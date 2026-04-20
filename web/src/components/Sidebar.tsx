@@ -492,6 +492,13 @@ export function Sidebar() {
         <div className="flex items-center gap-2.5">
           <img src={logoSrc} alt="" className="w-6 h-6" />
           <span className="text-[13px] font-semibold text-cc-fg tracking-tight">The Companion</span>
+          <span
+            className="text-[9px] font-medium uppercase tracking-[0.14em] rounded-full px-1.5 py-0.5 bg-cc-primary/10 text-cc-primary border border-cc-primary/20 leading-none"
+            aria-label="Moritz Edition fork"
+            title="Moritz Edition fork of the-companion"
+          >
+            ME
+          </span>
           <button
             onClick={handleNewSession}
             title="New Session"

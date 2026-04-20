@@ -832,8 +832,14 @@ export function HomePage() {
         {/* Logo + Title — minimal, centered */}
         <div className="flex flex-col items-center mb-6 sm:mb-10">
           <img src={logoSrc} alt="The Companion" className="w-10 h-10 sm:w-12 sm:h-12 mb-3" />
-          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-cc-fg">
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-cc-fg flex items-baseline gap-2">
             The Companion
+            <span
+              className="text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.14em] rounded-full px-2 py-0.5 bg-cc-primary/10 text-cc-primary border border-cc-primary/20"
+              aria-label="Moritz Edition fork"
+            >
+              Moritz Edition
+            </span>
           </h1>
         </div>
 
