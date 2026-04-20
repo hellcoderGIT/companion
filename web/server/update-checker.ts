@@ -11,7 +11,10 @@ const currentVersion: string = JSON.parse(
   readFileSync(packageJsonPath, "utf-8"),
 ).version;
 
-const NPM_REGISTRY_BASE = "https://registry.npmjs.org/the-companion";
+// Package name is URL-encoded because scoped npm packages (e.g. @hellcoder/companion)
+// require the slash to be escaped in registry URLs.
+const NPM_PACKAGE_NAME = "@hellcoder/companion";
+const NPM_REGISTRY_BASE = `https://registry.npmjs.org/${encodeURIComponent(NPM_PACKAGE_NAME)}`;
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const INITIAL_DELAY_MS = 10_000; // 10 seconds after boot
 

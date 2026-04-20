@@ -1,10 +1,18 @@
 {
-  "name": "the-companion",
-  "version": "0.95.0",
+  "name": "@hellcoder/companion",
+  "version": "0.95.0-moritz.0",
   "type": "module",
-  "description": "Web UI for launching and interacting with Claude Code agents",
+  "description": "Web UI for launching and interacting with Claude Code agents — Moritz Edition (fork of the-companion)",
   "license": "MIT",
-  "author": "The Vibe Company",
+  "author": "hellcoderGIT (fork of The Vibe Company's the-companion)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hellcoderGIT/companion.git"
+  },
+  "homepage": "https://github.com/hellcoderGIT/companion#readme",
+  "bugs": {
+    "url": "https://github.com/hellcoderGIT/companion/issues"
+  },
   "bin": {
     "the-companion": "./bin/cli.ts",
     "companion": "./bin/cli.ts"

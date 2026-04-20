@@ -1,7 +1,7 @@
 {
-  "name": "The Companion",
-  "short_name": "Companion",
-  "description": "Web UI for Claude Code and Codex",
+  "name": "The Companion — Moritz Edition",
+  "short_name": "Companion ME",
+  "description": "Web UI for Claude Code and Codex — Moritz Edition (fork of the-companion)",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
