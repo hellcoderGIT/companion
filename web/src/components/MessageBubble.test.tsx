@@ -631,3 +631,53 @@ describe("MessageBubble - ContentBlockRenderer", () => {
     expect(screen.getByText("file contents here")).toBeTruthy();
   });
 });
+
+// ─── Moritz Edition: copy-to-clipboard buttons on code/output surfaces ──────
+// The three surfaces that render user-selectable content live-streamed from
+// the assistant/CLI all have selection-resets problems because React swaps
+// DOM nodes on token streaming. These tests just assert the button is wired
+// up on each surface. Click behavior and clipboard writes are covered in
+// CopyButton.test.tsx — we do not retest that here.
+
+describe("MessageBubble - copy buttons on code/output surfaces", () => {
+  // The fenced markdown code renderer now always renders the header chrome
+  // so the copy button has a stable top-right position regardless of whether
+  // the fence had a language tag.
+  it("renders a copy-code button on fenced markdown blocks", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "some text with ```ts\nconst x = 1;\n``` in it",
+      contentBlocks: [],
+    });
+    render(<MessageBubble message={msg} />);
+    // The react-markdown mock above exercises both the language-typescript
+    // and no-language block variants, so two copy-code buttons are expected.
+    expect(screen.getAllByRole("button", { name: "Copy code" }).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders a copy-output button on generic tool_result blocks", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [
+        { type: "tool_use", id: "tu-read", name: "Read", input: { file_path: "/x" } },
+        { type: "tool_result", tool_use_id: "tu-read", content: "file contents here" },
+      ],
+    });
+    render(<MessageBubble message={msg} />);
+    expect(screen.getByRole("button", { name: "Copy output" })).toBeTruthy();
+  });
+
+  it("renders a copy-output button on BashResultBlock", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [
+        { type: "tool_use", id: "tu-bash", name: "Bash", input: { command: "ls" } },
+        { type: "tool_result", tool_use_id: "tu-bash", content: "file1\nfile2\n" },
+      ],
+    });
+    render(<MessageBubble message={msg} />);
+    expect(screen.getByRole("button", { name: "Copy output" })).toBeTruthy();
+  });
+});
