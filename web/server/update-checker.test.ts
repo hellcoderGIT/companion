@@ -181,9 +181,10 @@ describe("checkForUpdate", () => {
 
     await checker.checkForUpdate();
 
-    // Should use /latest for stable channel
+    // Should use /latest for stable channel. The "/" in "@hellcoder/companion"
+    // is URL-encoded to "%2F" because that is what npm's registry requires.
     expect(mockFetch).toHaveBeenCalledWith(
-      "https://registry.npmjs.org/the-companion/latest",
+      "https://registry.npmjs.org/%40hellcoder%2Fcompanion/latest",
       expect.objectContaining({
         headers: { Accept: "application/json" },
       }),
@@ -203,9 +204,9 @@ describe("checkForUpdate", () => {
 
     await checker.checkForUpdate();
 
-    // Should use /next for prerelease channel
+    // Should use /next for prerelease channel. Scoped name is URL-encoded.
     expect(mockFetch).toHaveBeenCalledWith(
-      "https://registry.npmjs.org/the-companion/next",
+      "https://registry.npmjs.org/%40hellcoder%2Fcompanion/next",
       expect.objectContaining({
         headers: { Accept: "application/json" },
       }),
