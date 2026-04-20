@@ -3,6 +3,26 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage, ContentBlock } from "../types.js";
 import { ToolBlock, getToolIcon, getToolLabel, getPreview, ToolIcon } from "./ToolBlock.js";
+import { CopyButton } from "./CopyButton.js";
+
+/**
+ * Flattens the React children passed to a ReactMarkdown `code` renderer into
+ * a plain string so the copy button has a stable payload. ReactMarkdown gives
+ * us either a raw string (fenced block) or an array containing a single
+ * string, so this walker handles both without pulling in a full React->text
+ * helper.
+ */
+function childrenToPlainText(node: unknown): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(childrenToPlainText).join("");
+  if (typeof node === "object" && node !== null && "props" in node) {
+    // ReactElement — recurse into its children prop
+    const el = node as { props?: { children?: unknown } };
+    return childrenToPlainText(el.props?.children);
+  }
+  return "";
+}
 
 export function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === "system") {
@@ -205,20 +225,28 @@ function MarkdownContent({ text, showCursor = false }: { text: string; showCurso
 
             if (isBlock) {
               const lang = match?.[1] || "";
+              // Always render the chrome header so the copy button has a
+              // stable spot in the top-right regardless of language presence.
+              const copyText = childrenToPlainText(children);
               return (
                 <div className="my-2.5 rounded-xl overflow-hidden border border-cc-border shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
-                  {lang && (
-                    <div className="px-3 py-1.5 bg-cc-code-bg border-b border-cc-border flex items-center gap-2">
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 rounded-full bg-cc-muted/20" />
-                        <span className="w-2 h-2 rounded-full bg-cc-muted/20" />
-                        <span className="w-2 h-2 rounded-full bg-cc-muted/20" />
-                      </div>
+                  <div className="px-3 py-1.5 bg-cc-code-bg border-b border-cc-border flex items-center gap-2">
+                    <div className="flex gap-1">
+                      <span className="w-2 h-2 rounded-full bg-cc-muted/20" />
+                      <span className="w-2 h-2 rounded-full bg-cc-muted/20" />
+                      <span className="w-2 h-2 rounded-full bg-cc-muted/20" />
+                    </div>
+                    {lang && (
                       <span className="text-[10px] text-cc-muted/70 font-mono-code uppercase tracking-wider">
                         {lang}
                       </span>
-                    </div>
-                  )}
+                    )}
+                    <CopyButton
+                      text={copyText}
+                      label="Copy code"
+                      className="ml-auto -mr-1"
+                    />
+                  </div>
                   <pre className="px-3 sm:px-4 py-2.5 sm:py-3 bg-cc-code-bg text-cc-code-fg text-[12px] sm:text-[13px] font-mono-code leading-relaxed overflow-x-auto">
                     <code>{children}</code>
                   </pre>
@@ -295,7 +323,12 @@ function ContentBlockRenderer({
       return <BashResultBlock text={content} isError={isError} />;
     }
     return (
-      <div className="rounded-lg bg-cc-code-bg overflow-hidden">
+      <div className="relative rounded-lg bg-cc-code-bg overflow-hidden">
+        <CopyButton
+          text={content}
+          label="Copy output"
+          className="absolute top-1 right-1 z-10 bg-cc-code-bg/80 backdrop-blur-sm"
+        />
         <pre className={`text-[12px] font-mono-code px-3 py-2 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto ${
           isError ? "text-cc-error" : "text-cc-code-fg/60"
         }`}>
@@ -315,7 +348,13 @@ function BashResultBlock({ text, isError }: { text: string; isError: boolean }) 
   const rendered = showFull || !hasMore ? text : lines.slice(-20).join("\n");
 
   return (
-    <div className="rounded-lg bg-cc-code-bg overflow-hidden">
+    <div className="relative rounded-lg bg-cc-code-bg overflow-hidden">
+      {/* Copy always grabs the full output, not just the truncated tail. */}
+      <CopyButton
+        text={text}
+        label="Copy output"
+        className="absolute top-1 right-1 z-10 bg-cc-code-bg/80 backdrop-blur-sm"
+      />
       <pre className={`text-[12px] font-mono-code px-3 py-2 whitespace-pre-wrap leading-relaxed ${
         isError ? "text-cc-error" : "text-cc-code-fg/60"
       }`}>
