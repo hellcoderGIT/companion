@@ -53,6 +53,16 @@ describe("toModelOptions", () => {
     expect(options[0].icon).toBe("\u26A1"); // ⚡
   });
 
+  // "xhigh" variants (extra-high reasoning) get the ★ icon when the slug
+  // does not also contain "codex" (which wins by earlier placement in the
+  // lookup table — see the gpt-5.1-codex-max test above for that rule).
+  it("assigns xhigh icon to non-codex xhigh slugs", () => {
+    const options = toModelOptions([
+      { value: "gpt-xhigh-reasoning", label: "GPT xHigh", description: "" },
+    ]);
+    expect(options[0].icon).toBe("\u2605"); // ★
+  });
+
   it("uses fallback icon for generic model slugs", () => {
     const options = toModelOptions([
       { value: "gpt-5.2", label: "GPT-5.2", description: "" },
@@ -166,6 +176,18 @@ describe("static model/mode lists", () => {
   it("agent modes default to bypassPermissions", () => {
     expect(CLAUDE_AGENT_MODES[0].value).toBe("bypassPermissions");
     expect(CODEX_AGENT_MODES[0].value).toBe("bypassPermissions");
+  });
+
+  // Moritz Edition additions: Opus 4.7 is the new Claude default, and
+  // GPT-5.3 gains Max and xHigh variants at the top of the Codex list.
+  it("lists claude-opus-4-7 as the first Claude model (default)", () => {
+    expect(CLAUDE_MODELS[0].value).toBe("claude-opus-4-7");
+  });
+
+  it("lists gpt-5.3-codex-max and gpt-5.3-codex-xhigh in Codex models", () => {
+    const slugs = CODEX_MODELS.map((m) => m.value);
+    expect(slugs).toContain("gpt-5.3-codex-max");
+    expect(slugs).toContain("gpt-5.3-codex-xhigh");
   });
 
   it("claude agent modes include acceptEdits for middle ground", () => {

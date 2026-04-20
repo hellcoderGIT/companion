@@ -16,6 +16,7 @@ export interface ModeOption {
 
 const MODEL_ICONS: Record<string, string> = {
   "codex": "\u2733",    // ✳ for codex-optimized models
+  "xhigh": "\u2605",    // ★ for extra-high reasoning variants
   "max": "\u25A0",      // ■ for max/flagship
   "mini": "\u26A1",     // ⚡ for mini/fast
 };
@@ -40,12 +41,15 @@ export function toModelOptions(models: BackendModelInfo[]): ModelOption[] {
 // ─── Static fallbacks ────────────────────────────────────────────────────────
 
 export const CLAUDE_MODELS: ModelOption[] = [
+  { value: "claude-opus-4-7", label: "Opus 4.7", icon: "" },
   { value: "claude-opus-4-6", label: "Opus 4.6", icon: "" },
   { value: "claude-sonnet-4-6", label: "Sonnet 4.6", icon: "" },
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", icon: "" },
 ];
 
 export const CODEX_MODELS: ModelOption[] = [
+  { value: "gpt-5.3-codex-max", label: "GPT-5.3 Max", icon: "\u25A0" },
+  { value: "gpt-5.3-codex-xhigh", label: "GPT-5.3 xHigh", icon: "\u2605" },
   { value: "gpt-5.3-codex", label: "GPT-5.3 Codex", icon: "\u2733" },
   { value: "gpt-5.2-codex", label: "GPT-5.2 Codex", icon: "\u25C6" },
   { value: "gpt-5.1-codex-max", label: "GPT-5.1 Max", icon: "\u25A0" },
