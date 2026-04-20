@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.97.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.96.0...companion-v0.97.0) (2026-04-20)
+
+
+### Features
+
+* **ui:** add copy-to-clipboard button on code and tool-output blocks ([7c38495](https://github.com/hellcoderGIT/companion/commit/7c38495df6ddbc158b970973737f008b398ba83a))
+* **ui:** copy-to-clipboard button on code and tool-output blocks ([00d0601](https://github.com/hellcoderGIT/companion/commit/00d0601a8a53ed77f65459084de064fa9eeb48a7))
+
 ## [0.96.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.95.0...companion-v0.96.0) (2026-04-20)
 
 
