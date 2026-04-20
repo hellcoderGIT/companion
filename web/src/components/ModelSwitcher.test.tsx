@@ -61,8 +61,11 @@ describe("ModelSwitcher", () => {
     render(<ModelSwitcher sessionId="s1" />);
     fireEvent.click(screen.getByLabelText("Switch model"));
 
-    // All three Claude models should appear as options
-    expect(screen.getByRole("option", { name: /Opus/ })).toBeInTheDocument();
+    // All Claude models should appear as options. Moritz Edition adds
+    // Opus 4.7 alongside 4.6, so we assert on the exact labels rather than
+    // the loose /Opus/ regex (which would now match two rows).
+    expect(screen.getByRole("option", { name: /Opus 4\.7/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Opus 4\.6/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Sonnet/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Haiku/ })).toBeInTheDocument();
   });
@@ -71,8 +74,13 @@ describe("ModelSwitcher", () => {
     render(<ModelSwitcher sessionId="s1" />);
     fireEvent.click(screen.getByLabelText("Switch model"));
 
-    const opusOption = screen.getByRole("option", { name: /Opus/ });
-    expect(opusOption).toHaveAttribute("aria-selected", "true");
+    // Session is on claude-opus-4-6 per the default fixture, so Opus 4.6 is
+    // aria-selected and Opus 4.7 is not.
+    const opus46 = screen.getByRole("option", { name: /Opus 4\.6/ });
+    expect(opus46).toHaveAttribute("aria-selected", "true");
+
+    const opus47 = screen.getByRole("option", { name: /Opus 4\.7/ });
+    expect(opus47).toHaveAttribute("aria-selected", "false");
 
     const sonnetOption = screen.getByRole("option", { name: /Sonnet/ });
     expect(sonnetOption).toHaveAttribute("aria-selected", "false");
@@ -102,7 +110,8 @@ describe("ModelSwitcher", () => {
   it("does not send when selecting the already-active model", () => {
     render(<ModelSwitcher sessionId="s1" />);
     fireEvent.click(screen.getByLabelText("Switch model"));
-    fireEvent.click(screen.getByRole("option", { name: /Opus/ }));
+    // Session is on claude-opus-4-6, so clicking Opus 4.6 must be a no-op.
+    fireEvent.click(screen.getByRole("option", { name: /Opus 4\.6/ }));
 
     // Same model — no WS message, no store update
     expect(mockSendToSession).not.toHaveBeenCalled();
