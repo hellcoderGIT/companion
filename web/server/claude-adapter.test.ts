@@ -569,8 +569,9 @@ describe("send() — outgoing message translation", () => {
   });
 
   it("user_message with non-image, non-PDF attachment falls back to text mention when no cwd", () => {
-    // Without a known cwd (system_init not received), the adapter cannot stage
-    // files to disk. It should still preserve the text content and not throw.
+    // Without a known cwd (system_init not received and no cwd passed at
+    // construction), the adapter cannot stage files to disk. It should still
+    // preserve the text content and not throw.
     adapter.send({
       type: "user_message",
       content: "Look at this",
@@ -585,6 +586,49 @@ describe("send() — outgoing message translation", () => {
       ? content
       : content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
     expect(asText).toContain("Look at this");
+  });
+
+  it("user_message with non-image attachment stages file to <cwd>/.companion-uploads/ when cwd is known at construction", async () => {
+    // The bridge knows the session cwd before the CLI even connects, so the
+    // adapter must accept it via the constructor and stage files immediately.
+    const { mkdtempSync, existsSync, readdirSync, readFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const tmpCwd = mkdtempSync(join(tmpdir(), "companion-stage-test-"));
+    try {
+      const a = new ClaudeAdapter("sess-stage", { cwd: tmpCwd });
+      const sentRaw: string[] = [];
+      a.attachWebSocket({
+        send: (s: string) => sentRaw.push(s),
+        readyState: 1,
+      } as any);
+      a.send({
+        type: "user_message",
+        content: "Look at this",
+        // base64 of "col1,col2\n1,2\n" → "Y29sMSxjb2wyCjEsMgo="
+        attachments: [{ name: "data.csv", media_type: "text/csv", data: "Y29sMSxjb2wyCjEsMgo=", size: 14 }],
+      });
+      const sent = JSON.parse(sentRaw[0].trim());
+
+      // Staged file must exist under <cwd>/.companion-uploads
+      const stagingDir = join(tmpCwd, ".companion-uploads");
+      expect(existsSync(stagingDir)).toBe(true);
+      const files = readdirSync(stagingDir);
+      expect(files).toHaveLength(1);
+      // Filename is "<8charId>-data.csv" (UUID is mocked to test-uuid-N, so
+      // the 8-char id slice is the first 8 chars of that mock).
+      expect(files[0]).toMatch(/^.{8}-data\.csv$/);
+      // Decoded content is preserved
+      expect(readFileSync(join(stagingDir, files[0]!), "utf-8")).toBe("col1,col2\n1,2\n");
+
+      // The text block must reference the staged path so the model can Read it
+      const textBlock = sent.message.content.find((b: any) => b.type === "text");
+      expect(textBlock.text).toContain("Look at this");
+      expect(textBlock.text).toContain("./.companion-uploads/");
+      expect(textBlock.text).toContain("data.csv");
+    } finally {
+      rmSync(tmpCwd, { recursive: true, force: true });
+    }
   });
 
   it("permission_response allow → sends correct control_response NDJSON", () => {

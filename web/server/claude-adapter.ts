@@ -12,6 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, basename } from "node:path";
+import { log } from "./logger.js";
 import type { ServerWebSocket } from "bun";
 import type { IBackendAdapter } from "./backend-adapter.js";
 import type {
@@ -82,9 +83,11 @@ export class ClaudeAdapter implements IBackendAdapter {
   // Optional recorder for raw protocol messages
   private recorder: RecorderManager | null;
 
-  // Session cwd captured from system_init; used to stage non-inline attachments
-  // (anything other than image/* and application/pdf) inside the working
-  // directory so the model can Read them via its file tools.
+  // Session cwd used to stage non-inline attachments (anything other than
+  // image/* and application/pdf) inside the working directory so the model
+  // can Read them via its file tools. Initially set by the bridge at
+  // construction time (the bridge always knows the cwd before spawning the
+  // CLI) and refreshed from system_init for safety.
   private sessionCwd: string | null = null;
 
   // Callback to update session.lastCliActivityTs from the bridge
@@ -98,11 +101,21 @@ export class ClaudeAdapter implements IBackendAdapter {
     opts?: {
       recorder?: RecorderManager | null;
       onActivityUpdate?: () => void;
+      /** Working directory of the session, used to stage attachments to
+       *  `<cwd>/.companion-uploads/`. Optional because tests may construct
+       *  without it; the bridge should always pass it. */
+      cwd?: string;
     },
   ) {
     this.sessionId = sessionId;
     this.recorder = opts?.recorder ?? null;
     this.onActivityUpdate = opts?.onActivityUpdate ?? null;
+    this.sessionCwd = opts?.cwd ?? null;
+  }
+
+  /** Update the session cwd (e.g. after a worktree switch). */
+  setSessionCwd(cwd: string | undefined | null): void {
+    if (cwd) this.sessionCwd = cwd;
   }
 
   // -- WebSocket lifecycle ----------------------------------------------------
@@ -345,7 +358,15 @@ export class ClaudeAdapter implements IBackendAdapter {
    * "./.companion-uploads/abc1234-report.csv") or null if staging failed.
    */
   private stageAttachmentToDisk(att: { name: string; media_type: string; data: string; size: number }): string | null {
-    if (!this.sessionCwd) return null;
+    if (!this.sessionCwd) {
+      log.warn("claude-adapter", "Cannot stage attachment: session cwd is not known yet", {
+        sessionId: this.sessionId,
+        attachmentName: att.name,
+        attachmentSize: att.size,
+        mediaType: att.media_type,
+      });
+      return null;
+    }
     try {
       const stagingDir = join(this.sessionCwd, ".companion-uploads");
       mkdirSync(stagingDir, { recursive: true });
@@ -355,12 +376,20 @@ export class ClaudeAdapter implements IBackendAdapter {
       const finalName = `${id}-${safeName}`;
       const fullPath = join(stagingDir, finalName);
       writeFileSync(fullPath, Buffer.from(att.data, "base64"));
+      log.info("claude-adapter", "Staged attachment to disk", {
+        sessionId: this.sessionId,
+        attachmentName: att.name,
+        size: att.size,
+        path: fullPath,
+      });
       return `./.companion-uploads/${finalName}`;
     } catch (err) {
-      console.error(
-        `[claude-adapter] Failed to stage attachment ${att.name} for session ${this.sessionId}:`,
-        err,
-      );
+      log.error("claude-adapter", "Failed to stage attachment", {
+        sessionId: this.sessionId,
+        attachmentName: att.name,
+        cwd: this.sessionCwd,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return null;
     }
   }
