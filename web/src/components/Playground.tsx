@@ -296,10 +296,12 @@ const MSG_USER_IMAGE: ChatMessage = {
   id: "msg-2",
   role: "user",
   content: "Here's a screenshot of the error I'm seeing",
-  images: [
+  attachments: [
     {
+      name: "screenshot.png",
       media_type: "image/png",
       data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==",
+      size: 70,
     },
   ],
   timestamp: Date.now() - 55000,

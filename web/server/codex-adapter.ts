@@ -10,6 +10,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, basename } from "node:path";
 import type { Subprocess } from "bun";
 import type { IBackendAdapter } from "./backend-adapter.js";
 import type {
@@ -503,6 +505,29 @@ export class CodexAdapter implements IBackendAdapter {
 
   private getExecutionCwd(): string {
     return this.options.executionCwd || this.options.cwd || "";
+  }
+
+  /**
+   * Decode a base64 attachment and write it under <cwd>/.companion-uploads/.
+   * Returns the relative path the model can Read, or null if no cwd or write failed.
+   * Mirrors the behavior in claude-adapter.
+   */
+  private stageAttachmentToDisk(att: { name: string; media_type: string; data: string; size: number }): string | null {
+    const cwd = this.getExecutionCwd();
+    if (!cwd) return null;
+    try {
+      const stagingDir = join(cwd, ".companion-uploads");
+      mkdirSync(stagingDir, { recursive: true });
+      const safeName = basename(att.name || "attachment").replace(/[^a-zA-Z0-9._-]/g, "_") || "attachment";
+      const id = randomUUID().slice(0, 8);
+      const finalName = `${id}-${safeName}`;
+      const fullPath = join(stagingDir, finalName);
+      writeFileSync(fullPath, Buffer.from(att.data, "base64"));
+      return `./.companion-uploads/${finalName}`;
+    } catch (err) {
+      log.error("codex-adapter", `Failed to stage attachment ${att.name} for session ${this.sessionId}`, { error: String(err) });
+      return null;
+    }
   }
 
   /**
@@ -1150,7 +1175,11 @@ export class CodexAdapter implements IBackendAdapter {
   // ── Outgoing message handlers ───────────────────────────────────────────
 
   private async handleOutgoingUserMessage(
-    msg: { type: "user_message"; content: string; images?: { media_type: string; data: string }[] },
+    msg: {
+      type: "user_message";
+      content: string;
+      attachments?: { name: string; media_type: string; data: string; size: number }[];
+    },
   ): Promise<void> {
     if (!this.threadId) {
       this.emit({ type: "error", message: "No Codex thread started yet" });
@@ -1158,19 +1187,29 @@ export class CodexAdapter implements IBackendAdapter {
     }
 
     const input: Array<{ type: string; text?: string; url?: string }> = [];
+    const stagedRefs: string[] = [];
 
-    // Add images if present
-    if (msg.images?.length) {
-      for (const img of msg.images) {
-        input.push({
-          type: "image",
-          url: `data:${img.media_type};base64,${img.data}`,
-        });
+    // Dispatch attachments. Codex's input format only supports images via
+    // data URLs, so PDFs and arbitrary files must be staged on disk.
+    if (msg.attachments?.length) {
+      for (const att of msg.attachments) {
+        if (att.media_type.startsWith("image/")) {
+          input.push({
+            type: "image",
+            url: `data:${att.media_type};base64,${att.data}`,
+          });
+        } else {
+          const ref = this.stageAttachmentToDisk(att);
+          stagedRefs.push(ref || `(${att.name} — could not stage to disk)`);
+        }
       }
     }
 
+    const augmentedText = stagedRefs.length > 0
+      ? `${msg.content}\n\nAttached files (in working directory):\n${stagedRefs.map((r) => `- ${r}`).join("\n")}`
+      : msg.content;
     // Add text
-    input.push({ type: "text", text: msg.content });
+    input.push({ type: "text", text: augmentedText });
 
     try {
       // Only send collaborationMode on mode transitions — sending it every turn

@@ -2207,12 +2207,12 @@ describe("Browser message routing", () => {
     expect(userMessages).toHaveLength(1);
   });
 
-  it("user_message with images: builds content blocks", () => {
+  it("user_message with image attachment: builds content blocks", () => {
     bridge.handleBrowserMessage(browser, JSON.stringify({
       type: "user_message",
       content: "What's in this image?",
-      images: [
-        { media_type: "image/png", data: "base64data==" },
+      attachments: [
+        { name: "img.png", media_type: "image/png", data: "base64data==", size: 9 },
       ],
     }));
 
@@ -2229,6 +2229,26 @@ describe("Browser message routing", () => {
     // Second block should be the text
     expect(sent.message.content[1].type).toBe("text");
     expect(sent.message.content[1].text).toBe("What's in this image?");
+  });
+
+  it("user_message with oversized attachment is rejected by validator", () => {
+    // Bridge should drop the message and emit an error to the browser instead
+    // of forwarding to the CLI when an attachment exceeds the per-file cap.
+    const oversize = "A".repeat(40 * 1024 * 1024); // 40MB > 25MB cap
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "huge",
+      attachments: [
+        { name: "big.bin", media_type: "application/octet-stream", data: oversize, size: 30 * 1024 * 1024 },
+      ],
+    }));
+
+    expect(cli.send).not.toHaveBeenCalled();
+    // Browser should have received an error message
+    const sentToBrowser = (browser.send as any).mock.calls.map((c: any[]) => {
+      try { return JSON.parse(c[0]); } catch { return null; }
+    }).filter(Boolean);
+    expect(sentToBrowser.some((m: any) => m.type === "error")).toBe(true);
   });
 
   it("permission_response allow: sends control_response to CLI", async () => {
