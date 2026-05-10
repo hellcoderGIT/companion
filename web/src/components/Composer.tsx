@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { useStore } from "../store.js";
 import { createClientMessageId, sendToSession } from "../ws.js";
 import { CLAUDE_MODES, CODEX_MODES } from "../utils/backends.js";
@@ -72,6 +72,44 @@ function ModeToggleButton({
       )}
       <span>{modeLabel}</span>
     </button>
+  );
+}
+
+function IconToolbarButton({
+  onClick,
+  disabled,
+  active,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  disabled: boolean;
+  /** When true, the button is enabled and uses the active hover styles. */
+  active: boolean;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+        active
+          ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+          : "text-cc-muted opacity-30 cursor-not-allowed"
+      }`}
+      title={title}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SaveAsPromptIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+      <path d="M4 2.75h8A1.25 1.25 0 0113.25 4v9.25L8 10.5l-5.25 2.75V4A1.25 1.25 0 014 2.75z" />
+    </svg>
   );
 }
 
@@ -451,6 +489,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
     if (files.length > 0) await ingestFiles(files);
   }
 
+  function openSavePromptModal() {
+    const defaultName = text.trim().slice(0, 32);
+    setSavePromptName(defaultName || "");
+    setSavePromptError(null);
+    setSavePromptOpen((v) => !v);
+  }
+
   function toggleMode() {
     if (!isConnected) return;
     const store = useStore.getState();
@@ -724,40 +769,25 @@ export function Composer({ sessionId }: { sessionId: string }) {
 
             <div className="flex-1" />
 
-            <button
-              onClick={() => {
-                const defaultName = text.trim().slice(0, 32);
-                setSavePromptName(defaultName || "");
-                setSavePromptError(null);
-                setSavePromptOpen((v) => !v);
-              }}
+            <IconToolbarButton
+              onClick={openSavePromptModal}
               disabled={!isConnected || !text.trim()}
-              className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
-                isConnected && text.trim()
-                  ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
-                  : "text-cc-muted opacity-30 cursor-not-allowed"
-              }`}
+              active={isConnected && !!text.trim()}
               title="Save as prompt"
             >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
-                <path d="M4 2.75h8A1.25 1.25 0 0113.25 4v9.25L8 10.5l-5.25 2.75V4A1.25 1.25 0 014 2.75z" />
-              </svg>
-            </button>
+              <SaveAsPromptIcon />
+            </IconToolbarButton>
 
-            <button
+            <IconToolbarButton
               onClick={() => fileInputRef.current?.click()}
               disabled={!isConnected}
-              className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
-                isConnected
-                  ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
-                  : "text-cc-muted opacity-30 cursor-not-allowed"
-              }`}
+              active={isConnected}
               title="Attach file"
             >
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
                 <path d="M11.5 6.5L7 11a2 2 0 1 1-2.83-2.83l5-5a3.25 3.25 0 1 1 4.6 4.6l-5.7 5.7a4.5 4.5 0 0 1-6.36-6.36L7 2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-            </button>
+            </IconToolbarButton>
           </div>
 
           {/* Textarea row */}
@@ -794,42 +824,27 @@ export function Composer({ sessionId }: { sessionId: string }) {
 
           {/* Desktop action bar: + bookmark mode spacer model send (hidden on mobile) */}
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 pb-2">
-            {/* + button (image upload) */}
-            <button
+            {/* + button (file upload) */}
+            <IconToolbarButton
               onClick={() => fileInputRef.current?.click()}
               disabled={!isConnected}
-              className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
-                isConnected
-                  ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
-                  : "text-cc-muted opacity-30 cursor-not-allowed"
-              }`}
+              active={isConnected}
               title="Attach file"
             >
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
                 <path d="M8 3v10M3 8h10" strokeLinecap="round" />
               </svg>
-            </button>
+            </IconToolbarButton>
 
             {/* Save prompt (bookmark) */}
-            <button
-              onClick={() => {
-                const defaultName = text.trim().slice(0, 32);
-                setSavePromptName(defaultName || "");
-                setSavePromptError(null);
-                setSavePromptOpen((v) => !v);
-              }}
+            <IconToolbarButton
+              onClick={openSavePromptModal}
               disabled={!isConnected || !text.trim()}
-              className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
-                isConnected && text.trim()
-                  ? "text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
-                  : "text-cc-muted opacity-30 cursor-not-allowed"
-              }`}
+              active={isConnected && !!text.trim()}
               title="Save as prompt"
             >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
-                <path d="M4 2.75h8A1.25 1.25 0 0113.25 4v9.25L8 10.5l-5.25 2.75V4A1.25 1.25 0 014 2.75z" />
-              </svg>
-            </button>
+              <SaveAsPromptIcon />
+            </IconToolbarButton>
 
             {/* Mode toggle */}
             <ModeToggleButton
