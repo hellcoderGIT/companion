@@ -5,6 +5,50 @@ import {
   rememberClientMessage,
 } from "./ws-bridge-replay.js";
 
+// ─── Attachment limits (server-side, mirrors client) ────────────────────────
+// Re-validated server-side because clients can lie. Keep these in sync
+// with web/src/utils/attachment.ts.
+export const MAX_ATTACHMENT_BYTES = Number(process.env.COMPANION_MAX_ATTACHMENT_BYTES || 25 * 1024 * 1024);
+export const MAX_TOTAL_ATTACHMENT_BYTES = Number(process.env.COMPANION_MAX_TOTAL_ATTACHMENT_BYTES || 100 * 1024 * 1024);
+
+/**
+ * Validate the attachments on an outgoing user_message. Returns null when
+ * all attachments pass, or a human-readable error message describing the
+ * first violation otherwise.
+ */
+export function validateAttachments(
+  attachments: { name: string; media_type: string; data: string; size: number }[] | undefined,
+): string | null {
+  if (!attachments?.length) return null;
+  let total = 0;
+  for (const att of attachments) {
+    if (typeof att.size !== "number" || att.size < 0) {
+      return `Attachment "${att.name}" has an invalid size`;
+    }
+    if (att.size > MAX_ATTACHMENT_BYTES) {
+      return `Attachment "${att.name}" exceeds the per-file limit (${MAX_ATTACHMENT_BYTES} bytes)`;
+    }
+    total += att.size;
+    if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
+      return `Total attachment size exceeds the per-message limit (${MAX_TOTAL_ATTACHMENT_BYTES} bytes)`;
+    }
+    if (typeof att.data !== "string" || att.data.length === 0) {
+      return `Attachment "${att.name}" has no data`;
+    }
+    if (!/^[A-Za-z0-9+/=\r\n]*$/.test(att.data)) {
+      return `Attachment "${att.name}" is not valid base64`;
+    }
+    // Best-effort sanity check: declared size vs base64 length. Allow slack
+    // for padding/whitespace, but catch wildly mismatched payloads.
+    const expectedB64Len = Math.ceil(att.size / 3) * 4;
+    const actualB64Len = att.data.replace(/\s/g, "").length;
+    if (Math.abs(actualB64Len - expectedB64Len) > 8) {
+      return `Attachment "${att.name}" size does not match its data length`;
+    }
+  }
+  return null;
+}
+
 // ─── Browser Ingest Pipeline ────────────────────────────────────────────────
 // Pure functions for parsing and deduplicating browser WebSocket messages.
 // Extracted from WsBridge.handleBrowserMessage and routeBrowserMessage

@@ -10,6 +10,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, basename } from "node:path";
 import type { ServerWebSocket } from "bun";
 import type { IBackendAdapter } from "./backend-adapter.js";
 import type {
@@ -79,6 +81,11 @@ export class ClaudeAdapter implements IBackendAdapter {
 
   // Optional recorder for raw protocol messages
   private recorder: RecorderManager | null;
+
+  // Session cwd captured from system_init; used to stage non-inline attachments
+  // (anything other than image/* and application/pdf) inside the working
+  // directory so the model can Read them via its file tools.
+  private sessionCwd: string | null = null;
 
   // Callback to update session.lastCliActivityTs from the bridge
   private onActivityUpdate: (() => void) | null;
@@ -272,19 +279,51 @@ export class ClaudeAdapter implements IBackendAdapter {
   // -- Outgoing message handlers (browser -> NDJSON) --------------------------
 
   private handleOutgoingUserMessage(
-    msg: { type: "user_message"; content: string; session_id?: string; images?: { media_type: string; data: string }[] },
+    msg: {
+      type: "user_message";
+      content: string;
+      session_id?: string;
+      attachments?: { name: string; media_type: string; data: string; size: number }[];
+    },
   ): boolean {
-    // Build content: if images are present, use content block array; otherwise plain string
+    // Dispatch each attachment by media type:
+    //   image/*           → inline as { type: "image", source: { base64 } } block
+    //   application/pdf   → inline as { type: "document", source: { base64 } } block
+    //   everything else   → write to <cwd>/.companion-uploads/<id>-<name> and
+    //                       reference by relative path so the model can Read it
     let content: string | unknown[];
-    if (msg.images?.length) {
+    if (msg.attachments?.length) {
       const blocks: unknown[] = [];
-      for (const img of msg.images) {
-        blocks.push({
-          type: "image",
-          source: { type: "base64", media_type: img.media_type, data: img.data },
-        });
+      const stagedRefs: string[] = [];
+
+      for (const att of msg.attachments) {
+        if (att.media_type.startsWith("image/")) {
+          blocks.push({
+            type: "image",
+            source: { type: "base64", media_type: att.media_type, data: att.data },
+          });
+        } else if (att.media_type === "application/pdf") {
+          blocks.push({
+            type: "document",
+            source: { type: "base64", media_type: att.media_type, data: att.data },
+          });
+        } else {
+          // Stage to disk; if no cwd yet, fall back to a textual mention so the
+          // user isn't silently dropped. (Should be rare since system_init
+          // arrives before the first user message.)
+          const stagedRef = this.stageAttachmentToDisk(att);
+          if (stagedRef) {
+            stagedRefs.push(stagedRef);
+          } else {
+            stagedRefs.push(`(${att.name} — ${att.size} bytes; could not stage to disk)`);
+          }
+        }
       }
-      blocks.push({ type: "text", text: msg.content });
+
+      const augmentedText = stagedRefs.length > 0
+        ? `${msg.content}\n\nAttached files (in working directory):\n${stagedRefs.map((r) => `- ${r}`).join("\n")}`
+        : msg.content;
+      blocks.push({ type: "text", text: augmentedText });
       content = blocks;
     } else {
       content = msg.content;
@@ -298,6 +337,32 @@ export class ClaudeAdapter implements IBackendAdapter {
     });
     this.sendToBackend(ndjson);
     return true;
+  }
+
+  /**
+   * Decode a base64 attachment and write it under <cwd>/.companion-uploads/.
+   * Returns the relative path the model should use (e.g.
+   * "./.companion-uploads/abc1234-report.csv") or null if staging failed.
+   */
+  private stageAttachmentToDisk(att: { name: string; media_type: string; data: string; size: number }): string | null {
+    if (!this.sessionCwd) return null;
+    try {
+      const stagingDir = join(this.sessionCwd, ".companion-uploads");
+      mkdirSync(stagingDir, { recursive: true });
+      // Sanitize filename: strip path separators, collapse weird chars
+      const safeName = basename(att.name || "attachment").replace(/[^a-zA-Z0-9._-]/g, "_") || "attachment";
+      const id = randomUUID().slice(0, 8);
+      const finalName = `${id}-${safeName}`;
+      const fullPath = join(stagingDir, finalName);
+      writeFileSync(fullPath, Buffer.from(att.data, "base64"));
+      return `./.companion-uploads/${finalName}`;
+    } catch (err) {
+      console.error(
+        `[claude-adapter] Failed to stage attachment ${att.name} for session ${this.sessionId}:`,
+        err,
+      );
+      return null;
+    }
   }
 
   private handleOutgoingPermissionResponse(
@@ -635,6 +700,9 @@ export class ClaudeAdapter implements IBackendAdapter {
   }
 
   private handleSystemInit(msg: CLISystemInitMessage): void {
+    // Cache cwd for subsequent attachment staging
+    if (msg.cwd) this.sessionCwd = msg.cwd;
+
     // Emit session metadata so the bridge can update session state
     this.sessionMetaCb?.({
       cliSessionId: msg.session_id,

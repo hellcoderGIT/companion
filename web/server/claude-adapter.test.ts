@@ -528,13 +528,13 @@ describe("send() — outgoing message translation", () => {
     expect(sent.session_id).toBe("sid-1");
   });
 
-  it("user_message with images → includes image blocks in content array", () => {
-    // Images should be prepended as image blocks before a text block
-    // in the content array, following the Claude content block format.
+  it("user_message with image attachment → includes image block before text block", () => {
+    // Image attachments should be prepended as image content blocks before
+    // a text block in the content array, following the Claude block format.
     adapter.send({
       type: "user_message",
       content: "Describe this",
-      images: [{ media_type: "image/png", data: "base64data" }],
+      attachments: [{ name: "pic.png", media_type: "image/png", data: "base64data", size: 6 }],
     });
     const sent = getLastSent();
     expect(sent.type).toBe("user");
@@ -550,6 +550,41 @@ describe("send() — outgoing message translation", () => {
     // Second block: text
     expect(sent.message.content[1].type).toBe("text");
     expect(sent.message.content[1].text).toBe("Describe this");
+  });
+
+  it("user_message with PDF attachment → emits a document content block", () => {
+    // PDFs should be encoded as `document` content blocks with base64 source.
+    adapter.send({
+      type: "user_message",
+      content: "Summarize",
+      attachments: [{ name: "doc.pdf", media_type: "application/pdf", data: "pdfdata", size: 7 }],
+    });
+    const sent = getLastSent();
+    expect(sent.message.content[0].type).toBe("document");
+    expect(sent.message.content[0].source.type).toBe("base64");
+    expect(sent.message.content[0].source.media_type).toBe("application/pdf");
+    expect(sent.message.content[0].source.data).toBe("pdfdata");
+    expect(sent.message.content[1].type).toBe("text");
+    expect(sent.message.content[1].text).toBe("Summarize");
+  });
+
+  it("user_message with non-image, non-PDF attachment falls back to text mention when no cwd", () => {
+    // Without a known cwd (system_init not received), the adapter cannot stage
+    // files to disk. It should still preserve the text content and not throw.
+    adapter.send({
+      type: "user_message",
+      content: "Look at this",
+      attachments: [{ name: "data.csv", media_type: "text/csv", data: "Y29s", size: 3 }],
+    });
+    const sent = getLastSent();
+    expect(sent.type).toBe("user");
+    // Content remains a text-only payload (string or single text block);
+    // either way, the original text must appear somewhere.
+    const content = sent.message.content;
+    const asText = typeof content === "string"
+      ? content
+      : content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
+    expect(asText).toContain("Look at this");
   });
 
   it("permission_response allow → sends correct control_response NDJSON", () => {

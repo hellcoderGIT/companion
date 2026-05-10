@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
-import { readFileAsBase64 } from "./image.js";
+import { readFileAsBase64 } from "./attachment.js";
 
 describe("readFileAsBase64", () => {
   it("reads a text file and returns base64 + mediaType", async () => {

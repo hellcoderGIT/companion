@@ -263,6 +263,41 @@ interface SDKUserMessage {
 }
 ```
 
+#### 6.1.1. Browser → Bridge: `user_message` with attachments
+
+The browser sends a higher-level `user_message` over the browser WebSocket. The
+bridge translates it into the `user` NDJSON above before forwarding to the CLI.
+
+```typescript
+interface BrowserUserMessage {
+  type: "user_message";
+  content: string;
+  session_id?: string;
+  client_msg_id?: string;
+  attachments?: Array<{
+    name: string;        // original filename, used in previews and disk staging
+    media_type: string;  // MIME type (e.g. "image/png", "application/pdf", "text/csv")
+    data: string;        // base64-encoded payload
+    size: number;        // decoded byte length, validated against caps
+  }>;
+}
+```
+
+**Server-side caps** (override via env):
+- `COMPANION_MAX_ATTACHMENT_BYTES` (default `25 MB`) — per-file
+- `COMPANION_MAX_TOTAL_ATTACHMENT_BYTES` (default `100 MB`) — per-message
+
+**Bridge dispatch** (per attachment):
+- `image/*` → inline as `{ type: "image", source: { type: "base64", media_type, data } }` content block
+- `application/pdf` → inline as `{ type: "document", source: { type: "base64", media_type, data } }` content block
+- everything else → written to `<cwd>/.companion-uploads/<id>-<safeName>` and the
+  text content of the message is augmented with a list of relative paths so
+  Claude can `Read` them via its existing file tools.
+
+When attachments fail validation (bad base64, oversize, mismatched size) the
+bridge sends an `{ type: "error" }` event back to the browser and does **not**
+forward the message to the CLI.
+
 ### 6.2. `system/init` — Initialization (CLI → Server)
 
 First message sent by the CLI after WebSocket connection. Contains full capability info.

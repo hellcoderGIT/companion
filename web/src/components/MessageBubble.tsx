@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import type { ChatMessage, ContentBlock } from "../types.js";
 import { ToolBlock, getToolIcon, getToolLabel, getPreview, ToolIcon } from "./ToolBlock.js";
 import { CopyButton } from "./CopyButton.js";
+import { MessageAttachment } from "./AttachmentChip.js";
 
 /**
  * Flattens the React children passed to a ReactMarkdown `code` renderer into
@@ -41,14 +42,15 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
     return (
       <div className="flex justify-end animate-[userSlideIn_0.3s_ease-out]">
         <div className="max-w-[85%] sm:max-w-[80%] px-3.5 sm:px-4 py-2.5 rounded-[16px] rounded-br-[6px] user-bubble-gradient text-cc-fg shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          {message.images && message.images.length > 0 && (
+          {message.attachments && message.attachments.length > 0 && (
             <div className="flex gap-2 flex-wrap mb-2">
-              {message.images.map((img, i) => (
-                <img
+              {message.attachments.map((att, i) => (
+                <MessageAttachment
                   key={i}
-                  src={`data:${img.media_type};base64,${img.data}`}
-                  alt="attachment"
-                  className="max-w-[150px] sm:max-w-[200px] max-h-[120px] sm:max-h-[150px] rounded-xl object-cover border border-cc-border/30"
+                  name={att.name}
+                  mediaType={att.media_type}
+                  data={att.data}
+                  size={att.size}
                 />
               ))}
             </div>

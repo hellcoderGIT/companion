@@ -4403,18 +4403,20 @@ describe("CodexAdapter with ICodexTransport", () => {
     spy.mockRestore();
   });
 
-  // ── Image support in user messages ────────────────────────────────────
+  // ── Attachment support in user messages ───────────────────────────────
 
-  it("includes images in turn/start input when present", async () => {
-    // When a user message includes images, they should be added to the
-    // turn/start input array before the text
+  it("includes image attachments in turn/start input when present", async () => {
+    // When a user message includes image attachments, they should be added
+    // to the turn/start input array (as image type) before the text.
     const { mock, adapter } = await initAdapter();
     adapter.sendBrowserMessage({
       type: "user_message",
       content: "describe this",
-      images: [{
+      attachments: [{
+        name: "snap.png",
         media_type: "image/png",
         data: "iVBOR",
+        size: 5,
       }],
     } as unknown as BrowserOutgoingMessage);
     await new Promise((r) => setTimeout(r, 50));

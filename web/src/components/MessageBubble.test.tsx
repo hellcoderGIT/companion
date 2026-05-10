@@ -93,13 +93,13 @@ describe("MessageBubble - user messages", () => {
     expect(screen.getByText("Hello Claude")).toBeTruthy();
   });
 
-  it("renders user messages with image thumbnails", () => {
+  it("renders user messages with image attachment thumbnails", () => {
     const msg = makeMessage({
       role: "user",
       content: "See this image",
-      images: [
-        { media_type: "image/png", data: "abc123base64" },
-        { media_type: "image/jpeg", data: "def456base64" },
+      attachments: [
+        { name: "a.png", media_type: "image/png", data: "abc123base64", size: 9 },
+        { name: "b.jpg", media_type: "image/jpeg", data: "def456base64", size: 9 },
       ],
     });
     const { container } = render(<MessageBubble message={msg} />);
@@ -108,15 +108,50 @@ describe("MessageBubble - user messages", () => {
     expect(images.length).toBe(2);
     expect(images[0].getAttribute("src")).toBe("data:image/png;base64,abc123base64");
     expect(images[1].getAttribute("src")).toBe("data:image/jpeg;base64,def456base64");
-    expect(images[0].getAttribute("alt")).toBe("attachment");
+    expect(images[0].getAttribute("alt")).toBe("a.png");
   });
 
-  it("does not render images section when images array is empty", () => {
-    const msg = makeMessage({ role: "user", content: "No images", images: [] });
+  it("renders non-image attachments as a download link card with size", () => {
+    const msg = makeMessage({
+      role: "user",
+      content: "Here's a CSV",
+      attachments: [
+        { name: "report.csv", media_type: "text/csv", data: "Y29sMSxjb2wyCg==", size: 11 },
+      ],
+    });
     const { container } = render(<MessageBubble message={msg} />);
 
-    const images = container.querySelectorAll("img");
-    expect(images.length).toBe(0);
+    // Non-image attachments should not produce an <img> tag
+    expect(container.querySelectorAll("img").length).toBe(0);
+    const link = container.querySelector("a[download]") as HTMLAnchorElement | null;
+    expect(link).toBeTruthy();
+    expect(link!.getAttribute("href")).toBe("data:text/csv;base64,Y29sMSxjb2wyCg==");
+    expect(link!.getAttribute("download")).toBe("report.csv");
+    expect(screen.getByText("report.csv")).toBeTruthy();
+    expect(screen.getByText("11 B")).toBeTruthy();
+  });
+
+  it("renders mixed image and non-image attachments together", () => {
+    const msg = makeMessage({
+      role: "user",
+      content: "mixed",
+      attachments: [
+        { name: "screenshot.png", media_type: "image/png", data: "img1", size: 4 },
+        { name: "data.zip", media_type: "application/zip", data: "ZmFrZQ==", size: 4 },
+      ],
+    });
+    const { container } = render(<MessageBubble message={msg} />);
+
+    expect(container.querySelectorAll("img").length).toBe(1);
+    expect(container.querySelectorAll("a[download]").length).toBe(1);
+  });
+
+  it("does not render attachments section when attachments array is empty", () => {
+    const msg = makeMessage({ role: "user", content: "No attachments", attachments: [] });
+    const { container } = render(<MessageBubble message={msg} />);
+
+    expect(container.querySelectorAll("img").length).toBe(0);
+    expect(container.querySelectorAll("a[download]").length).toBe(0);
   });
 });
 

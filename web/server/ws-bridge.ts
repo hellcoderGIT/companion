@@ -28,6 +28,7 @@ import {
   parseBrowserMessage,
   deduplicateBrowserMessage,
   IDEMPOTENT_BROWSER_MESSAGE_TYPES,
+  validateAttachments,
 } from "./ws-bridge-browser-ingest.js";
 import {
   appendHistory as appendHistoryFn,
@@ -1110,6 +1111,20 @@ export class WsBridge {
 
     // -- user_message: store in history before delegating to adapter ------
     if (msg.type === "user_message") {
+      // Validate attachments before doing any work; reject the whole message
+      // on failure so the user sees a single clear error rather than a
+      // partially-applied turn.
+      const attachmentError = validateAttachments(msg.attachments);
+      if (attachmentError) {
+        log.warn("ws-bridge", "Rejecting user_message with invalid attachments", {
+          sessionId: session.id,
+          error: attachmentError,
+        });
+        if (ws) {
+          this.sendToBrowser(ws, { type: "error", message: `Attachment rejected: ${attachmentError}` });
+        }
+        return;
+      }
       metricsCollector.recordTurnStarted(session.id);
       const ts = Date.now();
       const userMessage: BrowserIncomingMessage = {
@@ -1117,6 +1132,7 @@ export class WsBridge {
         content: msg.content,
         timestamp: ts,
         id: msg.client_msg_id || `user-${ts}-${this.userMsgCounter++}`,
+        attachments: msg.attachments,
       };
       this.appendHistory(session, userMessage);
       const transitioned = session.stateMachine.transition("streaming", "user_message");

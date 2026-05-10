@@ -16,8 +16,14 @@ let mockStoreState: Record<string, unknown> = {};
 
 const mockReadFileAsBase64 = vi.fn();
 
-vi.mock("../utils/image.js", () => ({
+vi.mock("../utils/attachment.js", () => ({
   readFileAsBase64: (...args: unknown[]) => mockReadFileAsBase64(...args),
+  // Re-export the constants the component imports for size limits.
+  MAX_ATTACHMENT_BYTES: 25 * 1024 * 1024,
+  MAX_TOTAL_ATTACHMENT_BYTES: 100 * 1024 * 1024,
+  formatBytes: (n: number) => `${n} B`,
+  isImageMediaType: (m: string) => m.startsWith("image/"),
+  isPdfMediaType: (m: string) => m === "application/pdf",
 }));
 
 vi.mock("../ws.js", () => ({
@@ -761,24 +767,26 @@ describe("Composer save prompt", () => {
 // ─── Toolbar interactions ────────────────────────────────────────────────────
 
 describe("Composer toolbar interactions", () => {
-  it("mobile upload image button triggers file input", () => {
-    // Validates the mobile upload image button opens the file picker via hidden input.
+  it("mobile attach file button triggers file input", () => {
+    // Validates the mobile attach file button opens the file picker via hidden input.
     const { container } = render(<Composer sessionId="s1" />);
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     const clickSpy = vi.spyOn(fileInput, "click");
-    // There are two upload image buttons (mobile + desktop); click the one titled "Upload image" (mobile)
-    const uploadBtn = screen.getByTitle("Upload image");
+    // Two attach buttons (mobile + desktop) share the title "Attach file"; the
+    // first one in DOM order is the mobile variant.
+    const uploadBtn = screen.getAllByTitle("Attach file")[0];
     fireEvent.click(uploadBtn);
     expect(clickSpy).toHaveBeenCalled();
   });
 
-  it("desktop attach image button triggers file input", () => {
-    // Validates the desktop attach image button opens the file picker via hidden input.
+  it("desktop attach file button triggers file input", () => {
+    // Validates the desktop attach file button opens the file picker via hidden input.
     const { container } = render(<Composer sessionId="s1" />);
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     const clickSpy = vi.spyOn(fileInput, "click");
-    const attachBtn = screen.getByTitle("Attach image");
-    fireEvent.click(attachBtn);
+    const attachBtns = screen.getAllByTitle("Attach file");
+    // Last one in DOM order is the desktop variant.
+    fireEvent.click(attachBtns[attachBtns.length - 1]);
     expect(clickSpy).toHaveBeenCalled();
   });
 
@@ -859,9 +867,9 @@ describe("Composer toolbar interactions", () => {
   });
 });
 
-// ─── Image attachment ────────────────────────────────────────────────────────
+// ─── File attachments ────────────────────────────────────────────────────────
 
-describe("Composer image attachment", () => {
+describe("Composer file attachments", () => {
   it("file input adds image thumbnails and remove button works", async () => {
     // Validates the file select handler processes images and renders thumbnails.
     mockReadFileAsBase64.mockResolvedValue({ base64: "abc123", mediaType: "image/png" });
@@ -878,8 +886,29 @@ describe("Composer image attachment", () => {
       expect(screen.getByAltText("test.png")).toBeTruthy();
     });
 
-    // Remove the image
-    fireEvent.click(screen.getByLabelText("Remove image"));
+    // Remove the attachment (aria-label is `Remove ${name}`)
+    fireEvent.click(screen.getByLabelText("Remove test.png"));
     expect(screen.queryByAltText("test.png")).toBeFalsy();
+  });
+
+  it("accepts non-image file uploads (e.g. PDF) and shows a chip", async () => {
+    // The composer should accept any file type — non-images render as a
+    // labeled chip rather than an image preview.
+    mockReadFileAsBase64.mockResolvedValue({ base64: "JVBER", mediaType: "application/pdf" });
+    const { container } = render(<Composer sessionId="s1" />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    const file = new File(["%PDF"], "spec.pdf", { type: "application/pdf" });
+    Object.defineProperty(fileInput, "files", { value: [file], writable: false });
+    fireEvent.change(fileInput);
+
+    // Non-image attachments don't show the filename inline (only a file-type
+    // icon + size); the chip exposes the name via aria-label on the remove
+    // button and a `title` on the wrapper.
+    await waitFor(() => {
+      expect(screen.getByLabelText("Remove spec.pdf")).toBeTruthy();
+    });
+    // The PDF chip should NOT render an <img> preview.
+    expect(container.querySelector('img[alt="spec.pdf"]')).toBeFalsy();
   });
 });

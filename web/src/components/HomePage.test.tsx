@@ -870,18 +870,18 @@ describe("HomePage", () => {
     expect(createSessionStreamMock).not.toHaveBeenCalled();
   });
 
-  // ─── Image thumbnails ───────────────────────────────────────────────────────
+  // ─── File attachments ───────────────────────────────────────────────────────
 
-  it("shows upload image button", async () => {
-    // The image upload button should be present in the toolbar.
+  it("shows upload file button", async () => {
+    // The file upload button should be present in the toolbar.
     render(<HomePage />);
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
 
-    const uploadButton = screen.getByTitle("Upload image");
+    const uploadButton = screen.getByTitle("Attach file");
     expect(uploadButton).toBeInTheDocument();
 
-    // There should also be a hidden file input for image selection
-    const fileInput = screen.getByLabelText("Attach images");
+    // There should also be a hidden file input for file selection
+    const fileInput = screen.getByLabelText("Attach files");
     expect(fileInput).toBeInTheDocument();
   });
 

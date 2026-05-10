@@ -19,7 +19,7 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   contentBlocks?: ContentBlock[];
-  images?: { media_type: string; data: string }[];
+  attachments?: { name: string; media_type: string; data: string; size: number }[];
   timestamp: number;
   parentToolUseId?: string | null;
   isStreaming?: boolean;
