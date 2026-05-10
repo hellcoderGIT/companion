@@ -25,6 +25,103 @@ interface CommandItem {
   type: "command" | "skill";
 }
 
+// ─── Toolbar button primitives ──────────────────────────────────────────────
+// Both mobile and desktop layouts share these. Extracted to keep render bodies
+// small enough to stay under the jscpd duplication threshold.
+
+function ModeToggleButton({
+  isPlan,
+  isConnected,
+  onToggle,
+  modeLabel,
+  size,
+}: {
+  isPlan: boolean;
+  isConnected: boolean;
+  onToggle: () => void;
+  modeLabel: string;
+  size: "mobile" | "desktop";
+}) {
+  const isDesktop = size === "desktop";
+  const padding = isDesktop ? "px-2.5 py-1.5" : "px-2 py-1";
+  const activeCls = isDesktop
+    ? "text-cc-primary border-cc-primary/30 bg-cc-primary/8 hover:bg-cc-primary/12 cursor-pointer"
+    : "text-cc-primary border-cc-primary/30 bg-cc-primary/8";
+  const inactiveCls = isDesktop
+    ? "text-cc-muted border-cc-border hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+    : "text-cc-muted border-cc-border";
+  return (
+    <button
+      onClick={onToggle}
+      disabled={!isConnected}
+      className={`flex items-center gap-1.5 ${padding} rounded-md text-[12px] font-semibold transition-all border select-none shrink-0 ${
+        !isConnected ? "opacity-30 cursor-not-allowed text-cc-muted border-transparent" : isPlan ? activeCls : inactiveCls
+      }`}
+      title="Toggle mode (Shift+Tab)"
+    >
+      {isPlan ? (
+        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+          <rect x="3" y="3" width="3.5" height="10" rx="0.75" />
+          <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+          <path d="M2.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+          <path d="M8.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+      )}
+      <span>{modeLabel}</span>
+    </button>
+  );
+}
+
+function SendOrStopButton({
+  isRunning,
+  canSend,
+  onSend,
+  onInterrupt,
+  size,
+}: {
+  isRunning: boolean;
+  canSend: boolean;
+  onSend: () => void;
+  onInterrupt: () => void;
+  size: "mobile" | "desktop";
+}) {
+  const isDesktop = size === "desktop";
+  const dim = isDesktop ? "w-9 h-9" : "w-10 h-10";
+  const sendActive = isDesktop
+    ? "bg-cc-primary hover:bg-cc-primary-hover hover:scale-105 text-white cursor-pointer shadow-[0_4px_16px_rgba(217,119,87,0.25)]"
+    : "bg-cc-primary hover:bg-cc-primary-hover active:scale-95 text-white cursor-pointer shadow-[0_4px_16px_rgba(217,119,87,0.25)]";
+  if (isRunning) {
+    return (
+      <button
+        onClick={onInterrupt}
+        className={`flex items-center justify-center ${dim} rounded-lg bg-cc-error/10 hover:bg-cc-error/20 text-cc-error transition-colors cursor-pointer`}
+        title="Stop generation"
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+          <rect x="3" y="3" width="10" height="10" rx="1" />
+        </svg>
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={onSend}
+      disabled={!canSend}
+      className={`flex items-center justify-center ${dim} rounded-full transition-all duration-200 ${
+        canSend ? sendActive : "bg-cc-hover text-cc-muted cursor-not-allowed"
+      }`}
+      title="Send message"
+    >
+      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+        <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
+      </svg>
+    </button>
+  );
+}
+
 export function Composer({ sessionId }: { sessionId: string }) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -615,31 +712,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
 
           {/* Mobile toolbar: mode toggle + model switcher + secondary actions (hidden on sm+) */}
           <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-0.5 sm:hidden">
-            <button
-              onClick={toggleMode}
-              disabled={!isConnected}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-semibold transition-all border select-none shrink-0 ${
-                !isConnected
-                  ? "opacity-30 cursor-not-allowed text-cc-muted border-transparent"
-                  : isPlan
-                    ? "text-cc-primary border-cc-primary/30 bg-cc-primary/8"
-                    : "text-cc-muted border-cc-border"
-              }`}
-              title="Toggle mode (Shift+Tab)"
-            >
-              {isPlan ? (
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                  <rect x="3" y="3" width="3.5" height="10" rx="0.75" />
-                  <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                  <path d="M2.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                  <path d="M8.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                </svg>
-              )}
-              <span>{modeLabel}</span>
-            </button>
+            <ModeToggleButton
+              isPlan={isPlan}
+              isConnected={isConnected}
+              onToggle={toggleMode}
+              modeLabel={modeLabel}
+              size="mobile"
+            />
 
             <ModelSwitcher sessionId={sessionId} />
 
@@ -704,33 +783,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
 
           {/* Mobile action row (hidden on sm+) */}
           <div className="flex items-center justify-end gap-1 px-3 pb-1 sm:hidden">
-            {/* Send/stop */}
-            {isRunning ? (
-              <button
-                onClick={handleInterrupt}
-                className="flex items-center justify-center w-10 h-10 rounded-lg bg-cc-error/10 hover:bg-cc-error/20 text-cc-error transition-colors cursor-pointer"
-                title="Stop generation"
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                  <rect x="3" y="3" width="10" height="10" rx="1" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                onClick={handleSend}
-                disabled={!canSend}
-                className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
-                  canSend
-                    ? "bg-cc-primary hover:bg-cc-primary-hover active:scale-95 text-white cursor-pointer shadow-[0_4px_16px_rgba(217,119,87,0.25)]"
-                    : "bg-cc-hover text-cc-muted cursor-not-allowed"
-                }`}
-                title="Send message"
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                  <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
-                </svg>
-              </button>
-            )}
+            <SendOrStopButton
+              isRunning={isRunning}
+              canSend={canSend}
+              onSend={handleSend}
+              onInterrupt={handleInterrupt}
+              size="mobile"
+            />
           </div>
 
           {/* Desktop action bar: + bookmark mode spacer model send (hidden on mobile) */}
@@ -773,31 +832,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
             </button>
 
             {/* Mode toggle */}
-            <button
-              onClick={toggleMode}
-              disabled={!isConnected}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-semibold transition-all border select-none shrink-0 ${
-                !isConnected
-                  ? "opacity-30 cursor-not-allowed text-cc-muted border-transparent"
-                  : isPlan
-                    ? "text-cc-primary border-cc-primary/30 bg-cc-primary/8 hover:bg-cc-primary/12 cursor-pointer"
-                    : "text-cc-muted border-cc-border hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
-              }`}
-              title="Toggle mode (Shift+Tab)"
-            >
-              {isPlan ? (
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                  <rect x="3" y="3" width="3.5" height="10" rx="0.75" />
-                  <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                  <path d="M2.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                  <path d="M8.5 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                </svg>
-              )}
-              <span>{modeLabel}</span>
-            </button>
+            <ModeToggleButton
+              isPlan={isPlan}
+              isConnected={isConnected}
+              onToggle={toggleMode}
+              modeLabel={modeLabel}
+              size="desktop"
+            />
 
             {/* Spacer */}
             <div className="flex-1" />
@@ -806,32 +847,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
             <ModelSwitcher sessionId={sessionId} />
 
             {/* Send/stop */}
-            {isRunning ? (
-              <button
-                onClick={handleInterrupt}
-                className="flex items-center justify-center w-9 h-9 rounded-lg bg-cc-error/10 hover:bg-cc-error/20 text-cc-error transition-colors cursor-pointer"
-                title="Stop generation"
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                  <rect x="3" y="3" width="10" height="10" rx="1" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                onClick={handleSend}
-                disabled={!canSend}
-                className={`flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200 ${
-                  canSend
-                    ? "bg-cc-primary hover:bg-cc-primary-hover hover:scale-105 text-white cursor-pointer shadow-[0_4px_16px_rgba(217,119,87,0.25)]"
-                    : "bg-cc-hover text-cc-muted cursor-not-allowed"
-                }`}
-                title="Send message"
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                  <path d="M3 2l11 6-11 6V9.5l7-1.5-7-1.5V2z" />
-                </svg>
-              </button>
-            )}
+            <SendOrStopButton
+              isRunning={isRunning}
+              canSend={canSend}
+              onSend={handleSend}
+              onInterrupt={handleInterrupt}
+              size="desktop"
+            />
           </div>
 
         </div>
