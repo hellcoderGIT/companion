@@ -771,6 +771,7 @@ export class WsBridge {
       adapter = new ClaudeAdapter(sessionId, {
         recorder: this.recorder,
         onActivityUpdate: () => { session.lastCliActivityTs = Date.now(); },
+        cwd: session.state.cwd,
       });
       // Wire up the shared event pipeline via attachBackendAdapter
       // (also broadcasts cli_connected for new adapters)
