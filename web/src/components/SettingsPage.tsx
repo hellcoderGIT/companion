@@ -45,6 +45,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const notificationApiAvailable = typeof Notification !== "undefined";
   const [updateChannel, setUpdateChannel] = useState<"stable" | "prerelease">("stable");
   const [dockerAutoUpdate, setDockerAutoUpdate] = useState(false);
+  const [cliBridgeMode, setCliBridgeMode] = useState<"loopback" | "jsonHandoff">("loopback");
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingApp, setUpdatingApp] = useState(false);
   const [updateStatus, setUpdateStatus] = useState("");
@@ -138,6 +139,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (typeof s.aiValidationAutoDeny === "boolean") setAiValidationAutoDeny(s.aiValidationAutoDeny);
         if (s.updateChannel === "stable" || s.updateChannel === "prerelease") setUpdateChannel(s.updateChannel);
         if (typeof s.dockerAutoUpdate === "boolean") setDockerAutoUpdate(s.dockerAutoUpdate);
+        if (s.cliBridgeMode === "loopback" || s.cliBridgeMode === "jsonHandoff") setCliBridgeMode(s.cliBridgeMode);
         if (typeof s.publicUrl === "string") {
           setPublicUrl(s.publicUrl);
           useStore.getState().setPublicUrl(s.publicUrl);
@@ -340,6 +342,35 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 <p className="text-xs text-cc-muted px-1">
                   Last commit shows only uncommitted changes. Default branch shows all changes since diverging from main.
                 </p>
+
+                <div className="pt-3 border-t border-cc-border">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="block text-sm font-medium">Claude Code bridge mode</span>
+                      <p className="mt-0.5 text-xs text-cc-muted">
+                        How the Companion hands the bridge URL to the spawned Claude Code CLI. Loopback is the default fix for Claude Code v1.2.1+ which rejects the literal "localhost". JSON handoff is the more robust just-every/code-style approach: writes a temp descriptor with a one-shot token and passes its path via CLAUDE_BRIDGE_CONFIG.
+                      </p>
+                    </div>
+                    <select
+                      aria-label="CLI bridge mode"
+                      value={cliBridgeMode}
+                      onChange={async (e) => {
+                        const next = e.target.value === "jsonHandoff" ? "jsonHandoff" : "loopback";
+                        const prev = cliBridgeMode;
+                        setCliBridgeMode(next);
+                        try {
+                          await api.updateSettings({ cliBridgeMode: next });
+                        } catch {
+                          setCliBridgeMode(prev);
+                        }
+                      }}
+                      className="ml-3 px-2 py-1.5 text-xs bg-cc-bg rounded-lg border border-cc-border text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary"
+                    >
+                      <option value="loopback">Loopback (default)</option>
+                      <option value="jsonHandoff">JSON handoff (experimental)</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             </section>
 
