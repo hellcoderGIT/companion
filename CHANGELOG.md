@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.99.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.98.0...companion-v0.99.0) (2026-05-15)
+
+
+### Features
+
+* **claude-compat:** detect 2.1.121+ lockdown and offer pin/patch from UI ([#13](https://github.com/hellcoderGIT/companion/issues/13)) ([15d15e5](https://github.com/hellcoderGIT/companion/commit/15d15e5fed0bf4f843fff71c433cccc2ff657ce3))
+
+
+### Bug Fixes
+
+* **claude-compat:** detect patched binary anywhere in file, fix symlink resolution ([#15](https://github.com/hellcoderGIT/companion/issues/15)) ([6294bbe](https://github.com/hellcoderGIT/companion/commit/6294bbe0f1cae2a059528dfa5d19e331483fe899))
+
 ## [0.98.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.97.0...companion-v0.98.0) (2026-05-15)
 
 
