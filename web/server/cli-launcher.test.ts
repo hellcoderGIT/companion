@@ -2,6 +2,7 @@ import { vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { _resetForTest as resetSettings } from "./settings-manager.js";
 
 // ─── Hoisted mocks ──────────────────────────────────────────────────────────
 
@@ -149,7 +150,11 @@ beforeEach(() => {
   delete process.env.COMPANION_FORCE_BYPASS_IN_CONTAINER;
   // Default to stdio for most tests; WS launcher behavior is covered explicitly below.
   process.env.COMPANION_CODEX_TRANSPORT = "stdio";
+  // Isolate settings: cli-launcher reads claudeBridgeMode at spawn time, and
+  // we want every test to start from defaults regardless of the user's real
+  // settings.json. Point at a temp path so persistence doesn't leak.
   tempDir = mkdtempSync(join(tmpdir(), "launcher-test-"));
+  resetSettings(join(tempDir, "settings.json"));
   store = new SessionStore(tempDir);
   launcher = new CliLauncher(3456);
   launcher.setStore(store);

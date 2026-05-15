@@ -20,8 +20,8 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
-  statSync,
+  lstatSync,
+  readlinkSync,
   writeFileSync,
   chmodSync,
 } from "node:fs";
@@ -119,16 +119,28 @@ export async function pinToVersion(version: string): Promise<PatcherResult<{ tar
   }
 }
 
-/** Locate the binary the `claude` symlink currently resolves to. */
-function resolveCurrentBinaryPath(): string | null {
-  if (!existsSync(CLAUDE_SYMLINK)) return null;
-  try {
-    const stat = statSync(CLAUDE_SYMLINK);
-    if (!stat.isFile()) return null;
-    return readFileSync(CLAUDE_SYMLINK).length > 0 ? CLAUDE_SYMLINK : null;
-  } catch {
-    return null;
+/**
+ * Resolve `~/.local/bin/claude` to the absolute path of the real file the
+ * symlink chain ends at — e.g. `~/.local/share/claude/versions/2.1.142` or
+ * `~/.local/share/claude/versions/2.1.142.patched`. Uses lstatSync at each
+ * step so we never accidentally follow a symlink without realising. Returns
+ * null if the path doesn't exist or isn't ultimately a regular file.
+ */
+function resolveSymlinkChain(startPath: string): string | null {
+  let current = startPath;
+  for (let i = 0; i < 16; i++) { // sane hop limit to avoid loops
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch {
+      return null;
+    }
+    if (stat.isFile()) return current;
+    if (!stat.isSymbolicLink()) return null;
+    const link = readlinkSync(current);
+    current = link.startsWith("/") ? link : join(dirname(current), link);
   }
+  return null;
 }
 
 /**
@@ -145,24 +157,20 @@ function resolveCurrentBinaryPath(): string | null {
  * alongside as <X.Y.Z>.patched.
  */
 export async function patchBinary(): Promise<PatcherResult<{ patchedPath: string; replacements: number }>> {
-  const source = resolveCurrentBinaryPath();
-  if (!source) {
+  // Resolve the whole symlink chain so we end up at the real file inside
+  // ~/.local/share/claude/versions/<X.Y.Z>. resolveSymlinkChain uses lstat
+  // at every hop — using statSync here would follow the symlink and report
+  // isSymbolicLink() === false, which is the bug the previous version had:
+  // patched copies ended up next to the symlink (~/.local/bin/) instead of
+  // alongside the original under versions/.
+  const sourceFile = resolveSymlinkChain(CLAUDE_SYMLINK);
+  if (!sourceFile) {
     return { ok: false, error: `Could not resolve a real file from ${CLAUDE_SYMLINK}` };
   }
 
-  // The symlink itself points into versions/<X.Y.Z>. We patch a sibling, not the original.
-  // statSync on a symlink follows by default; resolve via readlinkSync if symlink.
-  let sourceFile = source;
-  try {
-    const lstat = statSync(source, { throwIfNoEntry: false });
-    if (lstat?.isSymbolicLink?.()) {
-      const { readlinkSync } = await import("node:fs");
-      const link = readlinkSync(source);
-      sourceFile = link.startsWith("/") ? link : join(dirname(source), link);
-    }
-  } catch { /* fall through, use source */ }
-
-  // Strip any trailing ".patched" if we somehow point at a patched file already.
+  // If the symlink chain already terminates at a .patched file, the base
+  // file (unpatched original) sits next to it. We patch a sibling of the
+  // unpatched original — never modifying it in place.
   const baseFile = sourceFile.replace(/\.patched$/, "");
   const patchedPath = `${baseFile}.patched`;
 
