@@ -21,6 +21,18 @@ export type UpdateChannel = "stable" | "prerelease";
  */
 export type CliBridgeMode = "loopback" | "jsonHandoff";
 
+/**
+ * Compatibility shim for Claude Code 2.1.121+ which rejects every non-Anthropic
+ * --sdk-url host. See web/server/claude-versions.ts and claude-patcher.ts.
+ *  - "none" (default): plain ws://127.0.0.1:<companion-port>/... Works on 2.1.120
+ *    and earlier. Sessions on a stock 2.1.121+ binary will fail.
+ *  - "patched": companion has byte-patched the binary so [::1] is allowlisted,
+ *    and runs a separate wss://[::1]:<ingress-port>/... TLS listener that
+ *    cli-launcher emits as --sdk-url. Survives Claude updates as long as the
+ *    hostname literal is still present in the new bundle.
+ */
+export type ClaudeBridgeMode = "none" | "patched";
+
 export interface CompanionSettings {
   anthropicApiKey: string;
   anthropicModel: string;
@@ -55,6 +67,12 @@ export interface CompanionSettings {
   dockerAutoUpdate: boolean;
   /** See CliBridgeMode. Defaults to "loopback". Optional in fixtures; normalize() applies the default. */
   cliBridgeMode?: CliBridgeMode;
+  /** See ClaudeBridgeMode. Defaults to "none". Persists across companion restarts. */
+  claudeBridgeMode?: ClaudeBridgeMode;
+  /** Ingress URL prefix (e.g. "wss://[::1]:54321") populated when claudeBridgeMode === "patched". Rewritten on every restart. */
+  claudeBridgeIngressUrl?: string;
+  /** When the user dismisses the incompatibility banner, we record the version so a later bump re-surfaces it. */
+  claudeCompatBannerDismissedVersion?: string;
   updatedAt: number;
 }
 
@@ -87,6 +105,9 @@ let settings: CompanionSettings = {
   updateChannel: "stable",
   dockerAutoUpdate: false,
   cliBridgeMode: "loopback",
+  claudeBridgeMode: "none",
+  claudeBridgeIngressUrl: "",
+  claudeCompatBannerDismissedVersion: "",
   updatedAt: 0,
 };
 
@@ -119,6 +140,10 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     updateChannel: raw?.updateChannel === "prerelease" ? "prerelease" : "stable",
     dockerAutoUpdate: typeof raw?.dockerAutoUpdate === "boolean" ? raw.dockerAutoUpdate : false,
     cliBridgeMode: raw?.cliBridgeMode === "jsonHandoff" ? "jsonHandoff" : "loopback",
+    claudeBridgeMode: raw?.claudeBridgeMode === "patched" ? "patched" : "none",
+    claudeBridgeIngressUrl: typeof raw?.claudeBridgeIngressUrl === "string" ? raw.claudeBridgeIngressUrl : "",
+    claudeCompatBannerDismissedVersion:
+      typeof raw?.claudeCompatBannerDismissedVersion === "string" ? raw.claudeCompatBannerDismissedVersion : "",
     updatedAt: typeof raw?.updatedAt === "number" ? raw.updatedAt : 0,
   };
 }
@@ -147,7 +172,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "cliBridgeMode">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -175,6 +200,10 @@ export function updateSettings(
     updateChannel: patch.updateChannel ?? settings.updateChannel,
     dockerAutoUpdate: patch.dockerAutoUpdate ?? settings.dockerAutoUpdate,
     cliBridgeMode: patch.cliBridgeMode ?? settings.cliBridgeMode,
+    claudeBridgeMode: patch.claudeBridgeMode ?? settings.claudeBridgeMode,
+    claudeBridgeIngressUrl: patch.claudeBridgeIngressUrl ?? settings.claudeBridgeIngressUrl,
+    claudeCompatBannerDismissedVersion:
+      patch.claudeCompatBannerDismissedVersion ?? settings.claudeCompatBannerDismissedVersion,
     updatedAt: Date.now(),
   });
   persist();

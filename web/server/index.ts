@@ -34,6 +34,12 @@ import { LinearAgentBridge } from "./linear-agent-bridge.js";
 import { NoVncProxy } from "./novnc-proxy.js";
 
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
+import {
+  startPeriodicCheck as startClaudeCompatPeriodicCheck,
+} from "./claude-compat-checker.js";
+import { startCliIngressServer } from "./cli-ingress-server.js";
+import { getSettings, updateSettings } from "./settings-manager.js";
+import { setCliIngressServer } from "./routes/system-routes.js";
 import { imagePullManager } from "./image-pull-manager.js";
 import { restoreIfNeeded as restoreTailscaleFunnel, cleanup as cleanupTailscaleFunnel } from "./tailscale-manager.js";
 import { isRunningAsService } from "./service.js";
@@ -360,6 +366,26 @@ restoreTailscaleFunnel(port).catch((err) => {
 
 // ── Update checker ──────────────────────────────────────────────────────────
 startPeriodicCheck();
+
+// ── Claude CLI compatibility checker — surfaces banner when CLI is 2.1.121+ ─
+startClaudeCompatPeriodicCheck();
+
+// ── CLI ingress (TLS WSS on [::1]) — only when the user has patched their
+// Claude binary; otherwise plain ws://127.0.0.1 on the main port is used.
+// We re-bind a new random port each restart and persist it to settings so
+// cli-launcher emits the current URL on next spawn.
+if (getSettings().claudeBridgeMode === "patched") {
+  (async () => {
+    try {
+      const ingress = await startCliIngressServer({ wsBridge, launcher });
+      setCliIngressServer(ingress);
+      updateSettings({ claudeBridgeIngressUrl: ingress.urlPrefix });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[server] Patched bridge mode active but ingress start failed: ${msg}`);
+    }
+  })();
+}
 if (isRunningAsService()) {
   setServiceMode(true);
   console.log("[server] Running as background service (auto-update available)");

@@ -497,12 +497,28 @@ export class CliLauncher {
 
     // When running inside a container, the SDK URL targets the host alias so
     // the CLI can connect back to the Hono server running on the host.
-    // For host sessions, use the numeric loopback (127.0.0.1) instead of
-    // "localhost": Claude Code v1.2.1+ rejects the literal hostname
-    // "localhost" in --sdk-url as a CSWSH hardening measure (issue #655).
+    //
+    // For host sessions there are two paths depending on settings:
+    //   * "patched" — the companion has byte-patched the local Claude binary
+    //     so it accepts [::1] in --sdk-url, and a parallel TLS WS listener is
+    //     running on wss://[::1]:<ingress-port>. We emit that URL and set
+    //     NODE_TLS_REJECT_UNAUTHORIZED=0 below so the self-signed cert is
+    //     accepted. Required on Claude Code >= 2.1.121, where the validator
+    //     rejects every non-Anthropic host. See claude-versions.ts.
+    //   * "none" (default) — plain ws://127.0.0.1:<port>/... Works on
+    //     2.1.120 and earlier; sessions on a stock 2.1.121+ binary will fail
+    //     immediately with "host 127.0.0.1 is not an approved Anthropic
+    //     endpoint" (visible only on direct CLI stderr).
+    const settings = getSettings();
+    const patchedBridge = !isContainerized
+      && settings.claudeBridgeMode === "patched"
+      && typeof settings.claudeBridgeIngressUrl === "string"
+      && settings.claudeBridgeIngressUrl.length > 0;
     const sdkUrl = isContainerized
       ? `ws://${containerSdkHost}:${this.port}/ws/cli/${sessionId}`
-      : `ws://127.0.0.1:${this.port}/ws/cli/${sessionId}`;
+      : patchedBridge
+        ? `${settings.claudeBridgeIngressUrl}/ws/cli/${sessionId}`
+        : `ws://127.0.0.1:${this.port}/ws/cli/${sessionId}`;
 
     // Claude Code rejects bypassPermissions when running with root/sudo.
     // Container sessions are downgraded by default; host sessions are only
@@ -535,7 +551,7 @@ export class CliLauncher {
     // path via CLAUDE_BRIDGE_CONFIG env var instead of --sdk-url on argv.
     // This is forward-compatible if Anthropic further restricts --sdk-url
     // (e.g. drops it entirely or adds origin/handshake checks).
-    const bridgeMode = getSettings().cliBridgeMode ?? "loopback";
+    const bridgeMode = settings.cliBridgeMode ?? "loopback";
     const useJsonHandoff = bridgeMode === "jsonHandoff" && !isContainerized;
     let bridgeConfigPath: string | undefined;
     if (useJsonHandoff) {
@@ -634,6 +650,10 @@ export class CliLauncher {
         ...options.env,
         PATH: getEnrichedPath(),
         ...(bridgeConfigPath ? { CLAUDE_BRIDGE_CONFIG: bridgeConfigPath } : {}),
+        // Patched-bridge mode terminates --sdk-url at our self-signed wss://[::1]
+        // listener. Tell Bun/Node to trust the self-signed cert without involving
+        // the user's CA store.
+        ...(patchedBridge ? { NODE_TLS_REJECT_UNAUTHORIZED: "0" } : {}),
       };
       spawnCwd = info.cwd;
     }
