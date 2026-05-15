@@ -6,8 +6,8 @@
  * then refresh every CHECK_INTERVAL_MS. State is exposed via getCompatState().
  */
 
-import { existsSync, readdirSync, readlinkSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, readdirSync, readlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { getEnrichedPath, resolveBinary } from "./path-resolver.js";
 import {
@@ -85,22 +85,28 @@ async function spawnVersion(binary: string): Promise<string> {
 /**
  * Resolve the absolute file path the `claude` binary on PATH refers to.
  * Anthropic's installer puts a symlink in ~/.local/bin pointing into
- * ~/.local/share/claude/versions/<version>. Returns the final target file
- * after resolving one level of symlink.
+ * ~/.local/share/claude/versions/<version>. The companion patcher can also
+ * insert a `.patched` link in the chain. Walk lstat-based hops so we can
+ * tell symlinks from real files (statSync transparently follows symlinks
+ * and would always report isSymbolicLink() === false).
  */
 function resolveClaudeTarget(): string | null {
   const onPath = resolveBinary("claude");
   if (!onPath) return null;
-  try {
-    const st = statSync(onPath);
-    if (st.isSymbolicLink()) {
-      const target = readlinkSync(onPath);
-      return target.startsWith("/") ? target : join(onPath, "..", target);
+  let current = onPath;
+  for (let i = 0; i < 16; i++) {
+    let st;
+    try {
+      st = lstatSync(current);
+    } catch {
+      return null;
     }
-    return onPath;
-  } catch {
-    return onPath;
+    if (st.isFile()) return current;
+    if (!st.isSymbolicLink()) return null;
+    const target = readlinkSync(current);
+    current = target.startsWith("/") ? target : join(dirname(current), target);
   }
+  return null;
 }
 
 /**
@@ -128,19 +134,54 @@ function listCachedVersions(): ClaudeVersion[] {
 
 /**
  * Detect whether the binary at `path` has been patched.
- * Reads up to FIRST_CHUNK_BYTES from the start of the file and looks for the
- * marker string. Cheap — the marker lives in a constant section near other
- * string literals, typically within the first 256 MiB; we only read 32 MiB
- * to keep this fast, which empirically covers it.
+ *
+ * The marker bytes can live anywhere in the binary — in observed Claude 2.1.142
+ * builds, the closest occurrence is at offset ~166 MB out of 232 MB. A
+ * naive head-of-file slice misses it, so we stream the whole file in
+ * chunks and scan for the marker with boundary-safe leftover buffering.
+ * Returns true on the first match (early exit), so the typical cost is
+ * O(file size) only in the cold case where the binary is unpatched.
+ *
+ * Filename suffix is checked first as a fast-path: a binary at `<name>.patched`
+ * is almost certainly patched, and avoids the streaming scan in the common
+ * case where the symlink chain ends at our patcher's output.
  */
-const PATCH_DETECT_BYTES = 32 * 1024 * 1024;
 async function detectPatched(path: string): Promise<boolean> {
   try {
+    if (path.endsWith(".patched")) return true; // fast path
     const file = Bun.file(path);
     if (!(await file.exists())) return false;
-    const slice = file.slice(0, Math.min(file.size, PATCH_DETECT_BYTES));
-    const text = await slice.text();
-    return text.includes(PATCHED_BINARY_MARKER);
+
+    const marker = new TextEncoder().encode(PATCHED_BINARY_MARKER);
+    const markerLen = marker.length;
+    let leftover = new Uint8Array(0);
+
+    // ReadableStream isn't typed as async-iterable in lib.dom, so use the
+    // explicit reader API. Bun yields Uint8Array chunks (typically ~64 KiB).
+    // We join with the previous chunk's tail so a marker that straddles a
+    // chunk boundary still matches.
+    const reader = file.stream().getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      const combined = new Uint8Array(leftover.length + value.length);
+      combined.set(leftover, 0);
+      combined.set(value, leftover.length);
+
+      outer: for (let i = 0; i + markerLen <= combined.length; i++) {
+        for (let j = 0; j < markerLen; j++) {
+          if (combined[i + j] !== marker[j]) continue outer;
+        }
+        reader.cancel().catch(() => {});
+        return true;
+      }
+      // Keep the trailing (markerLen - 1) bytes so a marker spanning the
+      // next chunk boundary still matches.
+      leftover = markerLen > 1
+        ? combined.subarray(combined.length - (markerLen - 1))
+        : new Uint8Array(0);
+    }
+    return false;
   } catch {
     return false;
   }
