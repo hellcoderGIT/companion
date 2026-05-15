@@ -49,6 +49,9 @@ describe("settings-manager", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       cliBridgeMode: "loopback",
+      claudeBridgeMode: "none",
+      claudeBridgeIngressUrl: "",
+      claudeCompatBannerDismissedVersion: "",
       updatedAt: 0,
     });
   });
@@ -105,6 +108,9 @@ describe("settings-manager", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       cliBridgeMode: "loopback",
+      claudeBridgeMode: "none",
+      claudeBridgeIngressUrl: "",
+      claudeCompatBannerDismissedVersion: "",
       updatedAt: 123,
     });
   });
@@ -185,6 +191,9 @@ describe("settings-manager", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       cliBridgeMode: "loopback",
+      claudeBridgeMode: "none",
+      claudeBridgeIngressUrl: "",
+      claudeCompatBannerDismissedVersion: "",
       updatedAt: 0,
     });
   });

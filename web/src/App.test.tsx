@@ -47,6 +47,8 @@ const { mockStoreState, mockGetState } = vi.hoisted(() => {
     clearCreation: vi.fn(),
     setUpdateInfo: vi.fn(),
     setDockerUpdateDialogOpen: vi.fn(),
+    setClaudeCompatInfo: vi.fn(),
+    claudeCompatInfo: null,
   };
   mockGetState.mockReturnValue(mockStoreState);
   return { mockStoreState, mockGetState };
@@ -71,6 +73,7 @@ vi.mock("./api.js", () => ({
     getChangedFiles: vi.fn().mockResolvedValue({ files: [] }),
     checkForUpdate: vi.fn().mockResolvedValue(null),
     getSettings: vi.fn().mockResolvedValue({ publicUrl: "" }),
+    getClaudeCompat: vi.fn().mockResolvedValue(null),
   },
 }));
 
@@ -116,6 +119,10 @@ vi.mock("./components/TaskPanel.js", () => ({
 
 vi.mock("./components/DiffPanel.js", () => ({
   DiffPanel: () => <div data-testid="diff-panel">DiffPanel</div>,
+}));
+
+vi.mock("./components/ClaudeCompatBanner.js", () => ({
+  ClaudeCompatBanner: () => <div data-testid="claude-compat-banner-mock" />,
 }));
 
 vi.mock("./components/UpdateBanner.js", () => ({
@@ -209,6 +216,8 @@ beforeEach(() => {
     clearCreation: vi.fn(),
     setUpdateInfo: vi.fn(),
     setDockerUpdateDialogOpen: vi.fn(),
+    setClaudeCompatInfo: vi.fn(),
+    claudeCompatInfo: null,
   });
   mockGetState.mockReturnValue(mockStoreState);
   (parseHash as ReturnType<typeof vi.fn>).mockReturnValue({ page: "home" });

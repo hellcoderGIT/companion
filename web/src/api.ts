@@ -361,6 +361,31 @@ export interface UpdateInfo {
   channel: "stable" | "prerelease";
 }
 
+/**
+ * State of the locally-installed Claude CLI's compatibility with the
+ * companion's --sdk-url bridge. See web/server/claude-versions.ts for the
+ * background on why 2.1.121+ broke the integration.
+ */
+export interface ClaudeCompatInfo {
+  installedVersion: string | null;
+  installedPath: string | null;
+  /** True iff the installed CLI is >= 2.1.121 AND not byte-patched. */
+  isIncompatible: boolean;
+  /** True iff the installed binary contains the patcher marker. */
+  isPatched: boolean;
+  /** Versions cached under ~/.local/share/claude/versions/ that still work. */
+  availableKnownGood: string[];
+  /** Best version to pin to, or null if no cached candidate qualifies. */
+  suggestedPinTarget: string | null;
+  lastChecked: number;
+  error: string | null;
+  bridgeMode: "none" | "patched";
+  /** wss://[::1]:<port> populated when bridgeMode === "patched". */
+  ingressUrl: string;
+  /** Version string the user dismissed the banner for, if any. */
+  bannerDismissedVersion: string;
+}
+
 export interface UsageLimits {
   five_hour: { utilization: number; resets_at: string | null } | null;
   seven_day: { utilization: number; resets_at: string | null } | null;
@@ -1182,6 +1207,18 @@ export const api = {
   forceCheckForUpdate: () => post<UpdateInfo>("/update-check"),
   triggerUpdate: () =>
     post<{ ok: boolean; message: string }>("/update"),
+
+  // Claude CLI compatibility (post-2.1.121 --sdk-url lockdown)
+  getClaudeCompat: () => get<ClaudeCompatInfo>("/claude-compat"),
+  refreshClaudeCompat: () => post<ClaudeCompatInfo>("/claude-compat/refresh"),
+  pinClaudeVersion: (version?: string) =>
+    post<ClaudeCompatInfo & { pinnedTo: string }>("/claude-compat/pin", version ? { version } : {}),
+  patchClaudeBinary: () =>
+    post<ClaudeCompatInfo & { patchedPath: string; replacements: number }>("/claude-compat/patch"),
+  unpatchClaudeBinary: () =>
+    post<ClaudeCompatInfo & { target: string }>("/claude-compat/unpatch"),
+  dismissClaudeCompatBanner: (version: string) =>
+    post<{ ok: boolean; dismissedVersion: string }>("/claude-compat/dismiss-banner", { version }),
 
   // Cron jobs
   listCronJobs: () => get<CronJobInfo[]>("/cron/jobs"),

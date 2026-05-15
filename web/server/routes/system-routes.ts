@@ -10,8 +10,24 @@ import {
   setUpdateInProgress,
 } from "../update-checker.js";
 import { refreshServiceDefinition } from "../service.js";
-import { getSettings } from "../settings-manager.js";
+import { getSettings, updateSettings } from "../settings-manager.js";
 import { imagePullManager } from "../image-pull-manager.js";
+import { checkCompat, getCompatState } from "../claude-compat-checker.js";
+import { pinToVersion, patchBinary, unpatch } from "../claude-patcher.js";
+import {
+  startCliIngressServer,
+  type CliIngressServer,
+} from "../cli-ingress-server.js";
+
+/**
+ * Module-level handle to the running CLI ingress server (patched-bridge mode).
+ * Owned by this module so the patch / unpatch routes can start and stop it.
+ * Set by the bootstrap in index.ts when settings indicate patched mode at
+ * startup; otherwise populated by the /claude-compat/patch route.
+ */
+let cliIngress: CliIngressServer | null = null;
+export function getCliIngressServer(): CliIngressServer | null { return cliIngress; }
+export function setCliIngressServer(s: CliIngressServer | null): void { cliIngress = s; }
 
 export function registerSystemRoutes(
   api: Hono,
@@ -224,5 +240,122 @@ export function registerSystemRoutes(
     }
     deps.wsBridge.injectUserMessage(id, body.content);
     return c.json({ ok: true, sessionId: id });
+  });
+
+  // ── Claude CLI compatibility (post-2.1.121 --sdk-url lockdown) ──────────────
+  // Read more in claude-versions.ts. The UI consumes /claude-compat to render a
+  // banner offering Pin (downgrade) or Patch (byte-replace + TLS bridge).
+  function compatPayload() {
+    const compat = getCompatState();
+    const settings = getSettings();
+    return {
+      installedVersion: compat.installedVersion,
+      installedPath: compat.installedPath,
+      isIncompatible: compat.isIncompatible,
+      isPatched: compat.isPatched,
+      availableKnownGood: compat.availableKnownGood,
+      suggestedPinTarget: compat.suggestedPinTarget,
+      lastChecked: compat.lastChecked,
+      error: compat.error,
+      bridgeMode: settings.claudeBridgeMode ?? "none",
+      ingressUrl: settings.claudeBridgeIngressUrl ?? "",
+      bannerDismissedVersion: settings.claudeCompatBannerDismissedVersion ?? "",
+    };
+  }
+
+  api.get("/claude-compat", async (c) => {
+    const initial = getCompatState();
+    const staleMs = deps.updateCheckStaleMs;
+    if (initial.lastChecked === 0 || Date.now() - initial.lastChecked > staleMs) {
+      await checkCompat();
+    }
+    return c.json(compatPayload());
+  });
+
+  api.post("/claude-compat/refresh", async (c) => {
+    await checkCompat();
+    return c.json(compatPayload());
+  });
+
+  api.post("/claude-compat/pin", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const version = typeof body.version === "string" && body.version.trim()
+      ? body.version.trim()
+      : getCompatState().suggestedPinTarget;
+    if (!version) {
+      return c.json({ error: "No known-good Claude version is cached locally to pin to." }, 400);
+    }
+    const res = await pinToVersion(version);
+    if (!res.ok) return c.json({ error: res.error }, 400);
+
+    // Pinning means we're back on a non-validator binary; turn off patched
+    // bridge mode so we don't continue routing through wss://[::1].
+    if (cliIngress) {
+      cliIngress.stop();
+      cliIngress = null;
+    }
+    updateSettings({ claudeBridgeMode: "none", claudeBridgeIngressUrl: "" });
+
+    await checkCompat();
+    return c.json({ ok: true, pinnedTo: version, ...compatPayload() });
+  });
+
+  api.post("/claude-compat/patch", async (c) => {
+    const patchRes = await patchBinary();
+    if (!patchRes.ok) return c.json({ error: patchRes.error }, 400);
+
+    // Start (or restart) the TLS ingress listener and persist the URL so
+    // cli-launcher emits it on the next spawn.
+    if (cliIngress) {
+      cliIngress.stop();
+      cliIngress = null;
+    }
+    try {
+      cliIngress = await startCliIngressServer({
+        wsBridge: deps.wsBridge,
+        launcher: deps.launcher,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `Patched binary but TLS ingress failed: ${msg}` }, 500);
+    }
+    updateSettings({
+      claudeBridgeMode: "patched",
+      claudeBridgeIngressUrl: cliIngress.urlPrefix,
+    });
+
+    await checkCompat();
+    return c.json({
+      ok: true,
+      patchedPath: patchRes.patchedPath,
+      replacements: patchRes.replacements,
+      ...compatPayload(),
+    });
+  });
+
+  api.post("/claude-compat/unpatch", async (c) => {
+    const res = await unpatch();
+    if (!res.ok) return c.json({ error: res.error }, 400);
+
+    if (cliIngress) {
+      cliIngress.stop();
+      cliIngress = null;
+    }
+    updateSettings({ claudeBridgeMode: "none", claudeBridgeIngressUrl: "" });
+
+    await checkCompat();
+    return c.json({ ok: true, target: res.target, ...compatPayload() });
+  });
+
+  api.post("/claude-compat/dismiss-banner", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const version = typeof body.version === "string" && body.version.trim()
+      ? body.version.trim()
+      : getCompatState().installedVersion ?? "";
+    if (!version) {
+      return c.json({ error: "No version available to record as dismissed" }, 400);
+    }
+    updateSettings({ claudeCompatBannerDismissedVersion: version });
+    return c.json({ ok: true, dismissedVersion: version });
   });
 }

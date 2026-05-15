@@ -12,6 +12,7 @@ import { HomePage } from "./components/HomePage.js";
 import { TaskPanel } from "./components/TaskPanel.js";
 import { DiffPanel } from "./components/DiffPanel.js";
 import { UpdateBanner } from "./components/UpdateBanner.js";
+import { ClaudeCompatBanner } from "./components/ClaudeCompatBanner.js";
 import { SessionLaunchOverlay } from "./components/SessionLaunchOverlay.js";
 import { UpdateOverlay } from "./components/UpdateOverlay.js";
 import { DockerUpdateDialog } from "./components/DockerUpdateDialog.js";
@@ -147,6 +148,21 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Poll for Claude CLI compatibility (post-2.1.121 lockdown). Same cadence
+  // as the update check — fast enough that a freshly auto-updated Claude
+  // surfaces in the banner before the user notices session failures, slow
+  // enough not to spam.
+  useEffect(() => {
+    const check = () => {
+      api.getClaudeCompat().then((info) => {
+        useStore.getState().setClaudeCompatInfo(info);
+      }).catch(() => {});
+    };
+    check();
+    const interval = setInterval(check, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Load publicUrl from settings + check onboarding status.
   // Re-runs when isAuthenticated flips to true (e.g. after login) so that
   // users who authenticate first still see the onboarding wizard.
@@ -204,6 +220,7 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <TopBar />
         <UpdateBanner />
+        <ClaudeCompatBanner />
         <div className="flex-1 overflow-hidden relative">
           {isSettingsPage && (
             <div className="absolute inset-0">

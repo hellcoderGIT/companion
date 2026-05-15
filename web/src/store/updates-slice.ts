@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
 import type { AppState } from "./index.js";
-import type { UpdateInfo, CreationProgressEvent } from "../api.js";
+import type { UpdateInfo, CreationProgressEvent, ClaudeCompatInfo } from "../api.js";
 
 function getInitialDismissedVersion(): string | null {
   if (typeof window === "undefined") return null;
@@ -16,6 +16,7 @@ export interface UpdatesSlice {
   creationError: string | null;
   sessionCreating: boolean;
   sessionCreatingBackend: "claude" | "codex" | null;
+  claudeCompatInfo: ClaudeCompatInfo | null;
 
   setUpdateInfo: (info: UpdateInfo | null) => void;
   dismissUpdate: (version: string) => void;
@@ -25,6 +26,7 @@ export interface UpdatesSlice {
   clearCreation: () => void;
   setSessionCreating: (creating: boolean, backend?: "claude" | "codex") => void;
   setCreationError: (error: string | null) => void;
+  setClaudeCompatInfo: (info: ClaudeCompatInfo | null) => void;
 }
 
 export const createUpdatesSlice: StateCreator<AppState, [], [], UpdatesSlice> = (set) => ({
@@ -36,6 +38,7 @@ export const createUpdatesSlice: StateCreator<AppState, [], [], UpdatesSlice> = 
   creationError: null,
   sessionCreating: false,
   sessionCreatingBackend: null,
+  claudeCompatInfo: null,
 
   setUpdateInfo: (info) => set({ updateInfo: info }),
   dismissUpdate: (version) => {
@@ -58,4 +61,5 @@ export const createUpdatesSlice: StateCreator<AppState, [], [], UpdatesSlice> = 
   clearCreation: () => set({ creationProgress: null, creationError: null, sessionCreating: false, sessionCreatingBackend: null }),
   setSessionCreating: (creating, backend) => set({ sessionCreating: creating, sessionCreatingBackend: backend ?? null }),
   setCreationError: (error) => set({ creationError: error }),
+  setClaudeCompatInfo: (info) => set({ claudeCompatInfo: info }),
 });
