@@ -11,6 +11,16 @@ export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 
 export type UpdateChannel = "stable" | "prerelease";
 
+/**
+ * How the companion hands the bridge URL to the spawned Claude Code CLI.
+ * - "loopback" (default): pass `--sdk-url ws://127.0.0.1:PORT/...` on argv.
+ *   Works on Claude Code v1.2.1+ which rejects the literal "localhost".
+ * - "jsonHandoff": write a temp JSON descriptor and pass its path via the
+ *   CLAUDE_BRIDGE_CONFIG env var, mirroring just-every/code's v0.6.98
+ *   approach. More robust if Anthropic further restricts --sdk-url.
+ */
+export type CliBridgeMode = "loopback" | "jsonHandoff";
+
 export interface CompanionSettings {
   anthropicApiKey: string;
   anthropicModel: string;
@@ -43,6 +53,8 @@ export interface CompanionSettings {
   publicUrl: string;
   updateChannel: UpdateChannel;
   dockerAutoUpdate: boolean;
+  /** See CliBridgeMode. Defaults to "loopback". Optional in fixtures; normalize() applies the default. */
+  cliBridgeMode?: CliBridgeMode;
   updatedAt: number;
 }
 
@@ -74,6 +86,7 @@ let settings: CompanionSettings = {
   publicUrl: "",
   updateChannel: "stable",
   dockerAutoUpdate: false,
+  cliBridgeMode: "loopback",
   updatedAt: 0,
 };
 
@@ -105,6 +118,7 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     publicUrl: typeof raw?.publicUrl === "string" ? raw.publicUrl.trim().replace(/\/+$/, "") : "",
     updateChannel: raw?.updateChannel === "prerelease" ? "prerelease" : "stable",
     dockerAutoUpdate: typeof raw?.dockerAutoUpdate === "boolean" ? raw.dockerAutoUpdate : false,
+    cliBridgeMode: raw?.cliBridgeMode === "jsonHandoff" ? "jsonHandoff" : "loopback",
     updatedAt: typeof raw?.updatedAt === "number" ? raw.updatedAt : 0,
   };
 }
@@ -133,7 +147,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "cliBridgeMode">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -160,6 +174,7 @@ export function updateSettings(
     publicUrl: patch.publicUrl ?? settings.publicUrl,
     updateChannel: patch.updateChannel ?? settings.updateChannel,
     dockerAutoUpdate: patch.dockerAutoUpdate ?? settings.dockerAutoUpdate,
+    cliBridgeMode: patch.cliBridgeMode ?? settings.cliBridgeMode,
     updatedAt: Date.now(),
   });
   persist();

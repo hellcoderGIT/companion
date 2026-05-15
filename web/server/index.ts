@@ -190,6 +190,18 @@ const server = Bun.serve<SocketData>({
     const cliMatch = url.pathname.match(/^\/ws\/cli\/([a-f0-9-]+)$/);
     if (cliMatch) {
       const sessionId = cliMatch[1];
+      // When the session was launched with cliBridgeMode === "jsonHandoff",
+      // it has a one-shot bridgeToken that the spawned CLI must present
+      // (either via ?token= query param or Sec-WebSocket-Protocol). This is
+      // the security upgrade over passing --sdk-url on argv.
+      const session = launcher.getSession(sessionId);
+      if (session?.bridgeToken) {
+        const presented = url.searchParams.get("token")
+          || req.headers.get("sec-websocket-protocol")?.split(",").map(s => s.trim()).find(Boolean);
+        if (presented !== session.bridgeToken) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+      }
       const upgraded = server.upgrade(req, {
         data: { kind: "cli" as const, sessionId },
       });

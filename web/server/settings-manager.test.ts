@@ -48,6 +48,7 @@ describe("settings-manager", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      cliBridgeMode: "loopback",
       updatedAt: 0,
     });
   });
@@ -103,6 +104,7 @@ describe("settings-manager", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      cliBridgeMode: "loopback",
       updatedAt: 123,
     });
   });
@@ -182,6 +184,7 @@ describe("settings-manager", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      cliBridgeMode: "loopback",
       updatedAt: 0,
     });
   });

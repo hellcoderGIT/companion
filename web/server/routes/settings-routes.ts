@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { DEFAULT_ANTHROPIC_MODEL, getSettings, updateSettings, type UpdateChannel } from "../settings-manager.js";
+import { DEFAULT_ANTHROPIC_MODEL, getSettings, updateSettings, type UpdateChannel, type CliBridgeMode } from "../settings-manager.js";
 import { linearCache } from "../linear-cache.js";
 import { listConnections } from "../linear-connections.js";
 import { hasContainerCodexAuth } from "../codex-container-auth.js";
@@ -29,6 +29,7 @@ export function registerSettingsRoutes(api: Hono): void {
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
+      cliBridgeMode: settings.cliBridgeMode,
     });
   });
 
@@ -103,6 +104,9 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.dockerAutoUpdate !== undefined && typeof body.dockerAutoUpdate !== "boolean") {
       return c.json({ error: "dockerAutoUpdate must be a boolean" }, 400);
     }
+    if (body.cliBridgeMode !== undefined && body.cliBridgeMode !== "loopback" && body.cliBridgeMode !== "jsonHandoff") {
+      return c.json({ error: "cliBridgeMode must be 'loopback' or 'jsonHandoff'" }, 400);
+    }
     const hasAnyField = body.anthropicApiKey !== undefined || body.anthropicModel !== undefined
       || body.claudeCodeOAuthToken !== undefined || body.openaiApiKey !== undefined
       || body.onboardingCompleted !== undefined
@@ -116,7 +120,8 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.aiValidationAutoDeny !== undefined
       || body.publicUrl !== undefined
       || body.updateChannel !== undefined
-      || body.dockerAutoUpdate !== undefined;
+      || body.dockerAutoUpdate !== undefined
+      || body.cliBridgeMode !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
     }
@@ -210,6 +215,10 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.dockerAutoUpdate === "boolean"
           ? body.dockerAutoUpdate
           : undefined,
+      cliBridgeMode:
+        body.cliBridgeMode === "loopback" || body.cliBridgeMode === "jsonHandoff"
+          ? (body.cliBridgeMode as CliBridgeMode)
+          : undefined,
     });
 
     const connectionsAfterUpdate = listConnections();
@@ -234,6 +243,7 @@ export function registerSettingsRoutes(api: Hono): void {
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
+      cliBridgeMode: settings.cliBridgeMode,
     });
   });
 

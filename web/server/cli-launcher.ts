@@ -5,8 +5,11 @@ import {
   copyFileSync,
   cpSync,
   realpathSync,
+  writeFileSync,
+  unlinkSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
 import type { SessionStore } from "./session-store.js";
@@ -16,6 +19,7 @@ import { CodexAdapter } from "./codex-adapter.js";
 import { resolveBinary, getEnrichedPath } from "./path-resolver.js";
 import { containerManager } from "./container-manager.js";
 import { companionBus } from "./event-bus.js";
+import { getSettings } from "./settings-manager.js";
 import {
   getLegacyCodexHome,
   resolveCompanionCodexSessionHome,
@@ -135,6 +139,11 @@ export interface SdkSessionInfo {
   containerImage?: string;
   /** Runtime cwd inside container for agent RPC calls (e.g. "/workspace"). */
   containerCwd?: string;
+
+  /** One-shot token validated on the CLI WS upgrade when cliBridgeMode === "jsonHandoff". */
+  bridgeToken?: string;
+  /** Path to temp bridge descriptor file used in jsonHandoff mode; deleted on exit. */
+  bridgeConfigPath?: string;
 }
 
 export interface LaunchOptions {
@@ -486,11 +495,14 @@ export class CliLauncher {
     const containerSdkHost = (process.env.COMPANION_CONTAINER_SDK_HOST || "host.docker.internal").trim()
       || "host.docker.internal";
 
-    // When running inside a container, the SDK URL should target the host alias
-    // so the CLI can connect back to the Hono server running on the host.
+    // When running inside a container, the SDK URL targets the host alias so
+    // the CLI can connect back to the Hono server running on the host.
+    // For host sessions, use the numeric loopback (127.0.0.1) instead of
+    // "localhost": Claude Code v1.2.1+ rejects the literal hostname
+    // "localhost" in --sdk-url as a CSWSH hardening measure (issue #655).
     const sdkUrl = isContainerized
       ? `ws://${containerSdkHost}:${this.port}/ws/cli/${sessionId}`
-      : `ws://localhost:${this.port}/ws/cli/${sessionId}`;
+      : `ws://127.0.0.1:${this.port}/ws/cli/${sessionId}`;
 
     // Claude Code rejects bypassPermissions when running with root/sudo.
     // Container sessions are downgraded by default; host sessions are only
@@ -517,8 +529,37 @@ export class CliLauncher {
       info.permissionMode = "acceptEdits";
     }
 
+    // Optional: just-every/code-style JSON handoff. When enabled (and not
+    // containerized — the temp file path wouldn't be visible inside the
+    // container), write a temp descriptor with a one-shot token and pass its
+    // path via CLAUDE_BRIDGE_CONFIG env var instead of --sdk-url on argv.
+    // This is forward-compatible if Anthropic further restricts --sdk-url
+    // (e.g. drops it entirely or adds origin/handshake checks).
+    const bridgeMode = getSettings().cliBridgeMode ?? "loopback";
+    const useJsonHandoff = bridgeMode === "jsonHandoff" && !isContainerized;
+    let bridgeConfigPath: string | undefined;
+    if (useJsonHandoff) {
+      bridgeConfigPath = join(tmpdir(), `companion-bridge-${sessionId}.json`);
+      const token = randomUUID();
+      const descriptor = {
+        version: 1,
+        transport: "ws",
+        url: sdkUrl,
+        sessionId,
+        token,
+      };
+      try {
+        writeFileSync(bridgeConfigPath, JSON.stringify(descriptor), { mode: 0o600 });
+        info.bridgeToken = token;
+        info.bridgeConfigPath = bridgeConfigPath;
+      } catch (err) {
+        console.warn(`[cli-launcher] Failed to write bridge descriptor for ${sessionId}: ${err}. Falling back to --sdk-url.`);
+        bridgeConfigPath = undefined;
+      }
+    }
+
     const args: string[] = [
-      "--sdk-url", sdkUrl,
+      ...(bridgeConfigPath ? [] : ["--sdk-url", sdkUrl]),
       "--print",
       "--output-format", "stream-json",
       "--input-format", "stream-json",
@@ -592,6 +633,7 @@ export class CliLauncher {
         CLAUDECODE: undefined,
         ...options.env,
         PATH: getEnrichedPath(),
+        ...(bridgeConfigPath ? { CLAUDE_BRIDGE_CONFIG: bridgeConfigPath } : {}),
       };
       spawnCwd = info.cwd;
     }
@@ -632,6 +674,9 @@ export class CliLauncher {
         }
       }
       this.processes.delete(sessionId);
+      if (bridgeConfigPath) {
+        try { unlinkSync(bridgeConfigPath); } catch { /* already gone */ }
+      }
       this.persistState();
       companionBus.emit("session:exited", { sessionId, exitCode });
     });
