@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.98.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.97.0...companion-v0.98.0) (2026-05-15)
+
+
+### Features
+
+* **attachments:** support uploading any file type, not just images ([#7](https://github.com/hellcoderGIT/companion/issues/7)) ([8b1140e](https://github.com/hellcoderGIT/companion/commit/8b1140ec099e1e05a1418feabbf328558b52753f))
+
+
+### Bug Fixes
+
+* **attachments:** pass cwd at adapter construction so staging works for queued messages ([#11](https://github.com/hellcoderGIT/companion/issues/11)) ([0f40433](https://github.com/hellcoderGIT/companion/commit/0f40433288e7e3628a5312e76e430d574837fe51))
+* **cli-launcher:** use 127.0.0.1 in --sdk-url; add optional JSON-handoff bridge mode ([#655](https://github.com/hellcoderGIT/companion/issues/655)) ([#12](https://github.com/hellcoderGIT/companion/issues/12)) ([8cac088](https://github.com/hellcoderGIT/companion/commit/8cac0884aff7cfd982370feb2e21e82bbae54ed3))
+* **composer:** extract more shared toolbar buttons; pin jscpd ([#10](https://github.com/hellcoderGIT/companion/issues/10)) ([bc75eae](https://github.com/hellcoderGIT/companion/commit/bc75eae8002b5180ba545484bb45dd8929b8b8c7))
+
+
+### Code Refactoring
+
+* **composer:** extract ModeToggleButton/SendOrStopButton to fix DRY guard ([#9](https://github.com/hellcoderGIT/companion/issues/9)) ([a28c104](https://github.com/hellcoderGIT/companion/commit/a28c1043ae5905bd84fa006e36881092e7ad6716))
+
 ## [0.97.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.96.0...companion-v0.97.0) (2026-04-20)
 
 
