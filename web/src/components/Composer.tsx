@@ -167,6 +167,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
+  const [goalTipDismissed, setGoalTipDismissed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("cc-goal-tip-dismissed") === "true";
+  });
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   const [savePromptName, setSavePromptName] = useState("");
   const [savePromptScope, setSavePromptScope] = useState<"global" | "project">("global");
@@ -789,6 +793,45 @@ export function Composer({ sessionId }: { sessionId: string }) {
               </svg>
             </IconToolbarButton>
           </div>
+
+          {/* /goal command tip — shown until dismissed, only when CLI advertises /goal */}
+          {sessionData?.slash_commands?.includes("goal") && !goalTipDismissed && !text && (
+            <div
+              role="note"
+              aria-label="Goal command tip"
+              className="flex items-start gap-2 mx-2 sm:mx-3 mt-2 px-2.5 py-1.5 rounded-lg bg-cc-primary/5 border border-cc-primary/10 text-[11px] text-cc-muted"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="w-3.5 h-3.5 text-cc-primary/70 shrink-0 mt-0.5">
+                <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 110-2 1 1 0 010 2z" />
+              </svg>
+              <span className="flex-1">
+                Tip: try{" "}
+                <button
+                  type="button"
+                  onClick={() => selectCommand({ name: "goal", type: "command" })}
+                  className="font-mono-code text-cc-primary hover:underline cursor-pointer"
+                >
+                  /goal
+                </button>{" "}
+                to keep Claude focused on a long-running objective.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setGoalTipDismissed(true);
+                  if (typeof window !== "undefined") {
+                    window.localStorage.setItem("cc-goal-tip-dismissed", "true");
+                  }
+                }}
+                className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-cc-muted hover:text-cc-fg transition-colors cursor-pointer"
+                aria-label="Dismiss goal command tip"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="w-3 h-3">
+                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+          )}
 
           {/* Textarea row */}
           <div className="px-3 sm:px-3 pt-1 sm:pt-2.5">

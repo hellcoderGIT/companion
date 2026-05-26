@@ -764,6 +764,69 @@ describe("Composer save prompt", () => {
   });
 });
 
+// ─── /goal command tip ──────────────────────────────────────────────────────
+
+describe("Composer /goal command tip", () => {
+  beforeEach(() => {
+    // Ensure no leftover dismissal between tests
+    window.localStorage.removeItem("cc-goal-tip-dismissed");
+  });
+
+  it("renders when slash_commands includes 'goal' and not dismissed", () => {
+    setupMockStore({ session: { slash_commands: ["goal", "clear"] } });
+    render(<Composer sessionId="s1" />);
+    expect(screen.getByLabelText("Goal command tip")).toBeTruthy();
+  });
+
+  it("does not render when slash_commands does not include 'goal'", () => {
+    setupMockStore({ session: { slash_commands: ["clear", "help"] } });
+    render(<Composer sessionId="s1" />);
+    expect(screen.queryByLabelText("Goal command tip")).toBeNull();
+  });
+
+  it("does not render when previously dismissed via localStorage", () => {
+    window.localStorage.setItem("cc-goal-tip-dismissed", "true");
+    setupMockStore({ session: { slash_commands: ["goal"] } });
+    render(<Composer sessionId="s1" />);
+    expect(screen.queryByLabelText("Goal command tip")).toBeNull();
+  });
+
+  it("hides itself once user starts typing in the composer", () => {
+    setupMockStore({ session: { slash_commands: ["goal"] } });
+    const { container } = render(<Composer sessionId="s1" />);
+    expect(screen.getByLabelText("Goal command tip")).toBeTruthy();
+    const textarea = container.querySelector("textarea")!;
+    fireEvent.change(textarea, { target: { value: "hi" } });
+    expect(screen.queryByLabelText("Goal command tip")).toBeNull();
+  });
+
+  it("clicking the /goal chip pre-fills the textarea with '/goal '", () => {
+    setupMockStore({ session: { slash_commands: ["goal"] } });
+    const { container } = render(<Composer sessionId="s1" />);
+    const chip = screen.getByText("/goal").closest("button")!;
+    fireEvent.click(chip);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("/goal ");
+  });
+
+  it("clicking dismiss button hides the tip and persists to localStorage", () => {
+    setupMockStore({ session: { slash_commands: ["goal"] } });
+    render(<Composer sessionId="s1" />);
+    const dismissBtn = screen.getByLabelText("Dismiss goal command tip");
+    fireEvent.click(dismissBtn);
+    expect(screen.queryByLabelText("Goal command tip")).toBeNull();
+    expect(window.localStorage.getItem("cc-goal-tip-dismissed")).toBe("true");
+  });
+
+  it("passes axe accessibility checks while tip is visible", async () => {
+    const { axe } = await import("vitest-axe");
+    setupMockStore({ isConnected: true, session: { slash_commands: ["goal"] } });
+    const { container } = render(<Composer sessionId="s1" />);
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+});
+
 // ─── Toolbar interactions ────────────────────────────────────────────────────
 
 describe("Composer toolbar interactions", () => {

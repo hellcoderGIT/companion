@@ -727,7 +727,7 @@ export function Playground() {
       claude_code_version: "1.0.0",
       mcp_servers: [],
       agents: [],
-      slash_commands: ["explain", "review", "fix"],
+      slash_commands: ["explain", "review", "fix", "goal"],
       skills: ["doc-coauthoring", "frontend-design"],
       total_cost_usd: 0.1847,
       num_turns: 14,
