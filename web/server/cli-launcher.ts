@@ -520,25 +520,15 @@ export class CliLauncher {
         ? `${settings.claudeBridgeIngressUrl}/ws/cli/${sessionId}`
         : `ws://127.0.0.1:${this.port}/ws/cli/${sessionId}`;
 
-    // Claude Code rejects bypassPermissions when running with root/sudo.
-    // Container sessions are downgraded by default; host sessions are only
-    // downgraded when this server itself runs as root.
     let effectivePermissionMode = options.permissionMode;
-    const isRootProcess = typeof process.getuid === "function" && process.getuid() === 0;
     const shouldDowngradeContainerBypass =
       isContainerized
       && options.permissionMode === "bypassPermissions"
       && process.env.COMPANION_FORCE_BYPASS_IN_CONTAINER !== "1";
-    const shouldDowngradeRootBypass =
-      !isContainerized
-      && isRootProcess
-      && options.permissionMode === "bypassPermissions"
-      && process.env.COMPANION_FORCE_BYPASS_AS_ROOT !== "1";
 
-    if (shouldDowngradeContainerBypass || shouldDowngradeRootBypass) {
-      const scope = isContainerized ? "container" : "root";
+    if (shouldDowngradeContainerBypass) {
       console.warn(
-        `[cli-launcher] Session ${sessionId}: downgrading ${scope} permission mode ` +
+        `[cli-launcher] Session ${sessionId}: downgrading container permission mode ` +
         `from bypassPermissions to acceptEdits.`,
       );
       effectivePermissionMode = "acceptEdits";

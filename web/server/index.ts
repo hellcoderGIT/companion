@@ -56,7 +56,9 @@ import { DEFAULT_PORT_DEV, DEFAULT_PORT_PROD } from "./constants.js";
 const defaultPort = process.env.NODE_ENV === "production" ? DEFAULT_PORT_PROD : DEFAULT_PORT_DEV;
 const port = Number(process.env.PORT) || defaultPort;
 const host = process.env.HOST || "0.0.0.0";
-const sessionStore = new SessionStore(process.env.COMPANION_SESSION_DIR);
+const sessionStore = new SessionStore(
+  process.env.COMPANION_SESSION_DIR || process.env.COMPANION_SESSIONS_DIR,
+);
 const wsBridge = new WsBridge();
 const launcher = new CliLauncher(port);
 const worktreeTracker = new WorktreeTracker();
