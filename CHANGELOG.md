@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.99.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.99.0...companion-v0.99.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* restore ~/.companion/sessions default and drop root bypass downgrade ([#16](https://github.com/hellcoderGIT/companion/issues/16)) ([bea346e](https://github.com/hellcoderGIT/companion/commit/bea346e2118abe8f1494f33ef9a5c2426d60fe29))
+
 ## [0.99.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.98.0...companion-v0.99.0) (2026-05-15)
 
 
