@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { COMPANION_HOME } from "./paths.js";
 import type {
   SessionState,
   BrowserIncomingMessage,
@@ -25,7 +25,7 @@ export interface PersistedSession {
 
 // ─── Store ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_DIR = join(tmpdir(), "vibe-sessions");
+const DEFAULT_DIR = join(COMPANION_HOME, "sessions");
 
 export class SessionStore {
   private dir: string;

@@ -74,7 +74,7 @@ Browser (React) ←→ WebSocket ←→ Hono Server (Bun) ←→ WebSocket (NDJS
   - `index.ts` — Server bootstrap, Bun.serve with dual WebSocket upgrade (CLI vs browser)
   - `ws-bridge.ts` — Core message router. Maintains per-session state (CLI socket, browser sockets, message history, pending permissions). Parses NDJSON from CLI, translates to typed JSON for browsers.
   - `cli-launcher.ts` — Spawns/kills/relaunches Claude Code CLI processes. Handles `--resume` for session recovery. Persists session state across server restarts.
-  - `session-store.ts` — JSON file persistence to `$TMPDIR/vibe-sessions/`. Debounced writes.
+  - `session-store.ts` — JSON file persistence to `~/.companion/sessions/` (overridable via `COMPANION_SESSION_DIR`/`COMPANION_SESSIONS_DIR`, or relocate the whole companion home via `COMPANION_HOME`). Debounced writes.
   - `session-types.ts` — All TypeScript types for CLI messages (NDJSON), browser messages, session state, permissions.
   - `routes.ts` — REST API: session CRUD, filesystem browsing, environment management.
   - `env-manager.ts` — CRUD for environment profiles stored in `~/.companion/envs/`.
@@ -97,7 +97,7 @@ Full protocol documentation is in `WEBSOCKET_PROTOCOL_REVERSED.md`.
 
 ### Session Lifecycle
 
-Sessions persist to disk (`$TMPDIR/vibe-sessions/`) and survive server restarts. On restart, live CLI processes are detected by PID and given a grace period to reconnect their WebSocket. If they don't, they're killed and relaunched with `--resume` using the CLI's internal session ID.
+Sessions persist to disk (`~/.companion/sessions/`) and survive server restarts. On restart, live CLI processes are detected by PID and given a grace period to reconnect their WebSocket. If they don't, they're killed and relaunched with `--resume` using the CLI's internal session ID.
 
 ### Raw Protocol Recordings
 
@@ -196,6 +196,6 @@ gh pr edit --body-file /tmp/pr_body.md
 ### Caveats
 - `./scripts/dev-start.sh` health-checks the backend on `/` which returns 404. If the script times out, the backend is still running — verify with `curl http://localhost:3457/api/sessions`. You can start the servers manually as background processes instead.
 - The app requires Claude Code CLI or Codex CLI to create functional sessions. Without them, the UI loads but session creation will fail. The component playground at `#/playground` works without any CLI.
-- No external databases or services are needed. Session state persists to `$TMPDIR/vibe-sessions/` as JSON files.
+- No external databases or services are needed. Session state persists to `~/.companion/sessions/` as JSON files.
 - The pre-commit hook (`.husky/pre-commit`) runs `cd web && bun run typecheck && bun run test -- --coverage`. Run these before committing.
 - Two blocked postinstalls (`core-js`, `protobufjs`) are harmless and do not affect functionality.
