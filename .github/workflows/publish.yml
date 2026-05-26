@@ -24,6 +24,11 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    # Trusted Publishing (OIDC) — no NPM_PUBLISH_TOKEN needed.
+    # The package on npm must list this workflow as a trusted publisher.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +40,9 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm CLI (Trusted Publishing needs >= 11.5.1)
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         working-directory: web
@@ -59,9 +67,7 @@ jobs:
 
       - name: Publish to npm
         working-directory: web
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: npm publish --access public --provenance
 
   # Docker image publishing (upstream pushed to stangirard/the-companion) is
   # not used by this fork. If we want our own images later, add a job here
