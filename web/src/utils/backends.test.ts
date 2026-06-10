@@ -178,10 +178,17 @@ describe("static model/mode lists", () => {
     expect(CODEX_AGENT_MODES[0].value).toBe("bypassPermissions");
   });
 
-  // Moritz Edition additions: Opus 4.7 is the new Claude default, and
-  // GPT-5.3 gains Max and xHigh variants at the top of the Codex list.
-  it("lists claude-opus-4-7 as the first Claude model (default)", () => {
-    expect(CLAUDE_MODELS[0].value).toBe("claude-opus-4-7");
+  // Opus 4.8 is the current Claude default (natural successor to 4.7).
+  // Fable 5 — the first publicly available Mythos-class model — is exposed
+  // alongside it but is not the default since its safeguards route ~5% of
+  // sessions back to Opus 4.8; users should opt in deliberately.
+  it("lists claude-opus-4-8 as the first Claude model (default)", () => {
+    expect(CLAUDE_MODELS[0].value).toBe("claude-opus-4-8");
+  });
+
+  it("includes claude-fable-5 (Mythos-class) in Claude models", () => {
+    const slugs = CLAUDE_MODELS.map((m) => m.value);
+    expect(slugs).toContain("claude-fable-5");
   });
 
   it("lists gpt-5.3-codex-max and gpt-5.3-codex-xhigh in Codex models", () => {
