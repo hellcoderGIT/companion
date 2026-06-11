@@ -121,10 +121,6 @@ vi.mock("./components/DiffPanel.js", () => ({
   DiffPanel: () => <div data-testid="diff-panel">DiffPanel</div>,
 }));
 
-vi.mock("./components/ClaudeCompatBanner.js", () => ({
-  ClaudeCompatBanner: () => <div data-testid="claude-compat-banner-mock" />,
-}));
-
 vi.mock("./components/UpdateBanner.js", () => ({
   UpdateBanner: () => <div data-testid="update-banner">UpdateBanner</div>,
 }));
