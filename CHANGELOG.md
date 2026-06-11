@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.100.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.99.1...companion-v0.100.0) (2026-06-11)
+
+
+### Features
+
+* **claude:** drive Claude over stdio stream-json instead of --sdk-url ([#21](https://github.com/hellcoderGIT/companion/issues/21)) ([8008b9f](https://github.com/hellcoderGIT/companion/commit/8008b9f4250f252691ee6985044d30b6c1cd8ee2))
+* **models:** add Opus 4.8 and Fable 5 (Mythos-class) to Claude model list ([#19](https://github.com/hellcoderGIT/companion/issues/19)) ([5d5d2f3](https://github.com/hellcoderGIT/companion/commit/5d5d2f34f620fee60fec674cd799666f1e065388))
+
+
+### Bug Fixes
+
+* **claude:** remove obsolete --sdk-url compatibility banner ([#22](https://github.com/hellcoderGIT/companion/issues/22)) ([3590f0e](https://github.com/hellcoderGIT/companion/commit/3590f0e7005877cba89e234bf2bf6efc1edcec1f))
+
 ## [0.99.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.99.0...companion-v0.99.1) (2026-05-26)
 
 
