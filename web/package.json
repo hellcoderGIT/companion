@@ -47,6 +47,7 @@
     "test:watch": "vitest",
     "test:a11y": "vitest run --testNamePattern='axe accessibility|accessible names|aria-expanded'",
     "test:codex-contract": "vitest run server/codex-protocol-*.test.ts",
+    "test:live": "bun server/claude-adapter.live.ts",
     "generate-token": "bun bin/generate-token.ts"
   },
   "dependencies": {

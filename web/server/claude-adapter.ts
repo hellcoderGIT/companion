@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { log } from "./logger.js";
-import type { ServerWebSocket } from "bun";
+import type { ServerWebSocket, Subprocess } from "bun";
 import type { IBackendAdapter } from "./backend-adapter.js";
 import type {
   BrowserIncomingMessage,
@@ -60,8 +60,21 @@ const CLI_DEDUP_WINDOW = 2000;
 export class ClaudeAdapter implements IBackendAdapter {
   private sessionId: string;
 
-  // WebSocket to the Claude Code CLI process
+  // Transport selector. "websocket" is the legacy `--sdk-url` transport where
+  // the CLI dials back into the server; "stdio" is the supported stream-json
+  // transport where the server owns the child process and bridges over its
+  // stdin/stdout pipes. See claude-adapter stdio section below.
+  private transportKind: "websocket" | "stdio" = "websocket";
+
+  // WebSocket to the Claude Code CLI process (transportKind === "websocket")
   private cliSocket: ServerWebSocket<SocketData> | null = null;
+
+  // Stdio transport state (transportKind === "stdio")
+  private stdioWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  private stdioConnected = false;
+  private stdioBuffer = "";
+  /** Whether the one-time `initialize` control_request handshake has been sent. */
+  private stdioInitialized = false;
 
   // Callbacks registered by the bridge via on*() methods
   private browserMessageCb: ((msg: BrowserIncomingMessage) => void) | null = null;
@@ -150,6 +163,124 @@ export class ClaudeAdapter implements IBackendAdapter {
     this.disconnectCb?.();
   }
 
+  // -- Stdio lifecycle (stream-json over the child process pipes) --------------
+
+  /**
+   * Attach the spawned `claude` process and drive it over stdio stream-json.
+   *
+   * This is the supported transport (the `--sdk-url` WebSocket is an internal
+   * Remote-Control flag Anthropic locks down). The server owns the process:
+   *   • outbound NDJSON is written to the child's stdin
+   *   • inbound NDJSON is read from the child's stdout (line-buffered)
+   *   • process exit means the transport is gone (relaunch is driven by the
+   *     launcher's `session:exited` → proactive relaunch, mirroring Codex stdio).
+   *
+   * The child must be spawned with `--input-format stream-json
+   * --output-format stream-json --permission-prompt-tool stdio` so the
+   * `can_use_tool` permission flow round-trips over the same pipes.
+   */
+  attachStdio(proc: Subprocess): void {
+    this.transportKind = "stdio";
+    this.stdioConnected = true;
+
+    // Wrap Bun's FileSink stdin (which exposes a synchronous `.write()`) in a
+    // WritableStream and hold a single writer — matches the proven CodexAdapter
+    // idiom and avoids "WritableStream is locked" races under concurrent sends.
+    const stdin = proc.stdin as unknown;
+    let writable: WritableStream<Uint8Array>;
+    if (stdin && typeof (stdin as { write?: unknown }).write === "function") {
+      writable = new WritableStream({
+        write(chunk) {
+          (stdin as { write(data: Uint8Array): number }).write(chunk);
+        },
+      });
+    } else {
+      writable = stdin as WritableStream<Uint8Array>;
+    }
+    this.stdioWriter = writable.getWriter();
+
+    // Begin consuming stdout NDJSON. The reader is async, so the synchronous
+    // attach (and the bridge's callback registration that follows the
+    // adapter-created event) completes before any message is dispatched.
+    const stdout = proc.stdout as ReadableStream<Uint8Array>;
+    void this.readStdioStdout(stdout);
+
+    // Flush anything queued before the transport attached (applies the lazy
+    // `initialize` handshake before the first real message).
+    if (this.pendingMessages.length > 0) {
+      const queued = this.pendingMessages.splice(0);
+      for (const ndjson of queued) {
+        this.ensureStdioInitialized(ndjson);
+        this.sendRaw(ndjson);
+      }
+    }
+
+    // Mark the transport gone on process exit. Relaunch is intentionally NOT
+    // driven from here — the launcher emits `session:exited`, and the
+    // orchestrator's proactive keepalive relaunches with `--resume`. This
+    // mirrors the Codex stdio path and avoids double-relaunch.
+    proc.exited.then(() => {
+      this.stdioConnected = false;
+      this.stdioWriter = null;
+    });
+  }
+
+  /** Line-buffered stdout reader: splits NDJSON and routes complete lines. */
+  private async readStdioStdout(stdout: ReadableStream<Uint8Array>): Promise<void> {
+    const reader = stdout.getReader();
+    const decoder = new TextDecoder();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        this.stdioBuffer += decoder.decode(value, { stream: true });
+        const lines = this.stdioBuffer.split("\n");
+        // Keep the trailing partial line in the buffer until its newline arrives.
+        this.stdioBuffer = lines.pop() || "";
+        for (const line of lines) {
+          if (line.trim()) this.handleRawMessage(line);
+        }
+      }
+    } catch (err) {
+      log.error("claude-adapter", "stdio stdout reader error", {
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      this.stdioConnected = false;
+    }
+  }
+
+  /**
+   * Send the one-time `initialize` control_request before the first outbound
+   * message in stdio mode. This registers the canUseTool capability so the CLI
+   * emits `can_use_tool` control_requests (via `--permission-prompt-tool
+   * stdio`). If the first outbound message is itself an `initialize` (e.g. from
+   * injectSystemPrompt for agent sessions), we skip the duplicate.
+   */
+  private ensureStdioInitialized(nextNdjson: string): void {
+    if (this.stdioInitialized) return;
+    this.stdioInitialized = true;
+    try {
+      const parsed = JSON.parse(nextNdjson) as { type?: string; request?: { subtype?: string } };
+      if (parsed?.type === "control_request" && parsed.request?.subtype === "initialize") {
+        return; // caller is sending its own initialize — don't double up
+      }
+    } catch {
+      // fall through and send the baseline initialize
+    }
+    this.sendRaw(JSON.stringify({
+      type: "control_request",
+      request_id: randomUUID(),
+      request: { subtype: "initialize" },
+    }));
+  }
+
+  /** True when this adapter owns the child process via stdio (vs legacy WS). */
+  usesProcessTransport(): boolean {
+    return this.transportKind === "stdio";
+  }
+
   // -- IBackendAdapter: Event registration ------------------------------------
 
   onBrowserMessage(cb: (msg: BrowserIncomingMessage) => void): void {
@@ -167,6 +298,7 @@ export class ClaudeAdapter implements IBackendAdapter {
   // -- IBackendAdapter: Transport state ---------------------------------------
 
   isConnected(): boolean {
+    if (this.transportKind === "stdio") return this.stdioConnected;
     return this.cliSocket !== null;
   }
 
@@ -174,6 +306,13 @@ export class ClaudeAdapter implements IBackendAdapter {
     // Clear pending control requests to prevent memory leaks from
     // unresolved promises (CLI won't respond after disconnect)
     this.pendingControlRequests.clear();
+    if (this.transportKind === "stdio") {
+      // The launcher owns the process lifecycle (kill). Just drop the writer
+      // reference and mark disconnected; closing stdin here could race the kill.
+      this.stdioConnected = false;
+      this.stdioWriter = null;
+      return;
+    }
     if (this.cliSocket) {
       try {
         this.cliSocket.close();
@@ -190,6 +329,10 @@ export class ClaudeAdapter implements IBackendAdapter {
    * allowing the CLI to reconnect.
    */
   handleTransportClose(): void {
+    if (this.transportKind === "stdio") {
+      this.stdioConnected = false;
+      return;
+    }
     this.cliSocket = null;
   }
 
@@ -954,19 +1097,23 @@ export class ClaudeAdapter implements IBackendAdapter {
    * queues the message for later delivery (flushed in attachWebSocket).
    */
   private sendToBackend(ndjson: string): void {
-    if (!this.cliSocket) {
+    if (!this.isConnected()) {
       console.log(
         `[claude-adapter] CLI not yet connected for session ${this.sessionId}, queuing message`,
       );
       this.pendingMessages.push(ndjson);
       return;
     }
+    // In stdio mode, send the one-time initialize handshake before the first
+    // real message (enables the can_use_tool permission flow).
+    if (this.transportKind === "stdio") this.ensureStdioInitialized(ndjson);
     this.sendRaw(ndjson);
   }
 
   /**
-   * Low-level send: writes NDJSON to the CLI socket with newline delimiter.
-   * Records the outgoing message. Assumes cliSocket is non-null.
+   * Low-level send: writes NDJSON to the active transport with a newline
+   * delimiter and records the outgoing message. Assumes the transport is
+   * connected (callers gate on isConnected() / flush after attach).
    */
   private sendRaw(ndjson: string): void {
     // Record raw outgoing CLI message
@@ -975,7 +1122,11 @@ export class ClaudeAdapter implements IBackendAdapter {
     );
     try {
       // NDJSON requires a newline delimiter
-      this.cliSocket!.send(ndjson + "\n");
+      if (this.transportKind === "stdio") {
+        this.stdioWriter?.write(new TextEncoder().encode(ndjson + "\n"));
+      } else {
+        this.cliSocket!.send(ndjson + "\n");
+      }
     } catch (err) {
       console.error(
         `[claude-adapter] Failed to send to CLI for session ${this.sessionId}:`,

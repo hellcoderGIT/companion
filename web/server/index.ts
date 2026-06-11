@@ -60,7 +60,7 @@ const sessionStore = new SessionStore(
   process.env.COMPANION_SESSION_DIR || process.env.COMPANION_SESSIONS_DIR,
 );
 const wsBridge = new WsBridge();
-const launcher = new CliLauncher(port);
+const launcher = new CliLauncher();
 const worktreeTracker = new WorktreeTracker();
 const CONTAINER_STATE_PATH = join(COMPANION_HOME, "containers.json");
 const terminalManager = new TerminalManager();

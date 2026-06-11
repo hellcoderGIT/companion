@@ -84,12 +84,16 @@ function createMockProc(pid = 12345) {
     resolve = r;
   });
   exitResolve = resolve!;
+  // The Claude stdio transport (ClaudeAdapter.attachStdio) needs a writable
+  // stdin and a readable stdout to bridge NDJSON. Provide inert streams that
+  // accept writes and never emit so launcher-lifecycle tests stay deterministic.
   return {
     pid,
     kill: vi.fn(),
     exited: exitedPromise,
-    stdout: null,
-    stderr: null,
+    stdin: new WritableStream<Uint8Array>(),
+    stdout: new ReadableStream<Uint8Array>({ start() {} }),
+    stderr: new ReadableStream<Uint8Array>({ start() {} }),
   };
 }
 
@@ -156,7 +160,7 @@ beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), "launcher-test-"));
   resetSettings(join(tempDir, "settings.json"));
   store = new SessionStore(tempDir);
-  launcher = new CliLauncher(3456);
+  launcher = new CliLauncher();
   launcher.setStore(store);
   mockSpawn.mockReturnValue(createMockProc());
   mockListen.mockImplementation(() => ({ stop: vi.fn() }));
@@ -174,16 +178,18 @@ afterEach(() => {
 // ─── launch ──────────────────────────────────────────────────────────────────
 
 describe("launch", () => {
-  it("creates a session with a UUID and starting state", () => {
+  it("creates a session with a UUID and connects immediately over stdio", () => {
     const info = launcher.launch({ cwd: "/tmp/project" });
 
     expect(info.sessionId).toBe("test-session-id");
-    expect(info.state).toBe("starting");
+    // The stdio transport owns the process and attaches synchronously — there
+    // is no WebSocket handshake to wait for, so the session is "connected".
+    expect(info.state).toBe("connected");
     expect(info.cwd).toBe("/tmp/project");
     expect(info.createdAt).toBeGreaterThan(0);
   });
 
-  it("spawns CLI with correct --sdk-url and flags", () => {
+  it("spawns CLI with the stdio stream-json transport and flags", () => {
     launcher.launch({ cwd: "/tmp/project" });
 
     expect(mockSpawn).toHaveBeenCalledOnce();
@@ -192,24 +198,34 @@ describe("launch", () => {
     // Binary should be resolved via execSync
     expect(cmdAndArgs[0]).toBe("/usr/bin/claude");
 
-    // Core required flags
-    expect(cmdAndArgs).toContain("--sdk-url");
-    expect(cmdAndArgs).toContain("ws://127.0.0.1:3456/ws/cli/test-session-id");
+    // Stdio stream-json transport — NOT the legacy --sdk-url WebSocket bridge.
+    expect(cmdAndArgs).not.toContain("--sdk-url");
     expect(cmdAndArgs).toContain("--print");
     expect(cmdAndArgs).toContain("--output-format");
     expect(cmdAndArgs).toContain("stream-json");
     expect(cmdAndArgs).toContain("--input-format");
     expect(cmdAndArgs).toContain("--include-partial-messages");
     expect(cmdAndArgs).toContain("--verbose");
+    // Routes permission prompts back as can_use_tool over the same pipes.
+    const pptIdx = cmdAndArgs.indexOf("--permission-prompt-tool");
+    expect(pptIdx).toBeGreaterThan(-1);
+    expect(cmdAndArgs[pptIdx + 1]).toBe("stdio");
 
-    // Headless prompt
-    expect(cmdAndArgs).toContain("-p");
-    expect(cmdAndArgs).toContain("");
+    // No trailing `-p ""` — the prompt arrives as a stream-json user message.
+    expect(cmdAndArgs[cmdAndArgs.length - 1]).not.toBe("");
 
-    // Spawn options
+    // Spawn options: stdin is piped so the server can write NDJSON to the child.
     expect(options.cwd).toBe("/tmp/project");
+    expect(options.stdin).toBe("pipe");
     expect(options.stdout).toBe("pipe");
     expect(options.stderr).toBe("pipe");
+  });
+
+  it("emits backend:claude-adapter-created so the bridge can attach the adapter", () => {
+    const seen: string[] = [];
+    companionBus.on("backend:claude-adapter-created", ({ sessionId }) => { seen.push(sessionId); });
+    const info = launcher.launch({ cwd: "/tmp/project" });
+    expect(seen).toEqual([info.sessionId]);
   });
 
   it("passes --model when provided", () => {
@@ -271,8 +287,7 @@ describe("launch", () => {
     }
   });
 
-  it("uses COMPANION_CONTAINER_SDK_HOST for containerized sdk-url when set", () => {
-    process.env.COMPANION_CONTAINER_SDK_HOST = "172.17.0.1";
+  it("runs containerized Claude over `docker exec -i` with stdio stream-json (no --sdk-url)", () => {
     launcher.launch({
       cwd: "/tmp/project",
       containerId: "abc123def456",
@@ -280,10 +295,15 @@ describe("launch", () => {
     });
 
     const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    // `docker exec -i` keeps stdin open so the server can drive the CLI.
+    expect(cmdAndArgs.slice(0, 3)).toEqual(["docker", "exec", "-i"]);
+    expect(cmdAndArgs).toContain("abc123def456");
     // With bash -lc wrapping, CLI args are in the last element as a single string
     const bashCmd = cmdAndArgs[cmdAndArgs.length - 1];
-    expect(bashCmd).toContain("--sdk-url");
-    expect(bashCmd).toContain("ws://172.17.0.1:3456/ws/cli/test-session-id");
+    expect(bashCmd).not.toContain("--sdk-url");
+    expect(bashCmd).toContain("--input-format");
+    expect(bashCmd).toContain("stream-json");
+    expect(bashCmd).toContain("--permission-prompt-tool");
   });
 
   it("passes --allowedTools for each tool", () => {
@@ -705,8 +725,9 @@ describe("relaunch", () => {
       pid: 12345,
       kill: vi.fn(() => { resolveFirst(0); }),
       exited: new Promise<number>((r) => { resolveFirst = r; }),
-      stdout: null,
-      stderr: null,
+      stdin: new WritableStream<Uint8Array>(),
+      stdout: new ReadableStream<Uint8Array>({ start() {} }),
+      stderr: new ReadableStream<Uint8Array>({ start() {} }),
     };
     mockSpawn.mockReturnValueOnce(firstProc);
 
@@ -729,11 +750,12 @@ describe("relaunch", () => {
     expect(cmdAndArgs).toContain("--resume");
     expect(cmdAndArgs).toContain("cli-resume-id");
 
-    // Session state should be reset to starting (set by relaunch before spawnCLI)
+    // After relaunch the stdio transport attaches synchronously, so the session
+    // moves straight to "connected" (no WebSocket reconnect to wait for).
     // Allow microtask queue to flush
     await new Promise((r) => setTimeout(r, 10));
     const session = launcher.getSession("test-session-id");
-    expect(session?.state).toBe("starting");
+    expect(session?.state).toBe("connected");
   });
 
   it("reuses launch env variables during relaunch", async () => {
@@ -742,8 +764,9 @@ describe("relaunch", () => {
       pid: 12345,
       kill: vi.fn(() => { resolveFirst(0); }),
       exited: new Promise<number>((r) => { resolveFirst = r; }),
-      stdout: null,
-      stderr: null,
+      stdin: new WritableStream<Uint8Array>(),
+      stdout: new ReadableStream<Uint8Array>({ start() {} }),
+      stderr: new ReadableStream<Uint8Array>({ start() {} }),
     };
     mockSpawn.mockReturnValueOnce(firstProc);
 
@@ -803,8 +826,9 @@ describe("relaunch", () => {
       pid: 12345,
       kill: vi.fn(() => { resolveFirst(0); }),
       exited: new Promise<number>((r) => { resolveFirst = r; }),
-      stdout: null,
-      stderr: null,
+      stdin: new WritableStream<Uint8Array>(),
+      stdout: new ReadableStream<Uint8Array>({ start() {} }),
+      stderr: new ReadableStream<Uint8Array>({ start() {} }),
     };
     mockSpawn.mockReturnValueOnce(firstProc);
 
@@ -872,8 +896,9 @@ describe("relaunch", () => {
       pid: 12345,
       kill: vi.fn(() => { resolveFirst(0); }),
       exited: new Promise<number>((r) => { resolveFirst = r; }),
-      stdout: null,
-      stderr: null,
+      stdin: new WritableStream<Uint8Array>(),
+      stdout: new ReadableStream<Uint8Array>({ start() {} }),
+      stderr: new ReadableStream<Uint8Array>({ start() {} }),
     };
     mockSpawn.mockReturnValueOnce(firstProc);
 
@@ -999,8 +1024,9 @@ describe("codex websocket launcher", () => {
       pid: 3001,
       kill: vi.fn(() => resolveCodex1(0)),
       exited: new Promise<number>((r) => { resolveCodex1 = r; }),
-      stdout: null,
-      stderr: null,
+      stdin: new WritableStream<Uint8Array>(),
+      stdout: new ReadableStream<Uint8Array>({ start() {} }),
+      stderr: new ReadableStream<Uint8Array>({ start() {} }),
     };
     const proxy1 = createPendingCodexWsProxyProc(3002);
     proxy1.proc.kill.mockImplementation(() => proxy1.resolveExit(0));
@@ -1061,8 +1087,9 @@ describe("codex websocket launcher", () => {
       pid: 5001,
       kill: vi.fn(),
       exited: new Promise<number>((r) => { resolveLauncherProc = r; }),
-      stdout: null,
-      stderr: null,
+      stdin: new WritableStream<Uint8Array>(),
+      stdout: new ReadableStream<Uint8Array>({ start() {} }),
+      stderr: new ReadableStream<Uint8Array>({ start() {} }),
     };
     const proxy = createPendingCodexWsProxyProc(5002);
 
@@ -1132,7 +1159,7 @@ describe("persistence", () => {
         return origKill.call(process, pid, signal as any);
       }) as any);
 
-      const newLauncher = new CliLauncher(3456);
+      const newLauncher = new CliLauncher();
       newLauncher.setStore(store);
       const recovered = newLauncher.restoreFromDisk();
 
@@ -1168,7 +1195,7 @@ describe("persistence", () => {
         return true;
       }) as any);
 
-      const newLauncher = new CliLauncher(3456);
+      const newLauncher = new CliLauncher();
       newLauncher.setStore(store);
       const recovered = newLauncher.restoreFromDisk();
 
@@ -1184,13 +1211,13 @@ describe("persistence", () => {
     });
 
     it("returns 0 when no store is set", () => {
-      const newLauncher = new CliLauncher(3456);
+      const newLauncher = new CliLauncher();
       // No setStore call
       expect(newLauncher.restoreFromDisk()).toBe(0);
     });
 
     it("returns 0 when store has no launcher data", () => {
-      const newLauncher = new CliLauncher(3456);
+      const newLauncher = new CliLauncher();
       newLauncher.setStore(store);
       // Store is empty, no launcher.json file
       expect(newLauncher.restoreFromDisk()).toBe(0);
@@ -1215,7 +1242,7 @@ describe("persistence", () => {
 
       mockIsContainerAlive.mockReturnValueOnce("running");
 
-      const newLauncher = new CliLauncher(3456);
+      const newLauncher = new CliLauncher();
       newLauncher.setStore(store);
       const recovered = newLauncher.restoreFromDisk();
 
@@ -1243,7 +1270,7 @@ describe("persistence", () => {
 
       mockIsContainerAlive.mockReturnValueOnce("stopped");
 
-      const newLauncher = new CliLauncher(3456);
+      const newLauncher = new CliLauncher();
       newLauncher.setStore(store);
       const recovered = newLauncher.restoreFromDisk();
 
@@ -1269,7 +1296,7 @@ describe("persistence", () => {
       ];
       store.saveLauncher(savedSessions);
 
-      const newLauncher = new CliLauncher(3456);
+      const newLauncher = new CliLauncher();
       newLauncher.setStore(store);
       const recovered = newLauncher.restoreFromDisk();
 
@@ -1285,18 +1312,26 @@ describe("persistence", () => {
 // ─── getStartingSessions ─────────────────────────────────────────────────────
 
 describe("getStartingSessions", () => {
-  it("returns only sessions in starting state", () => {
-    launcher.launch({ cwd: "/tmp" });
+  it("returns only sessions in starting state (restored, awaiting relaunch)", () => {
+    // Fresh stdio launches connect immediately, so "starting" only arises on
+    // restore: restoreFromDisk marks live-PID sessions "starting" until they
+    // are relaunched. Persist such a session and restore it via a new launcher.
+    store.saveLauncher([
+      { sessionId: "restored-1", state: "connected", cwd: "/tmp", createdAt: Date.now(), pid: process.pid, backendType: "claude" },
+    ]);
+    const restored = new CliLauncher();
+    restored.setStore(store);
+    restored.restoreFromDisk();
 
-    const starting = launcher.getStartingSessions();
+    const starting = restored.getStartingSessions();
     expect(starting).toHaveLength(1);
     expect(starting[0].state).toBe("starting");
+    expect(starting[0].sessionId).toBe("restored-1");
   });
 
-  it("excludes sessions that have been connected", () => {
+  it("excludes freshly launched sessions (stdio connects immediately)", () => {
     launcher.launch({ cwd: "/tmp" });
-    launcher.markConnected("test-session-id");
-
+    // No WebSocket handshake to await — the session is already "connected".
     const starting = launcher.getStartingSessions();
     expect(starting).toHaveLength(0);
   });

@@ -19,6 +19,11 @@ export default defineConfig({
       reporter: ["text", "json-summary"],
       // The coverage-gate CI workflow reads json-summary to enforce
       // that new / changed files have ≥ 80 % line coverage.
+      exclude: [
+        // Standalone live-API harness (run via `bun run test:live`), not a
+        // vitest unit test — excluded so the coverage gate doesn't flag it.
+        "server/claude-adapter.live.ts",
+      ],
     },
     include: ["server/**/*.test.ts", "src/**/*.test.ts", "src/**/*.test.tsx"],
     environmentMatchGlobs: [
