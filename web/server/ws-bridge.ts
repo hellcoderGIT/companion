@@ -392,13 +392,21 @@ export class WsBridge {
     const session = this.getOrCreateSession(sessionId, backendType);
     session.backendAdapter = adapter;
 
+    // The legacy `--sdk-url` Claude transport has the CLI dial back in over a
+    // WebSocket, so its lifecycle (state machine advance, disconnect debounce)
+    // is driven by handleCLIOpen/handleCLIClose. Every other adapter — Codex,
+    // and the stdio stream-json Claude transport — has the server own the
+    // process, so attachment IS the transport-open event and disconnect is a
+    // process-exit, handled here like Codex.
+    const isLegacyWsClaude = adapter instanceof ClaudeAdapter && !adapter.usesProcessTransport();
+
     // Advance the state machine so that system_init (starting → ready) is reachable.
-    // For Claude, handleCLIOpen does starting → initializing via cli_ws_open.
-    // For Codex (and any non-Claude adapter), the adapter attachment IS the transport
-    // open event — no separate WS open fires — so do the equivalent transition here.
+    // For legacy WS Claude, handleCLIOpen does starting → initializing via cli_ws_open.
+    // For server-owned adapters, the adapter attachment IS the transport open event —
+    // no separate WS open fires — so do the equivalent transition here.
     // Also handles relaunched sessions stuck in "terminated": step through
     // terminated → starting → initializing so system_init can land on "ready".
-    if (!(adapter instanceof ClaudeAdapter)) {
+    if (!isLegacyWsClaude) {
       // Cancel any pending disconnect debounce — new adapter is reconnecting
       this.cancelDisconnectTimer(sessionId);
       const phase = session.stateMachine.phase;
@@ -624,14 +632,15 @@ export class WsBridge {
         return;
       }
 
-      // For ClaudeAdapter, disconnect is handled by handleCLIClose debounce logic
-      if (adapter instanceof ClaudeAdapter) {
-        // Do nothing here — handleCLIClose manages the debounce timer
+      // For the legacy WS Claude transport, disconnect is handled by the
+      // handleCLIClose debounce logic — do nothing here.
+      if (isLegacyWsClaude) {
         return;
       }
 
-      // For Codex adapters: transition to "reconnecting" with a short debounce
-      // (5s vs 15s for Claude Code, since Codex doesn't cycle its WebSocket).
+      // For server-owned adapters (Codex + stdio Claude): transition to
+      // "reconnecting" with a short debounce (5s vs 15s for the legacy WS
+      // Claude transport, since there's no WebSocket cycling).
       session.backendAdapter = null;
       session.stateMachine.transition("reconnecting", "codex_adapter_disconnected");
       this.persistSession(session);
@@ -665,10 +674,10 @@ export class WsBridge {
       this.broadcastToBrowsers(session, { type: "error", message: error });
     });
 
-    // Flush pending messages for non-Claude backends (Codex uses stdio, not
-    // a CLI WebSocket, so handleCLIOpen never runs to flush the queue).
-    // For Claude backends, handleCLIOpen handles this after attachWebSocket.
-    if (!(adapter instanceof ClaudeAdapter) && session.pendingMessages.length > 0) {
+    // Flush pending messages for server-owned backends (Codex + stdio Claude),
+    // where attachment is the transport-open event. The legacy WS Claude
+    // transport flushes in handleCLIOpen after attachWebSocket instead.
+    if (!isLegacyWsClaude && session.pendingMessages.length > 0) {
       this.flushQueuedBrowserMessages(session, adapter, "adapter_attach");
       this.persistSession(session);
     }

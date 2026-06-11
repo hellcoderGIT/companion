@@ -5,21 +5,18 @@ import {
   copyFileSync,
   cpSync,
   realpathSync,
-  writeFileSync,
-  unlinkSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
 import type { SessionStore } from "./session-store.js";
 import type { BackendType } from "./session-types.js";
 import type { RecorderManager } from "./recorder.js";
 import { CodexAdapter } from "./codex-adapter.js";
+import { ClaudeAdapter } from "./claude-adapter.js";
 import { resolveBinary, getEnrichedPath } from "./path-resolver.js";
 import { containerManager } from "./container-manager.js";
 import { companionBus } from "./event-bus.js";
-import { getSettings } from "./settings-manager.js";
 import {
   getLegacyCodexHome,
   resolveCompanionCodexSessionHome,
@@ -490,36 +487,6 @@ export class CliLauncher {
       }
     }
 
-    // Allow overriding the host alias used by containerized Claude sessions.
-    // Useful when host.docker.internal is unavailable in a given Docker setup.
-    const containerSdkHost = (process.env.COMPANION_CONTAINER_SDK_HOST || "host.docker.internal").trim()
-      || "host.docker.internal";
-
-    // When running inside a container, the SDK URL targets the host alias so
-    // the CLI can connect back to the Hono server running on the host.
-    //
-    // For host sessions there are two paths depending on settings:
-    //   * "patched" — the companion has byte-patched the local Claude binary
-    //     so it accepts [::1] in --sdk-url, and a parallel TLS WS listener is
-    //     running on wss://[::1]:<ingress-port>. We emit that URL and set
-    //     NODE_TLS_REJECT_UNAUTHORIZED=0 below so the self-signed cert is
-    //     accepted. Required on Claude Code >= 2.1.121, where the validator
-    //     rejects every non-Anthropic host. See claude-versions.ts.
-    //   * "none" (default) — plain ws://127.0.0.1:<port>/... Works on
-    //     2.1.120 and earlier; sessions on a stock 2.1.121+ binary will fail
-    //     immediately with "host 127.0.0.1 is not an approved Anthropic
-    //     endpoint" (visible only on direct CLI stderr).
-    const settings = getSettings();
-    const patchedBridge = !isContainerized
-      && settings.claudeBridgeMode === "patched"
-      && typeof settings.claudeBridgeIngressUrl === "string"
-      && settings.claudeBridgeIngressUrl.length > 0;
-    const sdkUrl = isContainerized
-      ? `ws://${containerSdkHost}:${this.port}/ws/cli/${sessionId}`
-      : patchedBridge
-        ? `${settings.claudeBridgeIngressUrl}/ws/cli/${sessionId}`
-        : `ws://127.0.0.1:${this.port}/ws/cli/${sessionId}`;
-
     let effectivePermissionMode = options.permissionMode;
     const shouldDowngradeContainerBypass =
       isContainerized
@@ -535,43 +502,22 @@ export class CliLauncher {
       info.permissionMode = "acceptEdits";
     }
 
-    // Optional: just-every/code-style JSON handoff. When enabled (and not
-    // containerized — the temp file path wouldn't be visible inside the
-    // container), write a temp descriptor with a one-shot token and pass its
-    // path via CLAUDE_BRIDGE_CONFIG env var instead of --sdk-url on argv.
-    // This is forward-compatible if Anthropic further restricts --sdk-url
-    // (e.g. drops it entirely or adds origin/handshake checks).
-    const bridgeMode = settings.cliBridgeMode ?? "loopback";
-    const useJsonHandoff = bridgeMode === "jsonHandoff" && !isContainerized;
-    let bridgeConfigPath: string | undefined;
-    if (useJsonHandoff) {
-      bridgeConfigPath = join(tmpdir(), `companion-bridge-${sessionId}.json`);
-      const token = randomUUID();
-      const descriptor = {
-        version: 1,
-        transport: "ws",
-        url: sdkUrl,
-        sessionId,
-        token,
-      };
-      try {
-        writeFileSync(bridgeConfigPath, JSON.stringify(descriptor), { mode: 0o600 });
-        info.bridgeToken = token;
-        info.bridgeConfigPath = bridgeConfigPath;
-      } catch (err) {
-        console.warn(`[cli-launcher] Failed to write bridge descriptor for ${sessionId}: ${err}. Falling back to --sdk-url.`);
-        bridgeConfigPath = undefined;
-      }
-    }
-
+    // Stdio stream-json transport (the supported integration path). The server
+    // owns the process and bridges over its stdin/stdout pipes via ClaudeAdapter
+    // — no `--sdk-url`, so we're immune to the 2.1.121 host allowlist and the
+    // 2.1.170 worker-registration handshake that broke the WebSocket bridge.
+    //
+    //   --permission-prompt-tool stdio  routes permission prompts back as
+    //   `can_use_tool` control_requests over the same pipes (the adapter sends
+    //   the one-time `initialize` handshake that enables this).
     const args: string[] = [
-      ...(bridgeConfigPath ? [] : ["--sdk-url", sdkUrl]),
       "--print",
-      "--output-format", "stream-json",
       "--input-format", "stream-json",
-      // Required on newer Claude Code versions to emit streaming chunk events.
+      "--output-format", "stream-json",
+      // Emit streaming chunk events (partial assistant messages).
       "--include-partial-messages",
       "--verbose",
+      "--permission-prompt-tool", "stdio",
     ];
 
     if (options.model) {
@@ -591,26 +537,20 @@ export class CliLauncher {
     if (options.forkSession) {
       args.push("--fork-session");
     }
-
-    // Always pass -p "" for headless mode. When relaunching, also pass --resume
-    // to restore the CLI's conversation context.
+    // On relaunch, --resume restores the CLI's conversation context. The prompt
+    // itself arrives as a stream-json `user` message on stdin (no trailing -p "").
     if (options.resumeSessionId) {
       args.push("--resume", options.resumeSessionId);
     }
-
-    args.push("-p", "");
 
     let spawnCmd: string[];
     let spawnEnv: Record<string, string | undefined>;
     let spawnCwd: string | undefined;
 
     if (isContainerized) {
-      // Run CLI inside the container via docker exec -i.
-      // Keeping stdin open avoids premature EOF-driven exits in SDK mode.
-      // Environment variables are passed via -e flags to docker exec.
+      // Run CLI inside the container via `docker exec -i` so the server can
+      // drive it over stdin/stdout. Env vars are passed via -e flags.
       const dockerArgs = ["docker", "exec", "-i"];
-
-      // Pass env vars via -e flags
       if (options.env) {
         for (const [k, v] of Object.entries(options.env)) {
           dockerArgs.push("-e", `${k}=${v}`);
@@ -629,7 +569,7 @@ export class CliLauncher {
       spawnEnv = { ...process.env, PATH: getEnrichedPath() };
       spawnCwd = undefined; // cwd is set inside the container via -w at creation
     } else {
-      // Host-based spawn (original behavior)
+      // Host-based spawn.
       // On Windows, .cmd/.bat files cannot be spawned directly by Bun.spawn;
       // they must be invoked via cmd.exe /c.
       const isCmdScript = process.platform === "win32" && (binary.endsWith(".cmd") || binary.endsWith(".bat"));
@@ -639,11 +579,6 @@ export class CliLauncher {
         CLAUDECODE: undefined,
         ...options.env,
         PATH: getEnrichedPath(),
-        ...(bridgeConfigPath ? { CLAUDE_BRIDGE_CONFIG: bridgeConfigPath } : {}),
-        // Patched-bridge mode terminates --sdk-url at our self-signed wss://[::1]
-        // listener. Tell Bun/Node to trust the self-signed cert without involving
-        // the user's CA store.
-        ...(patchedBridge ? { NODE_TLS_REJECT_UNAUTHORIZED: "0" } : {}),
       };
       spawnCwd = info.cwd;
     }
@@ -656,6 +591,7 @@ export class CliLauncher {
     const proc = Bun.spawn(spawnCmd, {
       cwd: spawnCwd,
       env: spawnEnv,
+      stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -663,10 +599,27 @@ export class CliLauncher {
     info.pid = proc.pid;
     this.processes.set(sessionId, proc);
 
-    // Stream stdout/stderr for debugging
-    this.pipeOutput(sessionId, proc);
+    // stdout carries the NDJSON protocol stream — it is owned by the adapter
+    // (below). Pipe only stderr for diagnostics so we don't steal stdout bytes.
+    const stderr = proc.stderr;
+    if (stderr && typeof stderr !== "number") {
+      this.pipeStream(sessionId, stderr, "stderr");
+    }
 
-    // Monitor process exit
+    // Create the ClaudeAdapter and bind it to the process's stdio. The adapter
+    // owns NDJSON translation; the bridge attaches via backend:claude-adapter-created
+    // (mirrors the Codex stdio path). State is "connected" immediately — there is
+    // no WebSocket handshake to wait for.
+    const adapter = new ClaudeAdapter(sessionId, {
+      recorder: this.recorder ?? undefined,
+      cwd: info.cwd,
+    });
+    adapter.attachStdio(proc);
+    companionBus.emit("backend:claude-adapter-created", { sessionId, adapter });
+    info.state = "connected";
+
+    // Monitor process exit. Relaunch is driven by the orchestrator's proactive
+    // keepalive on session:exited (it relaunches with --resume).
     const spawnedAt = Date.now();
     proc.exited.then((exitCode) => {
       console.log(`[cli-launcher] Session ${sessionId} exited (code=${exitCode})`);
@@ -684,9 +637,6 @@ export class CliLauncher {
         }
       }
       this.processes.delete(sessionId);
-      if (bridgeConfigPath) {
-        try { unlinkSync(bridgeConfigPath); } catch { /* already gone */ }
-      }
       this.persistState();
       companionBus.emit("session:exited", { sessionId, exitCode });
     });
