@@ -1012,6 +1012,12 @@ function handleParsedMessage(
       store.setCliConnected(sessionId, false);
       store.setCliReconnecting(sessionId, false);
       store.setSessionStatus(sessionId, null);
+      // The backend is gone, so nothing is generating. Clear any in-flight
+      // streaming draft/stats so the composer's "generating" spinner stops and
+      // the reconnect banner is shown instead of an endless, time-resetting
+      // spinner that never resolves (no result will ever arrive).
+      store.setStreaming(sessionId, null);
+      store.setStreamingStats(sessionId, null);
       break;
     }
 
