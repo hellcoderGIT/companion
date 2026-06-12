@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.101.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.100.0...companion-v0.101.0) (2026-06-12)
+
+
+### Features
+
+* **session:** add session export to HTML or text ([#24](https://github.com/hellcoderGIT/companion/issues/24)) ([915ae6b](https://github.com/hellcoderGIT/companion/commit/915ae6b7ae2186886e620e59f5903ecbc69a6228))
+
+
+### Bug Fixes
+
+* **claude:** recover stuck stdio sessions when the transport dies ([#23](https://github.com/hellcoderGIT/companion/issues/23)) ([62f315f](https://github.com/hellcoderGIT/companion/commit/62f315f0a11f63944d02650687ce0fd7bc562e9c))
+
 ## [0.100.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.99.1...companion-v0.100.0) (2026-06-11)
 
 
