@@ -75,6 +75,13 @@ export class ClaudeAdapter implements IBackendAdapter {
   private stdioBuffer = "";
   /** Whether the one-time `initialize` control_request handshake has been sent. */
   private stdioInitialized = false;
+  /** The spawned child process (stdio transport), so we can detect/kill a
+   *  process that lingers after its stdout transport has died. */
+  private stdioProc: Subprocess | null = null;
+  /** Guard so the disconnect callback fires at most once per transport, no
+   *  matter which teardown path (stdout reader end, reader error, or process
+   *  exit) trips first. Mirrors CodexAdapter.disconnectFired. */
+  private disconnectFired = false;
 
   // Callbacks registered by the bridge via on*() methods
   private browserMessageCb: ((msg: BrowserIncomingMessage) => void) | null = null;
@@ -182,6 +189,8 @@ export class ClaudeAdapter implements IBackendAdapter {
   attachStdio(proc: Subprocess): void {
     this.transportKind = "stdio";
     this.stdioConnected = true;
+    this.disconnectFired = false;
+    this.stdioProc = proc;
 
     // Wrap Bun's FileSink stdin (which exposes a synchronous `.write()`) in a
     // WritableStream and hold a single writer — matches the proven CodexAdapter
@@ -215,14 +224,34 @@ export class ClaudeAdapter implements IBackendAdapter {
       }
     }
 
-    // Mark the transport gone on process exit. Relaunch is intentionally NOT
-    // driven from here — the launcher emits `session:exited`, and the
-    // orchestrator's proactive keepalive relaunches with `--resume`. This
-    // mirrors the Codex stdio path and avoids double-relaunch.
+    // Mark the transport gone on process exit and notify the bridge. The
+    // launcher independently emits `session:exited` (driving the proactive
+    // `--resume` relaunch); the disconnect callback here drives the bridge's
+    // reconnecting/`cli_disconnected` flow (reconnect banner). Both relaunch
+    // requests are de-duplicated by the orchestrator's relaunchingSet, so this
+    // does not double-relaunch. Mirrors the Codex stdio path
+    // (`proc.exited` → `cleanupAndDisconnect`).
     proc.exited.then(() => {
-      this.stdioConnected = false;
-      this.stdioWriter = null;
+      this.notifyStdioDisconnect();
     });
+  }
+
+  /**
+   * Mark the stdio transport gone and fire the disconnect callback exactly
+   * once. Routed (by the bridge's `onDisconnect` handler) into the same
+   * recovery flow as a WebSocket drop: transition to "reconnecting", broadcast
+   * `cli_disconnected` (so the UI shows the reconnect banner), and request an
+   * auto-relaunch. Without this, a dead stdio transport left `isConnected()`
+   * false while the bridge still believed the backend was attached — every
+   * browser message queued forever ("Backend not connected") and the UI span
+   * an endless "generating" spinner with no banner.
+   */
+  private notifyStdioDisconnect(): void {
+    this.stdioConnected = false;
+    this.stdioWriter = null;
+    if (this.disconnectFired) return;
+    this.disconnectFired = true;
+    this.disconnectCb?.();
   }
 
   /** Line-buffered stdout reader: splits NDJSON and routes complete lines. */
@@ -247,7 +276,26 @@ export class ClaudeAdapter implements IBackendAdapter {
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      this.stdioConnected = false;
+      // The stdout stream ended: the stream-json transport is dead and cannot
+      // be revived on this process. If the child somehow lingers (e.g. it
+      // stopped emitting after a fatal API error such as a 429 but never
+      // exited), kill it so `proc.exited` resolves and the launcher's
+      // `session:exited` → proactive `--resume` relaunch can recover it. Left
+      // alive, the process would keep `handleAutoRelaunch`'s PID-liveness guard
+      // satisfied, blocking every relaunch path indefinitely.
+      const proc = this.stdioProc;
+      if (proc && proc.exitCode === null && !proc.killed) {
+        log.warn("claude-adapter", "stdout closed while process still alive; killing stale process", {
+          sessionId: this.sessionId,
+          pid: proc.pid,
+        });
+        try {
+          proc.kill();
+        } catch {
+          // Process may have exited between the check and the kill.
+        }
+      }
+      this.notifyStdioDisconnect();
     }
   }
 
@@ -330,7 +378,7 @@ export class ClaudeAdapter implements IBackendAdapter {
    */
   handleTransportClose(): void {
     if (this.transportKind === "stdio") {
-      this.stdioConnected = false;
+      this.notifyStdioDisconnect();
       return;
     }
     this.cliSocket = null;

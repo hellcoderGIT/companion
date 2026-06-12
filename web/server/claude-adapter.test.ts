@@ -1440,3 +1440,117 @@ describe("prompt_suggestion", () => {
     expect(emitted.suggestions).toEqual(["Fix the bug", "Add tests"]);
   });
 });
+
+// ─── Stdio transport disconnect propagation ──────────────────────────────────
+//
+// Regression coverage for the "endless generating, no output" bug: when the
+// stdio (stream-json) transport dies, the adapter must fire its disconnect
+// callback so the bridge can show the reconnect banner and trigger relaunch.
+// Previously the stdio paths only flipped `stdioConnected = false` silently,
+// leaving the bridge believing the backend was still attached.
+
+/**
+ * Build a minimal mock of Bun's Subprocess driving the stdio transport.
+ * - `stdout` is a controllable ReadableStream (call `endStdout()` to close it).
+ * - `exited` resolves when `resolveExit()` is called.
+ * - `kill()` is a spy that flips `killed` and resolves `exited`.
+ */
+function createMockProc() {
+  let stdoutController: ReadableStreamDefaultController<Uint8Array>;
+  const stdout = new ReadableStream<Uint8Array>({
+    start(controller) {
+      stdoutController = controller;
+    },
+  });
+
+  const stdinWrites: Uint8Array[] = [];
+  const stdin = { write: (data: Uint8Array) => (stdinWrites.push(data), data.length) };
+
+  let resolveExit!: () => void;
+  const exited = new Promise<number>((resolve) => {
+    resolveExit = () => resolve(0);
+  });
+
+  const proc = {
+    pid: 4242,
+    stdin,
+    stdout,
+    exitCode: null as number | null,
+    killed: false,
+    kill: vi.fn(() => {
+      proc.killed = true;
+      proc.exitCode = 0;
+      resolveExit();
+    }),
+    exited,
+  };
+
+  return {
+    proc: proc as any,
+    endStdout: () => stdoutController.close(),
+    resolveExit: () => {
+      proc.exitCode = 0;
+      resolveExit();
+    },
+  };
+}
+
+describe("stdio transport disconnect propagation", () => {
+  it("fires disconnect and kills a lingering process when stdout closes while alive", async () => {
+    // The wedge case: the worker stops emitting (e.g. after a 429) and closes
+    // stdout but the process keeps running. The adapter must kill it (so the
+    // relaunch path's PID-liveness guard is cleared) and report disconnect.
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+    expect(adapter.isConnected()).toBe(true);
+
+    endStdout();
+    // Let the async stdout reader observe the close and run its finally block.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+    expect(adapter.isConnected()).toBe(false);
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires disconnect on process exit", async () => {
+    const { proc, resolveExit } = createMockProc();
+    adapter.attachStdio(proc);
+
+    resolveExit();
+    await proc.exited;
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(adapter.isConnected()).toBe(false);
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires the disconnect callback at most once across both teardown paths", async () => {
+    // Both the stdout-reader finally AND proc.exited can trip; the disconnectCb
+    // must still fire exactly once (the bridge dedupes relaunch, but the UI
+    // banner/state transition should not flap).
+    const { proc, endStdout, resolveExit } = createMockProc();
+    adapter.attachStdio(proc);
+
+    endStdout();
+    resolveExit();
+    await proc.exited;
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not kill a process that has already exited", async () => {
+    // If the process exited on its own, stdout closes too — but we must not
+    // call kill() on an already-dead process.
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    proc.exitCode = 0; // simulate process already exited before stdout drains
+    endStdout();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(proc.kill).not.toHaveBeenCalled();
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+});
