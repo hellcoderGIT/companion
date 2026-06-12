@@ -408,3 +408,18 @@ export function getClaudeSessionHistoryPage(
 export function clearClaudeSessionHistoryCacheForTests(): void {
   parsedHistoryCache.clear();
 }
+
+/**
+ * Resolve the on-disk Claude history `.jsonl` file for a session, if any.
+ * Exposed so the export feature can read the raw transcript (including image
+ * content blocks, which the paginated history view strips for the UI).
+ */
+export function resolveClaudeSessionFilePath(
+  sessionId: string,
+  projectsRoot?: string,
+): string | null {
+  const trimmed = sessionId.trim();
+  if (!trimmed) return null;
+  const resolved = resolveSessionSourceFile(trimmed, getProjectsRoot(projectsRoot));
+  return resolved ? resolved.sourceFile : null;
+}

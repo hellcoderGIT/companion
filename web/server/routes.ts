@@ -37,6 +37,7 @@ import { registerLinearOAuthConnectionRoutes } from "./routes/linear-oauth-conne
 import { getSettings } from "./settings-manager.js";
 import { discoverClaudeSessions } from "./claude-session-discovery.js";
 import { getClaudeSessionHistoryPage } from "./claude-session-history.js";
+import { buildSessionExport } from "./session-export.js";
 import { verifyToken, getToken, regenerateToken, getAllAddresses } from "./auth-manager.js";
 import QRCode from "qrcode";
 import { VSCODE_EDITOR_CONTAINER_PORT, NOVNC_CONTAINER_PORT } from "./constants.js";
@@ -282,6 +283,25 @@ export function createRoutes(
       return c.json({ error: "Claude session history not found" }, 404);
     }
     return c.json(page);
+  });
+
+  api.get("/sessions/:id/export", (c) => {
+    const id = c.req.param("id");
+    const formatRaw = (c.req.query("format") || "html").toLowerCase();
+    const format = formatRaw === "txt" ? "txt" : "html";
+    const session = launcher.getSession(id);
+    // History files are keyed by the Claude CLI session id; fall back to the
+    // companion id in case the caller passed a raw Claude session id.
+    const claudeId = session?.cliSessionId || id;
+    const title =
+      sessionNames.getName(id) || session?.name || `Session ${id.slice(0, 8)}`;
+    const result = buildSessionExport({ sessionId: claudeId, format, title });
+    if (!result) {
+      return c.json({ error: "Session history not found" }, 404);
+    }
+    c.header("Content-Type", result.contentType);
+    c.header("Content-Disposition", `attachment; filename="${result.filename}"`);
+    return c.body(result.body);
   });
 
   api.post("/sessions/:id/editor/start", async (c) => {

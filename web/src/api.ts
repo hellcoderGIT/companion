@@ -905,6 +905,25 @@ export const api = {
   relaunchSession: (sessionId: string) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/relaunch`),
 
+  exportSession: async (
+    sessionId: string,
+    format: "html" | "txt",
+  ): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(
+      `${BASE}/sessions/${encodeURIComponent(sessionId)}/export?format=${format}`,
+      { headers: { ...getAuthHeaders() } },
+    );
+    if (!res.ok) {
+      handle401(res.status);
+      throw new Error(`Export failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const match = cd.match(/filename="?([^"]+)"?/);
+    const filename = match?.[1] || `session.${format}`;
+    return { blob, filename };
+  },
+
   archiveSession: (sessionId: string, opts?: { force?: boolean; linearTransition?: "none" | "backlog" | "configured" }) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/archive`, opts),
 

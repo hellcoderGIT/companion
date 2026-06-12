@@ -2089,3 +2089,50 @@ describe("listExecutions", () => {
     expect(url).toBe("/api/executions?status=running");
   });
 });
+
+// ===========================================================================
+// exportSession
+// ===========================================================================
+describe("exportSession", () => {
+  function mockBlobResponse(
+    body: string,
+    contentDisposition: string | null,
+    status = 200,
+  ) {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? "OK" : "Error",
+      blob: () => Promise.resolve(new Blob([body], { type: "text/html" })),
+      headers: { get: (name: string) => (name === "Content-Disposition" ? contentDisposition : null) },
+    };
+  }
+
+  it("requests the export endpoint with the chosen format and parses the filename", async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockBlobResponse("<html></html>", 'attachment; filename="My-Session-2026-06-11.html"'),
+    );
+
+    const { blob, filename } = await api.exportSession("s 1", "html");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/sessions/s%201/export?format=html");
+    expect(opts.headers).toBeDefined();
+    expect(filename).toBe("My-Session-2026-06-11.html");
+    expect(blob).toBeInstanceOf(Blob);
+  });
+
+  it("falls back to a default filename when Content-Disposition is absent", async () => {
+    mockFetch.mockResolvedValueOnce(mockBlobResponse("text", null));
+
+    const { filename } = await api.exportSession("s1", "txt");
+
+    expect(filename).toBe("session.txt");
+  });
+
+  it("throws when the export request fails", async () => {
+    mockFetch.mockResolvedValueOnce(mockBlobResponse("", null, 500));
+
+    await expect(api.exportSession("s1", "html")).rejects.toThrow(/Export failed \(500\)/);
+  });
+});
