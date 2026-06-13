@@ -407,6 +407,79 @@ describe("SessionOrchestrator", () => {
     });
   });
 
+  // ── Crash-loop relaunch budget ────────────────────────────────────────────
+
+  describe("auto-relaunch crash budget", () => {
+    // Drives one crash→proactive-relaunch cycle: the CLI exits, the keepalive
+    // timer fires, handleAutoRelaunch waits out its grace + cooldown, and the
+    // relaunch resolves. Advancing 45s comfortably covers the largest backoff
+    // (24s) + grace (10s) + cooldown (5s) while staying under HEALTHY_UPTIME_MS
+    // (60s), so a still-disconnected session never earns its budget back.
+    async function crashCycle() {
+      companionBus.emit("session:exited", { sessionId: "s1", exitCode: 143 });
+      await vi.advanceTimersByTimeAsync(45_000);
+      await vi.advanceTimersByTimeAsync(0);
+    }
+
+    it("stops relaunching and surfaces an error when a resumed session keeps re-crashing", async () => {
+      // Regression: previously a successful *spawn* reset the crash budget, so a
+      // session that resumed and immediately died again looped forever and the
+      // user only ever saw a flickering reconnect banner. The budget must now be
+      // gated on real uptime, so repeated fast crashes hit MAX_AUTO_RELAUNCHES.
+      vi.useFakeTimers();
+      // Spawn always "succeeds" but the process never stays connected.
+      deps.launcher.getSession.mockReturnValue({ archived: false, state: "exited", pid: undefined } as any);
+      deps.launcher.relaunch.mockResolvedValue({ ok: true });
+      deps.wsBridge.isCliConnected.mockReturnValue(false);
+      orchestrator.initialize();
+
+      // Five crashes in a row — well past the 3-attempt budget.
+      for (let i = 0; i < 5; i++) await crashCycle();
+
+      // It relaunched exactly MAX_AUTO_RELAUNCHES times, then gave up.
+      expect(deps.launcher.relaunch).toHaveBeenCalledTimes(3);
+      // ...and told the user, in-chat, that it stopped.
+      const errorBroadcasts = deps.wsBridge.broadcastToSession.mock.calls.filter(
+        ([, msg]: [string, any]) => msg?.type === "error",
+      );
+      expect(errorBroadcasts).toHaveLength(1);
+      expect(errorBroadcasts[0][1].message).toMatch(/restarted .* times/i);
+
+      vi.useRealTimers();
+    });
+
+    it("restores the budget after a relaunched session stays healthy", async () => {
+      // The uptime gate must not be a one-way trip: a session that recovers and
+      // stays connected for HEALTHY_UPTIME_MS earns a fresh budget, so a later
+      // unrelated crash is not permanently blocked.
+      vi.useFakeTimers();
+      deps.launcher.getSession.mockReturnValue({ archived: false, state: "exited", pid: undefined } as any);
+      deps.launcher.relaunch.mockResolvedValue({ ok: true });
+      deps.wsBridge.isCliConnected.mockReturnValue(false);
+      orchestrator.initialize();
+
+      // Burn 2 of 3 attempts while disconnected.
+      await crashCycle();
+      await crashCycle();
+      expect(deps.launcher.relaunch).toHaveBeenCalledTimes(2);
+
+      // The session now genuinely recovers: it comes back connected and stays up.
+      // The healthy-reset timer armed by the last relaunch fires past
+      // HEALTHY_UPTIME_MS (60s) and restores the full budget.
+      deps.wsBridge.isCliConnected.mockReturnValue(true);
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      // A fresh, unrelated crash streak (disconnected again) gets a full 3
+      // attempts — the earlier failures no longer count against it.
+      deps.wsBridge.isCliConnected.mockReturnValue(false);
+      deps.launcher.relaunch.mockClear();
+      for (let i = 0; i < 5; i++) await crashCycle();
+      expect(deps.launcher.relaunch).toHaveBeenCalledTimes(3);
+
+      vi.useRealTimers();
+    });
+  });
+
   // ── Session Creation ──────────────────────────────────────────────────────
 
   describe("createSession()", () => {

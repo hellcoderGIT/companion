@@ -34,6 +34,16 @@ const RECONNECT_GRACE_MS = Number(process.env.COMPANION_RECONNECT_GRACE_MS || "3
 // Proactive keepalive: base delay before relaunching a crashed CLI (doubles per attempt)
 const KEEPALIVE_BASE_DELAY_MS = 3_000;
 
+// How long a relaunched session must stay connected before we consider it
+// genuinely recovered and restore its full crash budget. A successful *spawn*
+// is not proof of health: a resumed session can re-crash within seconds (e.g. a
+// poisoned turn that re-triggers the same fatal error on every `--resume`). If
+// we reset the budget the instant the spawn succeeds, MAX_AUTO_RELAUNCHES is
+// never reached and the session relaunches forever. Gating the reset on real
+// uptime means repeated fast crashes accumulate toward the cap and the loop
+// terminates with a visible "keeps crashing" message instead.
+const HEALTHY_UPTIME_MS = 60_000;
+
 const VSCODE_EDITOR_CONTAINER_PORT = 13337;
 const CODEX_APP_SERVER_CONTAINER_PORT = Number(
   process.env.COMPANION_CODEX_CONTAINER_WS_PORT || "4502",
@@ -135,6 +145,10 @@ export class SessionOrchestrator {
   private intentionalKills = new Set<string>();
   // Timers for proactive keepalive relaunches (for cancellation on delete)
   private keepaliveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Timers that restore a session's crash budget once it has stayed connected
+  // for HEALTHY_UPTIME_MS after a relaunch. Cancelled if it re-crashes first, so
+  // a crash-loop accumulates toward MAX_AUTO_RELAUNCHES instead of resetting.
+  private healthyResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   // Idempotency guard for initialize()
   private _initialized = false;
@@ -200,6 +214,9 @@ export class SessionOrchestrator {
     // jobs) stay alive. Intentional kills (idle-kill, manual delete/archive)
     // are excluded via the intentionalKills set.
     companionBus.on("session:exited", ({ sessionId }) => {
+      // The session died before earning its budget back — cancel the pending
+      // "healthy" reset so this crash counts toward MAX_AUTO_RELAUNCHES.
+      this.cancelHealthyReset(sessionId);
       this.scheduleProactiveRelaunch(sessionId);
     });
 
@@ -696,6 +713,7 @@ export class SessionOrchestrator {
 
     this.intentionalKills.add(sessionId);
     this.cancelKeepaliveTimer(sessionId);
+    this.cancelHealthyReset(sessionId);
     this.wsBridge.cancelDisconnectTimer(sessionId);
     await this.launcher.kill(sessionId);
     containerManager.removeContainer(sessionId);
@@ -713,6 +731,7 @@ export class SessionOrchestrator {
   async deleteSession(sessionId: string): Promise<DeleteSessionResult> {
     this.intentionalKills.add(sessionId);
     this.cancelKeepaliveTimer(sessionId);
+    this.cancelHealthyReset(sessionId);
     this.wsBridge.cancelDisconnectTimer(sessionId);
     await this.launcher.kill(sessionId);
     containerManager.removeContainer(sessionId);
@@ -741,6 +760,7 @@ export class SessionOrchestrator {
   clearAutoRelaunchCount(sessionId: string): void {
     this.autoRelaunchCounts.delete(sessionId);
     this.relaunchExhaustedNotified.delete(sessionId);
+    this.cancelHealthyReset(sessionId);
   }
 
   // ── Event registration ─────────────────────────────────────────────────────
@@ -811,7 +831,11 @@ export class SessionOrchestrator {
       log.warn("orchestrator", "Auto-relaunch limit reached", { sessionId, maxAttempts: MAX_AUTO_RELAUNCHES });
       this.wsBridge.broadcastToSession(sessionId, {
         type: "error",
-        message: "Session keeps crashing. Please relaunch manually.",
+        message:
+          `This session restarted ${MAX_AUTO_RELAUNCHES} times in a row without staying up — ` +
+          `the underlying CLI keeps exiting right after it resumes (often a single turn that ` +
+          `fails the same way every time). Auto-restart is paused so it stops looping. ` +
+          `Use Reconnect to try again; if it keeps crashing, edit or remove the last message and resend.`,
       });
       this.relaunchExhaustedNotified.add(sessionId);
       this.relaunchingSet.delete(sessionId);
@@ -832,12 +856,17 @@ export class SessionOrchestrator {
           this.wsBridge.broadcastToSession(sessionId, { type: "error", message: result.error });
         } else if (result.ok) {
           metricsCollector.recordRelaunchSucceeded();
-          this.autoRelaunchCounts.delete(sessionId);
-          this.relaunchExhaustedNotified.delete(sessionId);
           // Clear intentionalKills so future crashes can use proactive keepalive.
           // After a successful relaunch, the session is alive again — any prior
           // idle-kill intent no longer applies.
           this.intentionalKills.delete(sessionId);
+          // Do NOT reset the crash budget here. The process spawned, but it may
+          // re-crash within seconds while replaying the same poisoned turn.
+          // Only restore the budget once it has proven healthy by staying
+          // connected for HEALTHY_UPTIME_MS (see scheduleHealthyReset). If it
+          // dies first, session:exited cancels that timer and the count sticks,
+          // so consecutive fast crashes converge on MAX_AUTO_RELAUNCHES.
+          this.scheduleHealthyReset(sessionId);
         }
         // ok=false without error: keep count to preserve the retry budget
       } finally {
@@ -909,6 +938,44 @@ export class SessionOrchestrator {
     if (timer) {
       clearTimeout(timer);
       this.keepaliveTimers.delete(sessionId);
+    }
+  }
+
+  // ── Private: Healthy-uptime budget reset ─────────────────────────────────────
+
+  /**
+   * After a successful relaunch, arm a timer that restores the session's crash
+   * budget only once it has stayed connected for HEALTHY_UPTIME_MS. This is the
+   * counterpart to the increment in handleAutoRelaunch: a session that keeps
+   * dying before this fires never gets its budget back, so a crash-loop reaches
+   * MAX_AUTO_RELAUNCHES and stops. A session that genuinely recovers (stays up)
+   * gets a fresh budget for any future, unrelated crash.
+   */
+  private scheduleHealthyReset(sessionId: string): void {
+    this.cancelHealthyReset(sessionId);
+    const timer = setTimeout(() => {
+      this.healthyResetTimers.delete(sessionId);
+      const info = this.launcher.getSession(sessionId);
+      if (!info || info.archived) return;
+      // Still alive after the stable window → genuine recovery.
+      if (!this.wsBridge.isCliConnected(sessionId)) return;
+      if ((this.autoRelaunchCounts.get(sessionId) ?? 0) > 0) {
+        log.info("orchestrator", "Session stable after relaunch; restoring crash budget", {
+          sessionId,
+          uptimeMs: HEALTHY_UPTIME_MS,
+        });
+      }
+      this.autoRelaunchCounts.delete(sessionId);
+      this.relaunchExhaustedNotified.delete(sessionId);
+    }, HEALTHY_UPTIME_MS);
+    this.healthyResetTimers.set(sessionId, timer);
+  }
+
+  private cancelHealthyReset(sessionId: string): void {
+    const timer = this.healthyResetTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this.healthyResetTimers.delete(sessionId);
     }
   }
 
