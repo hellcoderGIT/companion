@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.101.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.101.0...companion-v0.101.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* **orchestrator:** stop infinite crash-relaunch loop on poisoned resume ([#26](https://github.com/hellcoderGIT/companion/issues/26)) ([58af44d](https://github.com/hellcoderGIT/companion/commit/58af44d2634d2edb981144fab48a200f970be022))
+
 ## [0.101.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.100.0...companion-v0.101.0) (2026-06-12)
 
 
