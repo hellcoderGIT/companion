@@ -260,6 +260,22 @@ function AskUserQuestionDisplay({
   const [customText, setCustomText] = useState<Record<string, string>>({});
   const [showCustom, setShowCustom] = useState<Record<string, boolean>>({});
 
+  // The CLI's AskUserQuestion handler looks up each question's answer by the
+  // question's *text*, not by its position. Internally we key UI state by index
+  // (questions can share text / be empty), but the wire payload must be keyed by
+  // `question`. Keying by index made the answer invisible to the model — it
+  // received "User has answered your questions: ." with an empty body and just
+  // guessed. Map index-keyed state to question-text keys before sending.
+  function toAnswers(indexed: Record<string, string>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [idx, value] of Object.entries(indexed)) {
+      const q = questions[Number(idx)] as Record<string, unknown> | undefined;
+      const key = typeof q?.question === "string" && q.question ? q.question : idx;
+      out[key] = value;
+    }
+    return out;
+  }
+
   function handleOptionClick(questionIdx: number, label: string) {
     const key = String(questionIdx);
     setSelections((prev) => ({ ...prev, [key]: label }));
@@ -267,7 +283,7 @@ function AskUserQuestionDisplay({
 
     // Auto-submit if single question
     if (questions.length <= 1) {
-      onSelect({ [key]: label });
+      onSelect(toAnswers({ [key]: label }));
     }
   }
 
@@ -278,7 +294,7 @@ function AskUserQuestionDisplay({
     setSelections((prev) => ({ ...prev, [key]: text }));
 
     if (questions.length <= 1) {
-      onSelect({ [key]: text });
+      onSelect(toAnswers({ [key]: text }));
     }
   }
 
@@ -318,7 +334,7 @@ function AskUserQuestionDisplay({
   }
 
   function handleSubmitAll() {
-    onSelect(selections);
+    onSelect(toAnswers(selections));
   }
 
   if (questions.length === 0) {
