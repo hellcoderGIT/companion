@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.101.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.101.1...companion-v0.101.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* **permission:** key AskUserQuestion answers by question text ([#28](https://github.com/hellcoderGIT/companion/issues/28)) ([ecc9d07](https://github.com/hellcoderGIT/companion/commit/ecc9d071844d43f522b8d8e25d3033411a75f969))
+
 ## [0.101.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.101.0...companion-v0.101.1) (2026-06-13)
 
 
