@@ -431,9 +431,10 @@ describe("AskUserQuestionDisplay", () => {
       request_id: "req-ask-1",
       behavior: "allow",
     }));
-    // The updated_input spreads permission.input and adds { answers: { "0": "Red" } }
+    // The updated_input spreads permission.input and adds answers keyed by the
+    // question *text* (not index) — that's how the CLI looks the answer up.
     const call = mockSendToSession.mock.calls[0][1];
-    expect(call.updated_input.answers).toEqual({ "0": "Red" });
+    expect(call.updated_input.answers).toEqual({ "Which color?": "Red" });
   });
 
   it("renders fallback for simple question string", () => {
@@ -487,7 +488,7 @@ describe("AskUserQuestionDisplay", () => {
     fireEvent.click(screen.getByText("Submit answers"));
 
     const payload = mockSendToSession.mock.calls[0][1];
-    expect(payload.updated_input.answers).toEqual({ "1": "Custom response" });
+    expect(payload.updated_input.answers).toEqual({ "Add context": "Custom response" });
   });
 
   it("shows Enter hint for single-question custom Other input", () => {
@@ -540,7 +541,7 @@ describe("AskUserQuestionDisplay", () => {
     fireEvent.click(screen.getByText("Submit answers"));
 
     const payload = mockSendToSession.mock.calls[0][1];
-    expect(payload.updated_input.answers).toEqual({ "0": "Keep" });
+    expect(payload.updated_input.answers).toEqual({ "Primary": "Keep" });
   });
 });
 
