@@ -189,6 +189,16 @@ describe("launch", () => {
     expect(info.createdAt).toBeGreaterThan(0);
   });
 
+  it("records userName on the session info so it persists and can be filtered on", () => {
+    const info = launcher.launch({ cwd: "/tmp/project", userName: "Moritz" });
+    expect(info.userName).toBe("Moritz");
+  });
+
+  it("leaves userName undefined when not provided", () => {
+    const info = launcher.launch({ cwd: "/tmp/project" });
+    expect(info.userName).toBeUndefined();
+  });
+
   it("spawns CLI with the stdio stream-json transport and flags", () => {
     launcher.launch({ cwd: "/tmp/project" });
 

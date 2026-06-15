@@ -451,13 +451,32 @@ export function Sidebar() {
       cronJobName: bridgeState?.cronJobName || sdkInfo?.cronJobName,
       agentId: bridgeState?.agentId || sdkInfo?.agentId,
       agentName: bridgeState?.agentName || sdkInfo?.agentName,
+      userName: sdkInfo?.userName,
     };
   }).sort((a, b) => b.createdAt - a.createdAt);
 
-  const activeSessions = allSessionList.filter((s) => !s.archived && !s.cronJobId && !s.agentId);
-  const cronSessions = allSessionList.filter((s) => !s.archived && !!s.cronJobId);
-  const agentSessions = allSessionList.filter((s) => !s.archived && !!s.agentId);
-  const archivedSessions = allSessionList.filter((s) => s.archived);
+  // ── User filter ──────────────────────────────────────────────────────────
+  // Distinct user names across all sessions, used to populate the filter dropdown.
+  // Only shown once at least one session carries a user name (i.e. after sessions load).
+  const userOptions = useMemo(
+    () => Array.from(new Set(allSessionList.map((s) => s.userName).filter((u): u is string => !!u))).sort(),
+    [allSessionList],
+  );
+  // "__all__" (default) shows everything; "__none__" shows sessions without a user.
+  const [userFilter, setUserFilter] = useState<string>("__all__");
+  const matchesUserFilter = (s: SessionItemType) =>
+    userFilter === "__all__"
+      ? true
+      : userFilter === "__none__"
+        ? !s.userName
+        : s.userName === userFilter;
+  const hasUnassignedSessions = allSessionList.some((s) => !s.userName);
+  const visibleSessionList = allSessionList.filter(matchesUserFilter);
+
+  const activeSessions = visibleSessionList.filter((s) => !s.archived && !s.cronJobId && !s.agentId);
+  const cronSessions = visibleSessionList.filter((s) => !s.archived && !!s.cronJobId);
+  const agentSessions = visibleSessionList.filter((s) => !s.archived && !!s.agentId);
+  const archivedSessions = visibleSessionList.filter((s) => s.archived);
   const currentSession = currentSessionId ? allSessionList.find((s) => s.id === currentSessionId) : null;
   const logoSrc = currentSession?.backendType === "codex" ? "/logo-codex.svg" : "/logo.svg";
   const [showCronSessions, setShowCronSessions] = useState(true);
@@ -521,6 +540,26 @@ export function Sidebar() {
           </button>
         </div>
       </div>
+
+      {/* User filter — only rendered once sessions with a user name exist */}
+      {userOptions.length > 0 && (
+        <div className="px-3.5 pb-2">
+          <label className="sr-only" htmlFor="sidebar-user-filter">Filter sessions by user</label>
+          <select
+            id="sidebar-user-filter"
+            value={userFilter}
+            onChange={(e) => setUserFilter(e.target.value)}
+            aria-label="Filter sessions by user"
+            className="w-full px-2 py-1.5 text-[12px] bg-cc-card border border-cc-border rounded-lg text-cc-fg focus:outline-none focus:border-cc-primary cursor-pointer"
+          >
+            <option value="__all__">All users</option>
+            {userOptions.map((u) => (
+              <option key={u} value={u}>{u}</option>
+            ))}
+            {hasUnassignedSessions && <option value="__none__">No user data</option>}
+          </select>
+        </div>
+      )}
 
       {/* Container archive confirmation */}
       {confirmArchiveId && (

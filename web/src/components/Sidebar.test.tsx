@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { SessionState, SdkSessionInfo } from "../types.js";
 
@@ -180,6 +180,64 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     // The session label defaults to model name
     expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument();
+  });
+
+  // ─── User filter ────────────────────────────────────────────────────────────
+  it("does not render the user filter when no session has a user name", () => {
+    const session = makeSession("s1");
+    mockState = createMockState({
+      sessions: new Map([["s1", session]]),
+      sdkSessions: [makeSdkSession("s1")],
+    });
+    render(<Sidebar />);
+    expect(screen.queryByLabelText("Filter sessions by user")).not.toBeInTheDocument();
+  });
+
+  it("shows a user filter and narrows the list to the selected user", () => {
+    // Two sessions owned by different users — the filter should be able to
+    // isolate a single user's sessions while defaulting to showing all.
+    const sessionA = makeSession("a1", { model: "model-alice" });
+    const sessionB = makeSession("b1", { model: "model-bob" });
+    mockState = createMockState({
+      sessions: new Map([["a1", sessionA], ["b1", sessionB]]),
+      sdkSessions: [
+        makeSdkSession("a1", { model: "model-alice", userName: "Alice" }),
+        makeSdkSession("b1", { model: "model-bob", userName: "Bob" }),
+      ],
+    });
+
+    render(<Sidebar />);
+    const filter = screen.getByLabelText("Filter sessions by user") as HTMLSelectElement;
+    // Default ("All users") shows both sessions.
+    expect(screen.getByText("model-alice")).toBeInTheDocument();
+    expect(screen.getByText("model-bob")).toBeInTheDocument();
+    // Both users are listed as options.
+    expect(within(filter).getByRole("option", { name: "Alice" })).toBeInTheDocument();
+    expect(within(filter).getByRole("option", { name: "Bob" })).toBeInTheDocument();
+
+    // Selecting "Alice" hides Bob's session.
+    fireEvent.change(filter, { target: { value: "Alice" } });
+    expect(screen.getByText("model-alice")).toBeInTheDocument();
+    expect(screen.queryByText("model-bob")).not.toBeInTheDocument();
+  });
+
+  it("offers a 'No user data' option when some sessions lack a user name", () => {
+    const sessionA = makeSession("a1", { model: "model-alice" });
+    const sessionB = makeSession("b1", { model: "model-anon" });
+    mockState = createMockState({
+      sessions: new Map([["a1", sessionA], ["b1", sessionB]]),
+      sdkSessions: [
+        makeSdkSession("a1", { model: "model-alice", userName: "Alice" }),
+        makeSdkSession("b1", { model: "model-anon" }),
+      ],
+    });
+
+    render(<Sidebar />);
+    const filter = screen.getByLabelText("Filter sessions by user") as HTMLSelectElement;
+    fireEvent.change(filter, { target: { value: "__none__" } });
+    // Only the session without a user name remains.
+    expect(screen.getByText("model-anon")).toBeInTheDocument();
+    expect(screen.queryByText("model-alice")).not.toBeInTheDocument();
   });
 
   it("session items show model name or session ID", () => {

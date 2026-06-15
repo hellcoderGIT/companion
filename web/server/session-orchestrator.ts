@@ -84,6 +84,8 @@ export interface CreateSessionRequest {
   container?: { image?: string; ports?: number[]; volumes?: string[] };
   resumeSessionAt?: string;
   forkSession?: boolean;
+  /** Name of the human creating this session (injected into prompts, used for filtering). */
+  userName?: string;
 }
 
 export type CreateSessionResult =
@@ -594,6 +596,7 @@ export class SessionOrchestrator {
           allowedTools: body.allowedTools,
           env: envVars,
           backendType: backend,
+          userName: body.userName,
           containerId,
           containerName,
           containerImage,
