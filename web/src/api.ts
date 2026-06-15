@@ -227,6 +227,7 @@ export interface CreateSessionOpts {
   container?: ContainerCreateOpts;
   resumeSessionAt?: string;
   forkSession?: boolean;
+  userName?: string;
   linearConnectionId?: string;
   linearIssue?: {
     identifier: string;

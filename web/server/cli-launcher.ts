@@ -90,6 +90,8 @@ export interface SdkSessionInfo {
   archived?: boolean;
   /** User-facing session name */
   name?: string;
+  /** Name of the human who created this session (injected into prompts, used for filtering) */
+  userName?: string;
   /** Which backend this session uses */
   backendType?: BackendType;
   /** Git branch from bridge state (enriched by REST API) */
@@ -152,6 +154,8 @@ export interface LaunchOptions {
   allowedTools?: string[];
   env?: Record<string, string>;
   backendType?: BackendType;
+  /** Name of the human creating this session. */
+  userName?: string;
   /** Codex sandbox mode. */
   codexSandbox?: "workspace-write" | "danger-full-access";
   /** Whether Codex internet/web search should be enabled for this session. */
@@ -302,6 +306,8 @@ export class CliLauncher {
       createdAt: Date.now(),
       backendType,
     };
+
+    if (options.userName) info.userName = options.userName;
 
     if (options.resumeSessionAt) {
       info.resumeSessionAt = options.resumeSessionAt;

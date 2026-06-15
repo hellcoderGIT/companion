@@ -29,6 +29,7 @@ const { mockApi, createSessionStreamMock, mockStoreState, mockStoreGetState } = 
     listPrompts: vi.fn(),
     listLinearConnections: vi.fn(),
     listSandboxes: vi.fn(),
+    renameSession: vi.fn(),
   },
   createSessionStreamMock: vi.fn(),
   mockStoreState: {
@@ -105,8 +106,12 @@ describe("HomePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    // A name is required before a session can be created; seed it the way the real
+    // app pre-fills it from localStorage so the existing send-flow tests apply.
+    window.localStorage.setItem("cc-user-name", "Tester");
     mockStoreGetState.mockReturnValue(buildStoreMock());
 
+    mockApi.renameSession.mockResolvedValue({ ok: true, name: "" });
     mockApi.getHome.mockResolvedValue({ home: "/home/ubuntu", cwd: "/repo" });
     mockApi.listEnvs.mockResolvedValue([]);
     mockApi.getBackends.mockResolvedValue([{ id: "claude", name: "Claude", available: true }]);
@@ -678,9 +683,91 @@ describe("HomePage", () => {
         "new-session-abc",
         expect.objectContaining({
           role: "user",
-          content: "Fix the login bug",
+          // The author's name is injected into the initial message sent to the agent.
+          content: "[Tester]: Fix the login bug",
         }),
       );
+    });
+  });
+
+  // ─── Identity fields (name + session prefix) ────────────────────────────────
+  describe("identity fields", () => {
+    it("renders the name and session prefix inputs", async () => {
+      render(<HomePage />);
+      expect(await screen.findByLabelText("Your name")).toBeInTheDocument();
+      expect(screen.getByLabelText("Session prefix")).toBeInTheDocument();
+    });
+
+    it("pre-fills name and prefix from localStorage and persists edits", async () => {
+      // beforeEach seeds cc-user-name="Tester"; the input should reflect that and
+      // writes should be persisted so the fields don't need re-entering next time.
+      render(<HomePage />);
+      const nameInput = (await screen.findByLabelText("Your name")) as HTMLInputElement;
+      expect(nameInput.value).toBe("Tester");
+
+      fireEvent.change(nameInput, { target: { value: "Moritz" } });
+      expect(localStorage.getItem("cc-user-name")).toBe("Moritz");
+
+      const prefixInput = screen.getByLabelText("Session prefix");
+      fireEvent.change(prefixInput, { target: { value: "billing" } });
+      expect(localStorage.getItem("cc-session-prefix")).toBe("billing");
+    });
+
+    it("blocks session creation and shows an error when the name is empty", async () => {
+      // Clear the seeded name to simulate a first-time user who hasn't filled it in.
+      localStorage.removeItem("cc-user-name");
+      render(<HomePage />);
+      await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+      const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+      fireEvent.change(textarea, { target: { value: "Do the thing" } });
+
+      // Send button stays disabled without a name; submitting via Enter also no-ops.
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      expect(createSessionStreamMock).not.toHaveBeenCalled();
+      expect(screen.getByText(/enter your name/i)).toBeInTheDocument();
+    });
+
+    it("prefixes the session name and passes the user name through on create", async () => {
+      const storeMock = buildStoreMock();
+      mockStoreGetState.mockReturnValue(storeMock);
+      createSessionStreamMock.mockResolvedValue({
+        sessionId: "new-session-xyz",
+        state: "starting",
+        cwd: "/repo",
+      });
+
+      render(<HomePage />);
+      await waitFor(() => expect(screen.getByText("repo")).toBeInTheDocument());
+
+      fireEvent.change(screen.getByLabelText("Session prefix"), { target: { value: "billing" } });
+      const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+      fireEvent.change(textarea, { target: { value: "Fix it" } });
+      fireEvent.click(screen.getByTitle("Send message"));
+
+      // userName flows into the create payload...
+      await waitFor(() => {
+        expect(createSessionStreamMock).toHaveBeenCalledWith(
+          expect.objectContaining({ userName: "Tester" }),
+          expect.any(Function),
+        );
+      });
+
+      // ...and the generated session name is prefixed with "{prefix}_".
+      await waitFor(() => {
+        expect(storeMock.setSessionName).toHaveBeenCalledWith(
+          "new-session-xyz",
+          expect.stringMatching(/^billing_/),
+        );
+      });
+
+      // The prefixed name is also persisted server-side so other clients see it.
+      await waitFor(() => {
+        expect(mockApi.renameSession).toHaveBeenCalledWith(
+          "new-session-xyz",
+          expect.stringMatching(/^billing_/),
+        );
+      });
     });
   });
 

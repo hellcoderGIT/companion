@@ -21,6 +21,8 @@ export interface SessionItem {
   cronJobName?: string;
   agentId?: string;
   agentName?: string;
+  /** Name of the human who created this session (used for the sidebar user filter) */
+  userName?: string;
 }
 
 export interface ProjectGroup {

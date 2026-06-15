@@ -112,6 +112,8 @@ export interface SdkSessionInfo {
   containerName?: string;
   containerImage?: string;
   name?: string;
+  /** Name of the human who created this session (injected into prompts, used for filtering) */
+  userName?: string;
   backendType?: BackendType;
   gitBranch?: string;
   gitAhead?: number;

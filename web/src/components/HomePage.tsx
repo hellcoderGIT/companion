@@ -99,6 +99,10 @@ function formatTimeAgo(timestamp: number): string {
 
 export function HomePage() {
   const [text, setText] = useState("");
+  // Identity fields: who is creating the session, and an optional prefix for the
+  // generated session name. Persisted to localStorage so they pre-fill next time.
+  const [userName, setUserName] = useState(() => localStorage.getItem("cc-user-name") || "");
+  const [sessionPrefix, setSessionPrefix] = useState(() => localStorage.getItem("cc-session-prefix") || "");
   const [backend, setBackend] = useState<BackendType>(() =>
     (localStorage.getItem("cc-backend") as BackendType) || "claude",
   );
@@ -579,7 +583,10 @@ export function HomePage() {
     }
   }
 
-  function buildInitialMessage(msg: string): string {
+  function buildInitialMessage(rawMsg: string): string {
+    // Tag the request with the author's name so the agent knows who it's talking to.
+    const name = userName.trim();
+    const msg = name ? `[${name}]: ${rawMsg}` : rawMsg;
     if (!selectedLinearIssue) return msg;
     const description = (selectedLinearIssue.description ?? "").trim();
     const context = [
@@ -598,6 +605,11 @@ export function HomePage() {
   async function handleSend() {
     const msg = text.trim();
     if (!msg || sending) return;
+
+    if (!userName.trim()) {
+      setError("Please enter your name before starting a session.");
+      return;
+    }
 
     setSending(true);
     setError("");
@@ -666,6 +678,7 @@ export function HomePage() {
           codexInternetAccess: backend === "codex" ? true : undefined,
           resumeSessionAt: effectiveResumeSessionAt,
           forkSession: effectiveForkSession,
+          userName: userName.trim() || undefined,
           linearConnectionId: selectedLinearIssue ? (selectedLinearConnectionId || undefined) : undefined,
           linearIssue: selectedLinearIssue ? {
             identifier: selectedLinearIssue.identifier,
@@ -695,15 +708,22 @@ export function HomePage() {
           backendType: (result.backendType as BackendType | undefined) || backend,
           model,
           permissionMode: mode,
+          userName: userName.trim() || undefined,
           resumeSessionAt: effectiveResumeSessionAt,
           forkSession: effectiveResumeSessionAt ? effectiveForkSession === true : undefined,
         },
       ]);
 
-      // Assign a random session name
+      // Assign a random session name, optionally prefixed: {prefix}_{Generated Name}
       const existingNames = new Set(useStore.getState().sessionNames.values());
-      const sessionName = generateUniqueSessionName(existingNames);
+      const generatedName = generateUniqueSessionName(existingNames);
+      const prefix = sessionPrefix.trim();
+      const sessionName = prefix ? `${prefix}_${generatedName}` : generatedName;
       useStore.getState().setSessionName(sessionId, sessionName);
+      // Persist server-side too (mirrors the sidebar rename flow) so the name —
+      // including the prefix — is visible from other browsers/clients, not just
+      // the one that created the session.
+      api.renameSession(sessionId, sessionName).catch(() => {});
 
       // Save cwd to recent dirs
       if (effectiveCwd) addRecentDir(effectiveCwd);
@@ -854,7 +874,7 @@ export function HomePage() {
     }
   }, [gitRepoInfo]);
 
-  const canSend = text.trim().length > 0 && !sending;
+  const canSend = text.trim().length > 0 && userName.trim().length > 0 && !sending;
 
   return (
     <div className="flex-1 h-full flex flex-col items-center px-3 sm:px-6 pb-6 pb-safe overflow-y-auto overscroll-y-contain">
@@ -873,6 +893,46 @@ export function HomePage() {
               Moritz Edition
             </span>
           </h1>
+        </div>
+
+        {/* Identity fields — who is creating the session + optional session-name prefix */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+          <label className="flex-1 flex flex-col gap-1">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-cc-muted">
+              Your name <span className="text-cc-error">*</span>
+            </span>
+            <input
+              type="text"
+              value={userName}
+              onChange={(e) => {
+                const v = e.target.value;
+                setUserName(v);
+                localStorage.setItem("cc-user-name", v);
+              }}
+              placeholder="e.g. Moritz"
+              aria-label="Your name"
+              aria-required="true"
+              aria-invalid={userName.trim().length === 0}
+              className="w-full px-3 py-2 text-sm bg-cc-card border border-cc-border rounded-lg focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
+            />
+          </label>
+          <label className="flex-1 flex flex-col gap-1">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-cc-muted">
+              Session prefix <span className="text-cc-muted/60 normal-case">(optional)</span>
+            </span>
+            <input
+              type="text"
+              value={sessionPrefix}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSessionPrefix(v);
+                localStorage.setItem("cc-session-prefix", v);
+              }}
+              placeholder="e.g. billing"
+              aria-label="Session prefix"
+              className="w-full px-3 py-2 text-sm bg-cc-card border border-cc-border rounded-lg focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
+            />
+          </label>
         </div>
 
         {/* Hidden file input */}
