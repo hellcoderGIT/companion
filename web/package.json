@@ -1,6 +1,6 @@
 {
   "name": "@hellcoder/companion",
-  "version": "0.101.1",
+  "version": "0.101.2",
   "type": "module",
   "description": "Web UI for launching and interacting with Claude Code agents — Moritz Edition (fork of the-companion)",
   "license": "MIT",
