@@ -259,6 +259,38 @@ describe("TaskPanel", () => {
   });
 });
 
+// The Identity section lets users set their name + session prefix from the
+// Context panel (rarely-changed, persisted to localStorage and read by the
+// new-session form at creation time).
+describe("TaskPanel — Identity section", () => {
+  beforeEach(() => {
+    localStorage.removeItem("cc-user-name");
+    localStorage.removeItem("cc-session-prefix");
+  });
+
+  it("renders the Identity name and prefix inputs", () => {
+    render(<TaskPanel sessionId="s1" />);
+    expect(screen.getByLabelText("Your name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Session prefix")).toBeInTheDocument();
+  });
+
+  it("pre-fills from localStorage", () => {
+    localStorage.setItem("cc-user-name", "Moritz");
+    localStorage.setItem("cc-session-prefix", "billing");
+    render(<TaskPanel sessionId="s1" />);
+    expect((screen.getByLabelText("Your name") as HTMLInputElement).value).toBe("Moritz");
+    expect((screen.getByLabelText("Session prefix") as HTMLInputElement).value).toBe("billing");
+  });
+
+  it("persists edits to localStorage so the new-session form can read them", () => {
+    render(<TaskPanel sessionId="s1" />);
+    fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "Moritz" } });
+    expect(localStorage.getItem("cc-user-name")).toBe("Moritz");
+    fireEvent.change(screen.getByLabelText("Session prefix"), { target: { value: "billing" } });
+    expect(localStorage.getItem("cc-session-prefix")).toBe("billing");
+  });
+});
+
 describe("CodexRateLimitsSection", () => {
   it("renders nothing when no rate limits data", () => {
     // Session exists but has no codex_rate_limits
