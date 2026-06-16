@@ -118,6 +118,60 @@ function PanelSection({
   );
 }
 
+// ─── Identity — your name + optional session prefix (applied to new sessions) ─
+// These are global, rarely-changed preferences persisted to localStorage. The
+// new-session form reads them from there at creation time, so editing here only
+// affects sessions created afterwards (not the one currently open).
+
+function IdentitySection() {
+  const [name, setName] = useState(() => localStorage.getItem("cc-user-name") || "");
+  const [prefix, setPrefix] = useState(() => localStorage.getItem("cc-session-prefix") || "");
+
+  return (
+    <PanelSection id="identity" label="Identity">
+      <div className="px-4 pb-3 pt-1 flex flex-col gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-cc-muted">Your name</span>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => {
+              const v = e.target.value;
+              setName(v);
+              localStorage.setItem("cc-user-name", v);
+            }}
+            placeholder="e.g. Moritz"
+            aria-label="Your name"
+            className="w-full px-2.5 py-1.5 text-[13px] bg-cc-input-bg border border-cc-border rounded-md focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-cc-muted">
+            Session prefix <span className="text-cc-muted/60">(optional)</span>
+          </span>
+          <input
+            type="text"
+            value={prefix}
+            onChange={(e) => {
+              const v = e.target.value;
+              setPrefix(v);
+              localStorage.setItem("cc-session-prefix", v);
+            }}
+            placeholder="e.g. billing"
+            aria-label="Session prefix"
+            className="w-full px-2.5 py-1.5 text-[13px] bg-cc-input-bg border border-cc-border rounded-md focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
+          />
+        </label>
+        <p className="text-[10px] text-cc-muted/70 leading-snug">
+          Applied to new sessions: your name prefixes the first message as
+          {" "}<span className="font-mono-code">[Name]:</span> and the prefix names
+          sessions <span className="font-mono-code">prefix_Name</span>.
+        </p>
+      </div>
+    </PanelSection>
+  );
+}
+
 // ─── Shared progress meter ──────────────────────────────────────────────────
 
 function barColor(pct: number): string {
@@ -1144,6 +1198,7 @@ export function TaskPanel({ sessionId }: { sessionId: string }) {
       ) : (
         <>
           <div data-testid="task-panel-content" className="min-h-0 flex-1 overflow-y-auto">
+            <IdentitySection />
             <ClaudeConfigBrowser sessionId={sessionId} />
             {applicableSections
               .filter((id) => config.enabled[id] !== false)
