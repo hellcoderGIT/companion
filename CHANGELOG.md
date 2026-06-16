@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.102.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.101.2...companion-v0.102.0) (2026-06-16)
+
+
+### Features
+
+* **session:** add user identity, name prefix, and sidebar user filter ([#30](https://github.com/hellcoderGIT/companion/issues/30)) ([7025b26](https://github.com/hellcoderGIT/companion/commit/7025b263ce8e6d038861b8793cffc5565955c0ca))
+
+
+### Code Refactoring
+
+* **session:** move identity inputs to Context panel, make name optional ([#32](https://github.com/hellcoderGIT/companion/issues/32)) ([dcfb68f](https://github.com/hellcoderGIT/companion/commit/dcfb68fb85fd9614d8778bfccfb7d2ad3cf0cf7e))
+
 ## [0.101.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.101.1...companion-v0.101.2) (2026-06-15)
 
 
