@@ -99,12 +99,14 @@ function formatTimeAgo(timestamp: number): string {
 
 export function HomePage() {
   const [text, setText] = useState("");
-  // Identity: who is creating the session, and an optional prefix for the generated
-  // session name. Both are optional and edited from the Context panel (TaskPanel);
-  // here we just read whatever was last saved to localStorage and apply it at
-  // creation time — name is injected into the first message, prefix names the session.
-  const userName = localStorage.getItem("cc-user-name") || "";
-  const sessionPrefix = localStorage.getItem("cc-session-prefix") || "";
+  // Identity: who is creating the session + an optional session-name prefix. These
+  // are normally edited from the Context panel (TaskPanel) and persisted to
+  // localStorage. But the Context panel only exists inside an open session, so on a
+  // fresh browser with no name saved yet we surface the inputs here and require a
+  // name. Once a name is saved, the home screen stays clean and just reuses it.
+  const [identityInputsShown] = useState(() => !(localStorage.getItem("cc-user-name") || "").trim());
+  const [userName, setUserName] = useState(() => localStorage.getItem("cc-user-name") || "");
+  const [sessionPrefix, setSessionPrefix] = useState(() => localStorage.getItem("cc-session-prefix") || "");
   const [backend, setBackend] = useState<BackendType>(() =>
     (localStorage.getItem("cc-backend") as BackendType) || "claude",
   );
@@ -608,6 +610,11 @@ export function HomePage() {
     const msg = text.trim();
     if (!msg || sending) return;
 
+    if (identityInputsShown && !userName.trim()) {
+      setError("Please enter your name before starting a session.");
+      return;
+    }
+
     setSending(true);
     setError("");
     setPullError("");
@@ -871,7 +878,8 @@ export function HomePage() {
     }
   }, [gitRepoInfo]);
 
-  const canSend = text.trim().length > 0 && !sending;
+  const canSend = text.trim().length > 0 && !sending
+    && (!identityInputsShown || userName.trim().length > 0);
 
   return (
     <div className="flex-1 h-full flex flex-col items-center px-3 sm:px-6 pb-6 pb-safe overflow-y-auto overscroll-y-contain">
@@ -891,6 +899,49 @@ export function HomePage() {
             </span>
           </h1>
         </div>
+
+        {/* Identity fields — only on a fresh browser with no saved name. Once a
+            name is set it's edited from the Context panel instead. */}
+        {identityInputsShown && (
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+            <label className="flex-1 flex flex-col gap-1">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-cc-muted">
+                Your name <span className="text-cc-error">*</span>
+              </span>
+              <input
+                type="text"
+                value={userName}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setUserName(v);
+                  localStorage.setItem("cc-user-name", v);
+                }}
+                placeholder="e.g. Moritz"
+                aria-label="Your name"
+                aria-required="true"
+                aria-invalid={userName.trim().length === 0}
+                className="w-full px-3 py-2 text-sm bg-cc-card border border-cc-border rounded-lg focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
+              />
+            </label>
+            <label className="flex-1 flex flex-col gap-1">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-cc-muted">
+                Session prefix <span className="text-cc-muted/60 normal-case">(optional)</span>
+              </span>
+              <input
+                type="text"
+                value={sessionPrefix}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSessionPrefix(v);
+                  localStorage.setItem("cc-session-prefix", v);
+                }}
+                placeholder="e.g. billing"
+                aria-label="Session prefix"
+                className="w-full px-3 py-2 text-sm bg-cc-card border border-cc-border rounded-lg focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
+              />
+            </label>
+          </div>
+        )}
 
         {/* Hidden file input */}
         <input
