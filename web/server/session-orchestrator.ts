@@ -7,6 +7,7 @@ import type { BackendType, CreationStepId } from "./session-types.js";
 import type { ContainerConfig, ContainerInfo } from "./container-manager.js";
 import { containerManager } from "./container-manager.js";
 import { imagePullManager } from "./image-pull-manager.js";
+import { isSandboxEnabled } from "./feature-flags.js";
 import * as envManager from "./env-manager.js";
 import * as sandboxManager from "./sandbox-manager.js";
 import * as gitUtils from "./git-utils.js";
@@ -314,8 +315,10 @@ export class SessionOrchestrator {
         envVars = { ...envVars, OPENAI_API_KEY: globalSettings.openaiApiKey };
       }
 
-      // Resolve sandbox configuration
-      const sandboxEnabled = body.sandboxEnabled === true;
+      // Resolve sandbox configuration. Sandbox is force-disabled when the feature
+      // flag is off (the upstream image is unmaintained), so no image is pulled
+      // and no privileged container is launched regardless of the request.
+      const sandboxEnabled = isSandboxEnabled() && body.sandboxEnabled === true;
       const companionSandbox = body.sandboxSlug ? sandboxManager.getSandbox(body.sandboxSlug) : null;
       if (sandboxEnabled && body.sandboxSlug && !companionSandbox) {
         return { ok: false, error: `Sandbox "${body.sandboxSlug}" not found`, status: 404 };

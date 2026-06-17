@@ -10,6 +10,7 @@ import { containerManager } from "./container-manager.js";
 import { hasContainerClaudeAuth } from "./claude-container-auth.js";
 import { hasContainerCodexAuth } from "./codex-container-auth.js";
 import { imagePullManager } from "./image-pull-manager.js";
+import { isSandboxEnabled } from "./feature-flags.js";
 import { getConnection } from "./linear-connections.js";
 import { buildLinearSystemPrompt } from "./linear-prompt-builder.js";
 import { discoverCommandsAndSkills } from "./commands-discovery.js";
@@ -100,8 +101,10 @@ export async function executeSessionCreation(
     console.warn(`[session-creation] Environment "${body.envSlug}" not found, ignoring`);
   }
 
-  // Resolve sandbox configuration
-  const sandboxEnabled = body.sandboxEnabled === true;
+  // Resolve sandbox configuration. Sandbox is force-disabled when the feature
+  // flag is off (the upstream image is unmaintained), so no image is pulled and
+  // no privileged container is launched regardless of the request.
+  const sandboxEnabled = isSandboxEnabled() && body.sandboxEnabled === true;
   const companionSandbox = body.sandboxSlug ? sandboxManager.getSandbox(body.sandboxSlug as string) : null;
   if (sandboxEnabled && body.sandboxSlug && !companionSandbox) {
     throw new SessionCreationError(`Sandbox "${body.sandboxSlug}" not found`, 404, "resolving_env");

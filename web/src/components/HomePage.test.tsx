@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -1422,6 +1422,18 @@ describe("HomePage", () => {
   });
 
   describe("Sandbox toggle", () => {
+    // Sandbox UI is hidden unless the feature flag is on (the upstream image is
+    // unmaintained), so enable it for these toggle tests.
+    beforeEach(() => { vi.stubEnv("VITE_SANDBOX_ENABLED", "true"); });
+    afterEach(() => { vi.unstubAllEnvs(); });
+
+    it("is hidden when the sandbox feature flag is disabled", async () => {
+      vi.unstubAllEnvs(); // flag off (default)
+      render(<HomePage />);
+      await screen.findByLabelText("Task description");
+      expect(screen.queryByText("Sandbox")).not.toBeInTheDocument();
+    });
+
     it("shows sandbox toggle for all backends", async () => {
       // The sandbox toggle should appear regardless of which backend is selected
       render(<HomePage />);

@@ -15,6 +15,7 @@ import { UpdateBanner } from "./components/UpdateBanner.js";
 import { SessionLaunchOverlay } from "./components/SessionLaunchOverlay.js";
 import { UpdateOverlay } from "./components/UpdateOverlay.js";
 import { DockerUpdateDialog } from "./components/DockerUpdateDialog.js";
+import { isSandboxEnabled } from "./feature-flags.js";
 import { OnboardingModal } from "./components/OnboardingModal.js";
 
 // Lazy-loaded route-level pages (not needed for initial render)
@@ -176,11 +177,14 @@ export default function App() {
     }).catch(() => {});
   }, [isAuthenticated]);
 
-  // Show Docker image update dialog if an app update just completed
+  // Show Docker image update dialog if an app update just completed (skip while
+  // sandbox support is disabled — we never pull the unmaintained upstream image).
   useEffect(() => {
     if (localStorage.getItem("companion_docker_prompt_pending") === "1") {
       localStorage.removeItem("companion_docker_prompt_pending");
-      useStore.getState().setDockerUpdateDialogOpen(true);
+      if (isSandboxEnabled()) {
+        useStore.getState().setDockerUpdateDialogOpen(true);
+      }
     }
   }, []);
 

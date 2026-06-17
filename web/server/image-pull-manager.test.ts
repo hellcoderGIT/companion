@@ -44,6 +44,8 @@ async function createManager() {
 
 describe("ImagePullManager", () => {
   beforeEach(() => {
+    // Sandbox is force-disabled by default; enable it so the pull paths run.
+    process.env.COMPANION_SANDBOX_ENABLED = "1";
     vi.clearAllMocks();
     mockImageExists.mockReturnValue(false);
     mockPullImage.mockResolvedValue(true);
@@ -124,6 +126,21 @@ describe("ImagePullManager", () => {
       manager.ensureImage("the-companion:latest"); // second call
 
       expect(mockPullImage).toHaveBeenCalledOnce();
+    });
+
+    it("refuses to pull the upstream image when sandbox support is disabled (hard backstop)", async () => {
+      // Security backstop: with the flag off, the unmaintained upstream image must
+      // never be pulled, regardless of which call path requested it.
+      delete process.env.COMPANION_SANDBOX_ENABLED;
+      mockImageExists.mockReturnValue(false);
+      const manager = await createManager();
+
+      manager.ensureImage("the-companion:latest");
+
+      const state = manager.getState("the-companion:latest");
+      expect(state.status).toBe("error");
+      expect(state.error).toMatch(/disabled/i);
+      expect(mockPullImage).not.toHaveBeenCalled();
     });
   });
 

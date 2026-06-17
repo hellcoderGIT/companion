@@ -42,6 +42,8 @@ import { registerEnvRoutes } from "./env-routes.js";
 let app: Hono;
 
 beforeEach(() => {
+  // Sandbox is force-disabled by default; enable it so build-base runs.
+  process.env.COMPANION_SANDBOX_ENABLED = "1";
   vi.clearAllMocks();
 
   app = new Hono();

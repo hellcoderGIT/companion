@@ -12,6 +12,7 @@ import {
 import { refreshServiceDefinition } from "../service.js";
 import { getSettings, updateSettings } from "../settings-manager.js";
 import { imagePullManager } from "../image-pull-manager.js";
+import { isSandboxEnabled } from "../feature-flags.js";
 import { checkCompat, getCompatState } from "../claude-compat-checker.js";
 import { pinToVersion, patchBinary, unpatch } from "../claude-patcher.js";
 import {
@@ -145,8 +146,9 @@ export function registerSystemRoutes(
           return;
         }
 
-        // Re-pull Docker image if auto-update is enabled
-        if (getSettings().dockerAutoUpdate) {
+        // Re-pull Docker image if auto-update is enabled (and sandbox isn't
+        // disabled — we never refresh the unmaintained upstream image).
+        if (isSandboxEnabled() && getSettings().dockerAutoUpdate) {
           try {
             console.log("[update] Re-pulling Docker image (dockerAutoUpdate enabled)...");
             imagePullManager.pull("the-companion:latest");
