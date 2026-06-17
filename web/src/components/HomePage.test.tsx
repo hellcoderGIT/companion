@@ -691,25 +691,26 @@ describe("HomePage", () => {
   });
 
   // ─── Identity (name + session prefix) ───────────────────────────────────────
-  // The inputs themselves now live in the Context panel (TaskPanel); the home
-  // form only *reads* the saved values from localStorage and applies them. Both
-  // are optional — a session can be created without a name.
+  // Inputs are normally edited from the Context panel. But on a fresh browser with
+  // no saved name, the home form surfaces them and requires a name (the Context
+  // panel isn't reachable until a session exists). Once a name is saved, the home
+  // form hides the inputs and reuses the saved values.
   describe("identity", () => {
-    it("does not render identity inputs on the home form (they moved to the Context panel)", async () => {
+    it("does not render identity inputs when a name is already saved", async () => {
+      // beforeEach seeds cc-user-name="Tester", so the inputs stay hidden.
       render(<HomePage />);
       await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
       expect(screen.queryByLabelText("Your name")).not.toBeInTheDocument();
       expect(screen.queryByLabelText("Session prefix")).not.toBeInTheDocument();
     });
 
-    it("creates a session without a name (name is optional)", async () => {
-      // First-time user with nothing saved: creation must still proceed, and the
-      // message is sent verbatim (no "[Name]:" prefix).
+    it("shows the inputs and requires a name when none is saved", async () => {
+      // First-time user with nothing saved: inputs appear and a name is mandatory.
       localStorage.removeItem("cc-user-name");
       const storeMock = buildStoreMock();
       mockStoreGetState.mockReturnValue(storeMock);
       createSessionStreamMock.mockResolvedValue({
-        sessionId: "new-session-noname",
+        sessionId: "new-session-firstrun",
         state: "starting",
         cwd: "/repo",
       });
@@ -717,20 +718,34 @@ describe("HomePage", () => {
       render(<HomePage />);
       await waitFor(() => expect(screen.getByText("repo")).toBeInTheDocument());
 
+      // Inputs are visible.
+      expect(screen.getByLabelText("Your name")).toBeInTheDocument();
+      expect(screen.getByLabelText("Session prefix")).toBeInTheDocument();
+
+      // The send button is disabled without a name, and submitting via Enter is
+      // blocked with an error.
       const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
       fireEvent.change(textarea, { target: { value: "Do the thing" } });
+      expect(screen.getByTitle("Send message")).toBeDisabled();
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      expect(createSessionStreamMock).not.toHaveBeenCalled();
+      expect(screen.getByText(/enter your name/i)).toBeInTheDocument();
+
+      // Entering a name persists it and lets creation proceed with injection.
+      fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "Moritz" } });
+      expect(localStorage.getItem("cc-user-name")).toBe("Moritz");
       fireEvent.click(screen.getByTitle("Send message"));
 
       await waitFor(() => {
         expect(createSessionStreamMock).toHaveBeenCalledWith(
-          expect.objectContaining({ userName: undefined }),
+          expect.objectContaining({ userName: "Moritz" }),
           expect.any(Function),
         );
       });
       await waitFor(() => {
         expect(storeMock.appendMessage).toHaveBeenCalledWith(
-          "new-session-noname",
-          expect.objectContaining({ role: "user", content: "Do the thing" }),
+          "new-session-firstrun",
+          expect.objectContaining({ role: "user", content: "[Moritz]: Do the thing" }),
         );
       });
     });
