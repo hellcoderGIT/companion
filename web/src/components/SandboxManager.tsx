@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api, type CompanionSandbox, type ImagePullState } from "../api.js";
+import { isSandboxEnabled } from "../feature-flags.js";
 
 interface Props {
   embedded?: boolean;
 }
 
 export function SandboxManager({ embedded = false }: Props) {
+  // Sandbox support is disabled by default (upstream image unmaintained); when
+  // off, this page renders an inert notice and triggers no image pulls/builds.
+  const featureEnabled = isSandboxEnabled();
   const [sandboxes, setSandboxes] = useState<CompanionSandbox[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -43,6 +47,7 @@ export function SandboxManager({ embedded = false }: Props) {
 
   // On mount: load sandboxes, check Docker, check base image, get server cwd
   useEffect(() => {
+    if (!featureEnabled) { setLoading(false); return; }
     refresh();
     api.getContainerStatus()
       .then((s) => setDockerAvailable(s.available))
@@ -53,7 +58,7 @@ export function SandboxManager({ embedded = false }: Props) {
     api.getHome()
       .then(({ cwd }) => setServerCwd(cwd))
       .catch(() => {});
-  }, [refresh]);
+  }, [refresh, featureEnabled]);
 
   // Poll base image if pulling (every 2s, stop when ready/error)
   useEffect(() => {
@@ -246,6 +251,35 @@ export function SandboxManager({ embedded = false }: Props) {
         {baseImageState?.status === "error" && baseImageState.error && (
           <p className="mt-2 text-[10px] text-cc-error">{baseImageState.error}</p>
         )}
+      </div>
+    );
+  }
+
+  /* ─── Disabled notice ────────────────────────────────────────────── */
+
+  if (!featureEnabled) {
+    return (
+      <div className="h-full bg-cc-bg text-cc-fg font-sans-ui antialiased overflow-y-auto overflow-x-hidden">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10 pb-safe">
+          <h1 className="text-lg font-semibold mb-3">Sandboxes</h1>
+          <div className="rounded-xl bg-cc-card p-4 text-sm text-cc-muted leading-relaxed">
+            <p className="mb-2">
+              Sandbox / container support is <strong className="text-cc-fg">disabled</strong> in
+              this build.
+            </p>
+            <p className="mb-2">
+              It relied on the upstream{" "}
+              <code className="text-[12px] font-mono-code text-cc-fg">the-companion</code> Docker
+              image, which is no longer maintained — so the fork no longer pulls or runs it.
+            </p>
+            <p>
+              To re-enable (e.g. with your own image), build the frontend with{" "}
+              <code className="text-[12px] font-mono-code text-cc-fg">VITE_SANDBOX_ENABLED=true</code>{" "}
+              and run the server with{" "}
+              <code className="text-[12px] font-mono-code text-cc-fg">COMPANION_SANDBOX_ENABLED=1</code>.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }

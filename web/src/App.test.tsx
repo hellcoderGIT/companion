@@ -15,7 +15,7 @@
  * - Playground route renders lazy Playground
  * - Various page routes (settings, environments, etc.)
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -362,14 +362,29 @@ describe("App", () => {
   });
 
   describe("docker update dialog activation", () => {
+    afterEach(() => { vi.unstubAllEnvs(); });
+
     it("opens DockerUpdateDialog and clears localStorage when companion_docker_prompt_pending is set", () => {
       // After an app update, the localStorage flag triggers the Docker update dialog.
       // This useEffect reads the flag, removes it, and opens the dialog via the store.
+      // Only when sandbox support is enabled — otherwise we never touch the image.
+      vi.stubEnv("VITE_SANDBOX_ENABLED", "true");
       localStorage.setItem("companion_docker_prompt_pending", "1");
       setStoreValues({ isAuthenticated: true });
       render(<App />);
 
       expect(mockStoreState.setDockerUpdateDialogOpen).toHaveBeenCalledWith(true);
+      expect(localStorage.getItem("companion_docker_prompt_pending")).toBeNull();
+    });
+
+    it("does not open DockerUpdateDialog when sandbox support is disabled", () => {
+      // Flag off (default): the pending flag is still cleared, but the dialog (which
+      // would pull the unmaintained image) is not opened.
+      localStorage.setItem("companion_docker_prompt_pending", "1");
+      setStoreValues({ isAuthenticated: true });
+      render(<App />);
+
+      expect(mockStoreState.setDockerUpdateDialogOpen).not.toHaveBeenCalledWith(true);
       expect(localStorage.getItem("companion_docker_prompt_pending")).toBeNull();
     });
 

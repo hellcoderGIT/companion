@@ -4,6 +4,7 @@ import { join } from "node:path";
 import * as envManager from "../env-manager.js";
 import { containerManager } from "../container-manager.js";
 import { imagePullManager } from "../image-pull-manager.js";
+import { isSandboxEnabled } from "../feature-flags.js";
 
 export function registerEnvRoutes(
   api: Hono,
@@ -59,6 +60,9 @@ export function registerEnvRoutes(
   });
 
   api.post("/docker/build-base", async (c) => {
+    if (!isSandboxEnabled()) {
+      return c.json({ error: "Sandbox support is disabled in this build." }, 403);
+    }
     if (!containerManager.checkDocker()) return c.json({ error: "Docker is not available" }, 503);
     const dockerfilePath = join(options.webDir, "docker", "Dockerfile.the-companion");
     if (!existsSync(dockerfilePath)) {

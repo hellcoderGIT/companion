@@ -150,6 +150,8 @@ describe("executeSessionCreation", () => {
   let deps: SessionCreationDeps;
 
   beforeEach(() => {
+    // Sandbox is force-disabled by default; enable it so sandbox paths run.
+    process.env.COMPANION_SANDBOX_ENABLED = "1";
     vi.clearAllMocks();
     deps = makeDeps();
   });
@@ -213,6 +215,20 @@ describe("executeSessionCreation", () => {
       expect((e as SessionCreationError).statusCode).toBe(404);
       expect((e as SessionCreationError).step).toBe("resolving_env");
     }
+  });
+
+  it("ignores sandboxEnabled entirely when the feature flag is off (kill switch)", async () => {
+    // Security kill switch: with sandbox disabled, a request asking for a sandbox
+    // (even an invalid one) is treated as a plain session — no 404, no image
+    // pull, no container creation.
+    delete process.env.COMPANION_SANDBOX_ENABLED;
+    const result = await executeSessionCreation(
+      { cwd: "/workspace", sandboxEnabled: true, sandboxSlug: "missing" },
+      deps,
+    );
+    expect(result.session).toBeDefined();
+    expect(imagePullManager.ensureImage).not.toHaveBeenCalled();
+    expect(containerManager.createContainer).not.toHaveBeenCalled();
   });
 
   // -- Branch validation --

@@ -38,6 +38,8 @@ import { registerSandboxRoutes } from "./sandbox-routes.js";
 let app: Hono;
 
 beforeEach(() => {
+  // Sandbox is force-disabled by default; enable it so test-init runs.
+  process.env.COMPANION_SANDBOX_ENABLED = "1";
   vi.clearAllMocks();
 
   app = new Hono().basePath("/api");

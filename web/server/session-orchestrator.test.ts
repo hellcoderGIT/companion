@@ -220,6 +220,8 @@ describe("SessionOrchestrator", () => {
   let orchestrator: SessionOrchestrator;
 
   beforeEach(() => {
+    // Sandbox is force-disabled by default; enable it so sandbox paths run.
+    process.env.COMPANION_SANDBOX_ENABLED = "1";
     vi.clearAllMocks();
     companionBus.clear();
     mockImagePullIsReady.mockReturnValue(true);

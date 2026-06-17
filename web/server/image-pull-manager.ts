@@ -2,6 +2,7 @@ import { join, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { containerManager, ContainerManager } from "./container-manager.js";
+import { isSandboxEnabled } from "./feature-flags.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -170,6 +171,17 @@ class ImagePullManager {
 
     // Determine if we can pull from registry
     const registryImage = ContainerManager.getRegistryImage(image);
+
+    // Hard backstop: while sandbox support is disabled, never pull the upstream
+    // (unmaintained) registry image, regardless of which call path asked. Local
+    // Dockerfile builds are still allowed so a future self-built image works.
+    if (registryImage && !isSandboxEnabled()) {
+      this.markError(
+        image,
+        "Sandbox/container support is disabled in this build. Set COMPANION_SANDBOX_ENABLED=1 to re-enable.",
+      );
+      return;
+    }
 
     if (registryImage) {
       this.doPullFromRegistry(image, registryImage);

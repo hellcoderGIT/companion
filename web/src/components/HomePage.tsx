@@ -17,6 +17,7 @@ import { disconnectSession } from "../ws.js";
 import { generateUniqueSessionName } from "../utils/names.js";
 import { getRecentDirs, addRecentDir } from "../utils/recent-dirs.js";
 import { navigateToSession } from "../utils/routing.js";
+import { isSandboxEnabled } from "../feature-flags.js";
 import { getModelsForBackend, getModesForBackend, getDefaultModel, getDefaultMode, toModelOptions, type ModelOption } from "../utils/backends.js";
 import type { BackendType } from "../types.js";
 import { EnvManager } from "./EnvManager.js";
@@ -137,8 +138,10 @@ export function HomePage() {
   const [showEnvDropdown, setShowEnvDropdown] = useState(false);
   const [showEnvManager, setShowEnvManager] = useState(false);
 
-  // Sandbox state
-  const [sandboxEnabled, setSandboxEnabled] = useState(() => localStorage.getItem("cc-sandbox-enabled") === "true");
+  // Sandbox state. Force-off when the sandbox feature flag is disabled (the
+  // upstream image is unmaintained), even if localStorage still says enabled.
+  const sandboxFeatureEnabled = isSandboxEnabled();
+  const [sandboxEnabled, setSandboxEnabled] = useState(() => sandboxFeatureEnabled && localStorage.getItem("cc-sandbox-enabled") === "true");
   const [sandboxes, setSandboxes] = useState<CompanionSandbox[]>([]);
   const [selectedSandbox, setSelectedSandbox] = useState(() => localStorage.getItem("cc-selected-sandbox") || "");
   const [showSandboxDropdown, setShowSandboxDropdown] = useState(false);
@@ -1131,7 +1134,8 @@ export function HomePage() {
               )}
             </div>
 
-            {/* Sandbox selector */}
+            {/* Sandbox selector — hidden while sandbox support is disabled */}
+            {sandboxFeatureEnabled && (
             <div className="relative" ref={sandboxDropdownRef}>
               <button
                 onClick={() => {
@@ -1233,6 +1237,7 @@ export function HomePage() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Spacer pushes action buttons to the right */}
             <div className="flex-1" />

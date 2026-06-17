@@ -3,6 +3,7 @@ import type { Hono } from "hono";
 import * as sandboxManager from "../sandbox-manager.js";
 import { containerManager, type ContainerConfig } from "../container-manager.js";
 import { imagePullManager } from "../image-pull-manager.js";
+import { isSandboxEnabled } from "../feature-flags.js";
 
 export function registerSandboxRoutes(
   api: Hono,
@@ -62,6 +63,10 @@ export function registerSandboxRoutes(
   // Accepts an optional `initScript` body param to test unsaved content
   // without persisting it first. Falls back to the stored script.
   api.post("/sandboxes/:slug/test-init", async (c) => {
+    // Sandbox containers use the unmaintained upstream image; refuse when disabled.
+    if (!isSandboxEnabled()) {
+      return c.json({ error: "Sandbox support is disabled in this build." }, 403);
+    }
     const slug = c.req.param("slug");
     const body = await c.req.json().catch(() => ({}));
     const rawCwd = body.cwd;

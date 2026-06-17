@@ -70,6 +70,8 @@ function makeSandbox(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Sandbox UI is gated behind the feature flag; enable it for the management tests.
+  vi.stubEnv("VITE_SANDBOX_ENABLED", "true");
   vi.useFakeTimers({ shouldAdvanceTime: true });
 
   // Default: Docker available, base image ready, one sandbox, server cwd
@@ -86,6 +88,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 // ─── Render & Accessibility ────────────────────────────────────
@@ -107,6 +110,16 @@ describe("SandboxManager render & accessibility", () => {
     // instructing the user to use embedded mode instead.
     render(<SandboxManager />);
     expect(screen.getByText("Use embedded mode to view sandboxes.")).toBeInTheDocument();
+  });
+
+  it("renders an inert disabled notice and pulls nothing when the feature flag is off", () => {
+    // With sandbox support disabled (default), the page shows an explanation and
+    // must not trigger any image status checks or pulls.
+    vi.unstubAllEnvs(); // flag off
+    render(<SandboxManager embedded />);
+    expect(screen.getByText(/disabled/i)).toBeInTheDocument();
+    expect(mockGetImageStatus).not.toHaveBeenCalled();
+    expect(mockPullImage).not.toHaveBeenCalled();
   });
 });
 
