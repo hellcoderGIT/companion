@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.102.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.102.0...companion-v0.102.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* **session:** show identity inputs on new-conversation screen when no name saved ([#33](https://github.com/hellcoderGIT/companion/issues/33)) ([62b14e8](https://github.com/hellcoderGIT/companion/commit/62b14e82a03ec7131a0b6b2777e6c77043bc4a92))
+
 ## [0.102.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.101.2...companion-v0.102.0) (2026-06-16)
 
 
