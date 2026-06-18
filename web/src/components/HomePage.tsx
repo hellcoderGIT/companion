@@ -14,7 +14,7 @@ import {
 } from "../api.js";
 import { connectSession, createClientMessageId, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
-import { generateUniqueSessionName, initialsFromName } from "../utils/names.js";
+import { generateUniqueSessionName } from "../utils/names.js";
 import { getRecentDirs, addRecentDir } from "../utils/recent-dirs.js";
 import { navigateToSession } from "../utils/routing.js";
 import { isSandboxEnabled } from "../feature-flags.js";
@@ -725,12 +725,12 @@ export function HomePage() {
         },
       ]);
 
-      // Name the session "{prefix}_{base}". The prefix defaults to the user's
-      // initials when not explicitly set. The base is the optional topic if
-      // provided (e.g. "InvoicePdf"), otherwise a random generated name.
+      // Name the session "{prefix}_{base}". The prefix is the user's chosen
+      // initials, falling back to their name when not set. The base is the
+      // optional topic (e.g. "InvoicePdf"), otherwise a random generated name.
       const existingNames = new Set(useStore.getState().sessionNames.values());
       const generatedName = generateUniqueSessionName(existingNames);
-      const prefix = sessionPrefix.trim() || initialsFromName(userName);
+      const prefix = sessionPrefix.trim() || userName.trim();
       const topic = sessionTopic.trim();
       const base = topic || generatedName;
       const sessionName = prefix ? `${prefix}_${base}` : base;
@@ -949,7 +949,7 @@ export function HomePage() {
                   setSessionPrefix(v);
                   localStorage.setItem("cc-session-prefix", v);
                 }}
-                placeholder={initialsFromName(userName) || "e.g. MA"}
+                placeholder="e.g. MA"
                 aria-label="Session prefix"
                 className="w-full px-3 py-2 text-sm bg-cc-card border border-cc-border rounded-lg focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
               />
@@ -975,7 +975,7 @@ export function HomePage() {
           <span className="text-[10px] text-cc-muted/70 leading-snug">
             When set, the session is named{" "}
             <span className="font-mono-code">
-              {(sessionPrefix.trim() || initialsFromName(userName) || "MA")}_
+              {(sessionPrefix.trim() || userName.trim() || "MA")}_
               {sessionTopic.trim() || "InvoicePdf"}
             </span>
             .
