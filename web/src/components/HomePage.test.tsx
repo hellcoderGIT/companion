@@ -797,8 +797,8 @@ describe("HomePage", () => {
       });
     });
 
-    it("defaults the session prefix to the user's initials when none is saved", async () => {
-      // beforeEach seeds cc-user-name="Tester" and no prefix → initials "T".
+    it("falls back to the user's name as the prefix when none is saved", async () => {
+      // beforeEach seeds cc-user-name="Tester" and no prefix → use the name.
       const storeMock = buildStoreMock();
       mockStoreGetState.mockReturnValue(storeMock);
       createSessionStreamMock.mockResolvedValue({
@@ -817,7 +817,7 @@ describe("HomePage", () => {
       await waitFor(() => {
         expect(storeMock.setSessionName).toHaveBeenCalledWith(
           "new-session-xyz",
-          expect.stringMatching(/^T_/),
+          expect.stringMatching(/^Tester_/),
         );
       });
     });

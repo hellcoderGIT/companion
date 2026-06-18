@@ -25,15 +25,3 @@ export function generateUniqueSessionName(existingNames: Set<string>): string {
   }
   return generateSessionName();
 }
-
-/**
- * Derive a short uppercase initials prefix from a user's name, e.g.
- * "Moritz Aschoff" → "MA", "Moritz" → "M". Used as the default session-name
- * prefix so sessions are tagged with who created them (e.g. "MA_InvoicePdf").
- */
-export function initialsFromName(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "";
-  if (words.length === 1) return words[0].slice(0, 1).toUpperCase();
-  return (words[0][0] + words[1][0]).toUpperCase();
-}
