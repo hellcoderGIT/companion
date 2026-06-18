@@ -293,13 +293,24 @@ export function Composer({ sessionId }: { sessionId: string }) {
       client_msg_id: clientMsgId,
     });
 
-    useStore.getState().appendMessage(sessionId, {
+    const store = useStore.getState();
+    store.appendMessage(sessionId, {
       id: clientMsgId,
       role: "user",
       content: msg,
       attachments: attachmentPayload,
       timestamp: Date.now(),
     });
+
+    // Optimistically show the "Generating" indicator immediately so the user
+    // gets feedback during the wait before the first token/event arrives — the
+    // window where it's otherwise unclear whether the agent is working or died.
+    // Incoming events (result / session_phase / cli_disconnected) reconcile this.
+    store.setSessionStatus(sessionId, "running");
+    store.setLastActivity(sessionId, Date.now());
+    if (!store.streamingStartedAt.has(sessionId)) {
+      store.setStreamingStats(sessionId, { startedAt: Date.now() });
+    }
 
     setText("");
     setAttachments([]);

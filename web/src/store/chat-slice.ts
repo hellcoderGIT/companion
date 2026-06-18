@@ -7,12 +7,16 @@ export interface ChatSlice {
   streaming: Map<string, string>;
   streamingStartedAt: Map<string, number>;
   streamingOutputTokens: Map<string, number>;
+  /** Timestamp of the last activity-bearing message received per session.
+   * Drives the stall-aware "Generating" indicator (active → quiet → stalled). */
+  lastActivityAt: Map<string, number>;
 
   appendMessage: (sessionId: string, msg: ChatMessage) => void;
   setMessages: (sessionId: string, msgs: ChatMessage[]) => void;
   updateLastAssistantMessage: (sessionId: string, updater: (msg: ChatMessage) => ChatMessage) => void;
   setStreaming: (sessionId: string, text: string | null) => void;
   setStreamingStats: (sessionId: string, stats: { startedAt?: number; outputTokens?: number } | null) => void;
+  setLastActivity: (sessionId: string, ts: number) => void;
 
   promptSuggestions: Map<string, string[]>;
   setPromptSuggestions: (sessionId: string, suggestions: string[]) => void;
@@ -24,6 +28,7 @@ export const createChatSlice: StateCreator<AppState, [], [], ChatSlice> = (set) 
   streaming: new Map(),
   streamingStartedAt: new Map(),
   streamingOutputTokens: new Map(),
+  lastActivityAt: new Map(),
 
   appendMessage: (sessionId, msg) =>
     set((s) => {
@@ -81,6 +86,13 @@ export const createChatSlice: StateCreator<AppState, [], [], ChatSlice> = (set) 
         if (stats.outputTokens !== undefined) streamingOutputTokens.set(sessionId, stats.outputTokens);
       }
       return { streamingStartedAt, streamingOutputTokens };
+    }),
+
+  setLastActivity: (sessionId, ts) =>
+    set((s) => {
+      const lastActivityAt = new Map(s.lastActivityAt);
+      lastActivityAt.set(sessionId, ts);
+      return { lastActivityAt };
     }),
 
   promptSuggestions: new Map(),

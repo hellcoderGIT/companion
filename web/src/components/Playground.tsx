@@ -2261,15 +2261,28 @@ export function Playground() {
                 </div>
               </div>
             </Card>
-            <Card label="Generation stats bar">
-              <div className="flex items-center gap-1.5 text-[11px] text-cc-muted font-mono-code pl-9">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-cc-primary animate-pulse" />
-                <span>Generating...</span>
-                <span className="text-cc-muted/60">(</span>
-                <span>12s</span>
-                <span className="text-cc-muted/40">&middot;</span>
-                <span>&darr; 1.2k</span>
-                <span className="text-cc-muted/60">)</span>
+            <Card label="Generation stats bar — active (streaming)">
+              <div className="flex items-center gap-2 text-[11px] text-cc-muted font-mono-code pl-10 stats-glow py-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-cc-primary animate-[typing-breathe_1.5s_ease-in-out_infinite]" />
+                <span className="text-cc-fg/70">Generating</span>
+                <span className="text-cc-muted/30">|</span>
+                <span className="tabular-nums">12s</span>
+                <span className="text-cc-muted/30">|</span>
+                <span className="tabular-nums">1.2k tokens</span>
+              </div>
+            </Card>
+            <Card label="Generation stats bar — quiet (working silently, e.g. long tool call)">
+              <div className="flex items-center gap-2 text-[11px] text-cc-muted font-mono-code pl-10 stats-glow py-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-cc-primary animate-[typing-breathe_1.5s_ease-in-out_infinite]" />
+                <span className="text-cc-fg/70">Still working&hellip;</span>
+                <span className="text-cc-muted/30">|</span>
+                <span className="tabular-nums">no update for 23s</span>
+              </div>
+            </Card>
+            <Card label="Generation stats bar — stalled (may be stuck)">
+              <div className="flex items-center gap-2 text-[11px] text-cc-warning font-mono-code pl-10 stats-glow py-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-cc-warning animate-[typing-breathe_1.5s_ease-in-out_infinite]" />
+                <span>No activity for 1m 5s &mdash; the agent may be stuck</span>
               </div>
             </Card>
           </div>

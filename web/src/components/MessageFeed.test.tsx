@@ -40,6 +40,7 @@ vi.mock("../store.js", () => ({
       streamingStartedAt: mockStoreValues.streamingStartedAt ?? new Map(),
       streamingOutputTokens: mockStoreValues.streamingOutputTokens ?? new Map(),
       sessionStatus: mockStoreValues.sessionStatus ?? new Map(),
+      lastActivityAt: mockStoreValues.lastActivityAt ?? new Map(),
       toolProgress: mockStoreValues.toolProgress ?? new Map(),
       toolActivity: mockStoreValues.toolActivity ?? new Map(),
       chatTabReentryTickBySession:
@@ -103,12 +104,19 @@ function setSdkSessions(sessions: Array<Record<string, unknown>>) {
   mockStoreValues.sdkSessions = sessions;
 }
 
+function setStoreLastActivity(sessionId: string, ts: number | undefined) {
+  const map = new Map();
+  if (ts !== undefined) map.set(sessionId, ts);
+  mockStoreValues.lastActivityAt = map;
+}
+
 function resetStore() {
   mockStoreValues.messages = new Map();
   mockStoreValues.streaming = new Map();
   mockStoreValues.streamingStartedAt = new Map();
   mockStoreValues.streamingOutputTokens = new Map();
   mockStoreValues.sessionStatus = new Map();
+  mockStoreValues.lastActivityAt = new Map();
   mockStoreValues.toolProgress = new Map();
   mockStoreValues.toolActivity = new Map();
   mockStoreValues.chatTabReentryTickBySession = new Map();
@@ -306,6 +314,69 @@ describe("MessageFeed - generation stats bar", () => {
     expect(screen.getByText("Generating")).toBeTruthy();
     // Should show "2.5k" token count
     expect(screen.getByText(/2\.5k/)).toBeTruthy();
+  });
+});
+
+// The stall-aware tiers let the user tell whether the agent is actively
+// streaming, working silently (e.g. a long tool call), or possibly stuck.
+// Tier is derived from how long ago the last activity-bearing message arrived.
+describe("MessageFeed - activity tiers", () => {
+  it("shows the 'active' tier (Generating) when activity is recent", () => {
+    const sid = "test-tier-active";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 5000);
+    setStoreLastActivity(sid, Date.now() - 2000); // 2s ago → active
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("active");
+    expect(screen.getByText("Generating")).toBeTruthy();
+  });
+
+  it("shows the 'quiet' tier (Still working…) after ~10s of silence", () => {
+    const sid = "test-tier-quiet";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 30_000);
+    setStoreLastActivity(sid, Date.now() - 23_000); // 23s ago → quiet
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("quiet");
+    expect(screen.getByText("Still working…")).toBeTruthy();
+    expect(screen.getByText(/no update for \d+s/)).toBeTruthy();
+  });
+
+  it("shows the 'stalled' tier (may be stuck) after ~60s of silence", () => {
+    const sid = "test-tier-stalled";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 90_000);
+    setStoreLastActivity(sid, Date.now() - 65_000); // 65s ago → stalled
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("stalled");
+    expect(screen.getByText(/the agent may be stuck/)).toBeTruthy();
+  });
+
+  it("falls back to 'active' when no activity timestamp exists yet", () => {
+    // On optimistic send the bar appears before any event; absent a timestamp
+    // it must not read as stalled.
+    const sid = "test-tier-noactivity";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now());
+    // lastActivityAt intentionally unset
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("active");
   });
 });
 

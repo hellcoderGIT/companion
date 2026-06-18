@@ -811,6 +811,41 @@ describe("handleMessage: stream_event message_start", () => {
 
     expect(useStore.getState().streamingStartedAt.get("s1")).toBe(1700000000000);
   });
+
+  // Regression: streaming via stream_event must flip the session to "running"
+  // even when no session_phase event is emitted, otherwise the "Generating"
+  // indicator never shows for the streamed response (the bar is gated on
+  // sessionStatus === "running").
+  it("flips session status to running", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+    // session_init leaves the session idle.
+    expect(useStore.getState().sessionStatus.get("s1")).toBe("idle");
+
+    fireMessage({
+      type: "stream_event",
+      event: { type: "message_start" },
+      parent_tool_use_id: null,
+    });
+
+    expect(useStore.getState().sessionStatus.get("s1")).toBe("running");
+  });
+
+  // Activity-bearing messages bump lastActivityAt so the indicator's
+  // stall-detection can measure time since the agent was last seen working.
+  it("records lastActivityAt on activity-bearing messages", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    vi.setSystemTime(new Date(1700000123000));
+    fireMessage({
+      type: "stream_event",
+      event: { type: "message_start" },
+      parent_tool_use_id: null,
+    });
+
+    expect(useStore.getState().lastActivityAt.get("s1")).toBe(1700000123000);
+  });
 });
 
 // ===========================================================================
