@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.104.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.103.0...companion-v0.104.0) (2026-06-18)
+
+
+### Features
+
+* **panel:** add server memory usage meter to the side panel ([#41](https://github.com/hellcoderGIT/companion/issues/41)) ([7c84217](https://github.com/hellcoderGIT/companion/commit/7c84217ad0173229d4e450f7904510e89640a9ca))
+
+
+### Bug Fixes
+
+* **home:** refine session naming — typed prefix, name fallback, topic ([#39](https://github.com/hellcoderGIT/companion/issues/39)) ([0e79d7f](https://github.com/hellcoderGIT/companion/commit/0e79d7f104e55a6626284000599eb57a42a6a4fb))
+
 ## [0.103.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.102.1...companion-v0.103.0) (2026-06-18)
 
 
