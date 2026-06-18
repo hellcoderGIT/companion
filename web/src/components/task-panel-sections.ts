@@ -32,6 +32,12 @@ export const SECTION_DEFINITIONS: TaskPanelSectionDef[] = [
     backends: null,
   },
   {
+    id: "server-memory",
+    label: "Server Memory",
+    description: "Host memory usage meter (out-of-memory awareness)",
+    backends: null,
+  },
+  {
     id: "git-branch",
     label: "Git Branch",
     description: "Current branch, ahead/behind, and line changes",

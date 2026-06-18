@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, type ComponentType, type ReactNode } from "react";
 import { useStore } from "../store.js";
-import { api, type UsageLimits, type GitHubPRInfo, type LinearIssue, type LinearComment } from "../api.js";
+import { api, type UsageLimits, type SystemMemoryInfo, type GitHubPRInfo, type LinearIssue, type LinearComment } from "../api.js";
 import type { TaskItem, SdkSessionInfo } from "../types.js";
 import { McpSection } from "./McpPanel.js";
 import { LinearLogo } from "./LinearLogo.js";
@@ -13,6 +13,8 @@ import { SectionErrorBoundary } from "./SectionErrorBoundary.js";
 
 const EMPTY_TASKS: TaskItem[] = [];
 const COUNTDOWN_REFRESH_MS = 30_000;
+// Server memory is slow-moving and cheap to read; a 1-minute poll is plenty.
+const MEMORY_REFRESH_MS = 60_000;
 
 /** Shared SDK session Map — rebuilt only when the sdkSessions array reference changes. */
 let _cachedSdkArr: unknown = null;
@@ -290,6 +292,54 @@ function UsageLimitsSection({ sessionId }: { sessionId: string }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Server Memory ──────────────────────────────────────────────────────────
+
+/** Format a byte count as a compact "X.X GB" / "X MB" string. */
+function formatMemory(bytes: number): string {
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${Math.round(bytes / 1024 ** 2)} MB`;
+}
+
+/**
+ * Server memory usage meter. Polls the host's total/used memory on a slow
+ * interval so an approaching out-of-memory condition is visible at a glance.
+ * Backend-agnostic — it reflects the machine the Companion server runs on.
+ */
+function ServerMemorySection(_: { sessionId: string }) {
+  const [mem, setMem] = useState<SystemMemoryInfo | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchMem = async () => {
+      try {
+        const data = await api.getSystemMemory();
+        if (!cancelled) setMem(data);
+      } catch {
+        // silent — the memory bar is best-effort
+      }
+    };
+    fetchMem();
+    const id = setInterval(fetchMem, MEMORY_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  if (!mem) return null;
+
+  return (
+    <div className="shrink-0 px-4 py-2.5">
+      <ProgressMeter
+        label="Memory"
+        pct={mem.used_percent}
+        detail={`${formatMemory(mem.used_bytes)} / ${formatMemory(mem.total_bytes)}`}
+      />
     </div>
   );
 }
@@ -976,6 +1026,7 @@ function TasksSection({ sessionId }: { sessionId: string }) {
 
 const SECTION_COMPONENTS: Record<string, ComponentType<{ sessionId: string }>> = {
   "usage-limits": UsageLimitsRenderer,
+  "server-memory": ServerMemorySection,
   "git-branch": GitBranchSection,
   "github-pr": GitHubPRSection,
   "linear-issue": LinearIssueSection,
