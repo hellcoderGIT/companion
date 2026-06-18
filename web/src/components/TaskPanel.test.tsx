@@ -6,6 +6,7 @@ import { getDefaultConfig, type TaskPanelConfig } from "./task-panel-sections.js
 vi.mock("../api.js", () => ({
   api: {
     getSessionUsageLimits: vi.fn().mockRejectedValue(new Error("skip")),
+    getSystemMemory: vi.fn().mockRejectedValue(new Error("skip")),
     getPRStatus: vi.fn().mockRejectedValue(new Error("skip")),
     getLinkedLinearIssue: vi.fn().mockResolvedValue({ issue: null }),
     gitPull: vi.fn().mockResolvedValue({ success: true, git_ahead: 0, git_behind: 0, output: "" }),
@@ -1569,5 +1570,32 @@ describe("LinearIssueSection — comments and labels rendering", () => {
     render(<TaskPanel sessionId="s1" />);
     fireEvent.click(screen.getByTitle("Unlink issue"));
     expect(mockApi.unlinkLinearIssue).toHaveBeenCalledWith("s1");
+  });
+});
+
+// The server-memory section polls api.getSystemMemory and renders a meter so an
+// approaching OOM is visible. It's backend-agnostic (host memory, not a session).
+describe("ServerMemorySection", () => {
+  it("renders the memory meter with percentage and used/total detail", async () => {
+    mockApi.getSystemMemory.mockResolvedValueOnce({
+      total_bytes: 8 * 1024 ** 3, // 8 GB
+      used_bytes: 4 * 1024 ** 3, // 4 GB
+      available_bytes: 4 * 1024 ** 3,
+      used_percent: 50,
+    });
+    resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
+    render(<TaskPanel sessionId="s1" />);
+
+    expect(await screen.findByText("Memory")).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
+    // Detail shows human-readable used / total.
+    expect(screen.getByText(/4\.0 GB \/ 8\.0 GB/)).toBeInTheDocument();
+  });
+
+  it("renders nothing until memory data resolves (silent on failure)", () => {
+    // Default mock rejects → section returns null, panel still renders.
+    resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
+    render(<TaskPanel sessionId="s1" />);
+    expect(screen.queryByText("Memory")).not.toBeInTheDocument();
   });
 });

@@ -3,6 +3,7 @@ import type { CliLauncher } from "../cli-launcher.js";
 import type { WsBridge } from "../ws-bridge.js";
 import type { TerminalManager } from "../terminal-manager.js";
 import { getUsageLimits } from "../usage-limits.js";
+import { getSystemMemory } from "../system-memory.js";
 import {
   getUpdateState,
   checkForUpdate,
@@ -42,6 +43,10 @@ export function registerSystemRoutes(
   api.get("/usage-limits", async (c) => {
     const limits = await getUsageLimits();
     return c.json(limits);
+  });
+
+  api.get("/system/memory", (c) => {
+    return c.json(getSystemMemory());
   });
 
   api.get("/sessions/:id/usage-limits", async (c) => {

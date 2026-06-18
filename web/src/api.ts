@@ -387,6 +387,13 @@ export interface ClaudeCompatInfo {
   bannerDismissedVersion: string;
 }
 
+export interface SystemMemoryInfo {
+  total_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
+  used_percent: number;
+}
+
 export interface UsageLimits {
   five_hour: { utilization: number; resets_at: string | null } | null;
   seven_day: { utilization: number; resets_at: string | null } | null;
@@ -1209,6 +1216,7 @@ export const api = {
   getUsageLimits: () => get<UsageLimits>("/usage-limits"),
   getSessionUsageLimits: (sessionId: string) =>
     get<UsageLimits>(`/sessions/${encodeURIComponent(sessionId)}/usage-limits`),
+  getSystemMemory: () => get<SystemMemoryInfo>("/system/memory"),
 
   // Terminal
   spawnTerminal: (cwd: string, cols?: number, rows?: number, opts?: { containerId?: string }) =>
