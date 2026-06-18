@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.103.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.102.1...companion-v0.103.0) (2026-06-18)
+
+
+### Features
+
+* **home:** default session prefix to user initials and add optional topic ([#38](https://github.com/hellcoderGIT/companion/issues/38)) ([c76442a](https://github.com/hellcoderGIT/companion/commit/c76442a4d0cd169ff865ee4062242dea21e2e2f1))
+* **session:** make "Generating" indicator reliable and stall-aware ([#36](https://github.com/hellcoderGIT/companion/issues/36)) ([6929c50](https://github.com/hellcoderGIT/companion/commit/6929c50f45c7507060a71f5928a8a6dde5dcb189))
+
 ## [0.102.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.102.0...companion-v0.102.1) (2026-06-17)
 
 
