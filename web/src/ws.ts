@@ -451,7 +451,11 @@ function setStreamingDraftMessage(sessionId: string, content: string, phase?: "t
   store.setMessages(sessionId, messages);
 }
 
-function clearStreamingDraftMessage(sessionId: string) {
+/** Removes any in-flight streaming draft bubble(s) from the feed. Returns true
+ * if at least one draft was actually removed — callers use this to decide
+ * whether an interruption notice is warranted (a draft existing means a turn
+ * was cut off mid-stream). */
+function clearStreamingDraftMessage(sessionId: string): boolean {
   streamingDraftMessageIdBySession.delete(sessionId);
 
   // Remove ALL streaming draft messages, not just the tracked one.
@@ -461,7 +465,51 @@ function clearStreamingDraftMessage(sessionId: string) {
   const next = existing.filter((m) => !m.isStreaming);
   if (next.length !== existing.length) {
     store.setMessages(sessionId, next);
+    return true;
   }
+  return false;
+}
+
+/** Tracks the last meta notice per session so reconnect storms don't append a
+ * stream of identical italic lines. */
+const lastMetaNoticeBySession = new Map<string, { code: string; at: number }>();
+const META_NOTICE_DEDUPE_MS = 8000;
+
+/**
+ * Records a problematic session event on TWO channels:
+ *  1. The browser console (prefixed `[companion:session-event]`) with full
+ *     structured detail for client-side debugging.
+ *  2. A subtle italic system line in the chat feed (when `userText` is given)
+ *     so the user gets feedback that something happened, deduped per code.
+ *
+ * NOTE: the authoritative, detail-rich logs for the *next error search* live in
+ * the Companion server log (cli-launcher / orchestrator / claude-adapter) — this
+ * is the user-facing complement, not a replacement.
+ */
+function noteSessionEvent(
+  sessionId: string,
+  code: string,
+  opts: { detail?: Record<string, unknown>; userText?: string } = {},
+): void {
+  console.warn(`[companion:session-event] ${code}`, {
+    sessionId,
+    ...(opts.detail ?? {}),
+  });
+  if (!opts.userText) return;
+  const now = Date.now();
+  const prev = lastMetaNoticeBySession.get(sessionId);
+  if (prev && prev.code === code && now - prev.at < META_NOTICE_DEDUPE_MS) {
+    return;
+  }
+  lastMetaNoticeBySession.set(sessionId, { code, at: now });
+  useStore.getState().appendMessage(sessionId, {
+    id: `companion-notice-${code}-${now}`,
+    role: "system",
+    content: opts.userText,
+    timestamp: now,
+    meta: true,
+    metaCode: code,
+  });
 }
 
 function nextClientMsgId(): string {
@@ -691,6 +739,25 @@ function handleParsedMessage(
 
     case "assistant": {
       const msg = data.message;
+      // Synthetic no-op turn: the CLI fabricates an empty "No response
+      // requested." reply (model "<synthetic>") when a resume replays an
+      // injected meta-continuation instead of the user's real prompt — a prime
+      // "stuck session" signature. Don't render it as a normal assistant bubble
+      // (confusing noise); clear any in-flight draft and surface a diagnostic
+      // notice instead. We deliberately do NOT flip status to "running" here.
+      if (msg.model === "<synthetic>") {
+        clearStreamingDraftMessage(sessionId);
+        store.setStreaming(sessionId, null);
+        noteSessionEvent(sessionId, "synthetic_noop", {
+          detail: {
+            stopReason: msg.stop_reason,
+            text: extractTextFromBlocks(msg.content).slice(0, 120),
+          },
+          userText:
+            "The session resumed without generating a new response. If it seems stuck, resend your last message.",
+        });
+        break;
+      }
       const textContent = extractTextFromBlocks(msg.content);
       const chatMsg: ChatMessage = {
         id: msg.id,
@@ -1020,10 +1087,34 @@ function handleParsedMessage(
         store.setCliConnected(sessionId, false);
         store.setCliReconnecting(sessionId, false);
         store.setSessionStatus(sessionId, null);
+        // The turn is over (the CLI is gone). Drop any orphaned streaming draft
+        // bubble so it doesn't linger as a lone sparkle with no Generating bar.
+        store.setStreaming(sessionId, null);
+        store.setStreamingStats(sessionId, null);
+        if (clearStreamingDraftMessage(sessionId)) {
+          noteSessionEvent(sessionId, "interrupted_mid_stream", {
+            detail: { trigger: "session_phase:terminated", previousPhase: data.previousPhase },
+            userText: "Response interrupted — the session ended before the reply finished. It will resume automatically.",
+          });
+        } else {
+          noteSessionEvent(sessionId, "session_terminated", {
+            detail: { trigger: "session_phase:terminated", previousPhase: data.previousPhase, hadDraft: false },
+          });
+        }
       } else if (phase === "reconnecting") {
         store.setCliConnected(sessionId, false);
         store.setCliReconnecting(sessionId, true);
         store.setSessionStatus(sessionId, null);
+        // No result will arrive for the in-flight turn across a reconnect;
+        // clear the draft so the feed doesn't keep a stuck empty bubble.
+        store.setStreaming(sessionId, null);
+        store.setStreamingStats(sessionId, null);
+        if (clearStreamingDraftMessage(sessionId)) {
+          noteSessionEvent(sessionId, "interrupted_mid_stream", {
+            detail: { trigger: "session_phase:reconnecting", previousPhase: data.previousPhase },
+            userText: "Response interrupted — reconnecting to the backend…",
+          });
+        }
       } else if (phase === "starting" || phase === "initializing") {
         store.setCliConnected(sessionId, false);
         store.setCliReconnecting(sessionId, true);
@@ -1045,9 +1136,24 @@ function handleParsedMessage(
       // The backend is gone, so nothing is generating. Clear any in-flight
       // streaming draft/stats so the composer's "generating" spinner stops and
       // the reconnect banner is shown instead of an endless, time-resetting
-      // spinner that never resolves (no result will ever arrive).
+      // spinner that never resolves (no result will ever arrive). We must also
+      // remove the orphaned draft *message* (isStreaming bubble) from the feed:
+      // setStreaming only clears the composer-level spinner state, not the
+      // empty assistant bubble. Without this, an interruption mid-stream leaves
+      // a lone avatar/sparkle with no "Generating" indicator and no recovery
+      // until the user retypes.
       store.setStreaming(sessionId, null);
       store.setStreamingStats(sessionId, null);
+      if (clearStreamingDraftMessage(sessionId)) {
+        noteSessionEvent(sessionId, "interrupted_mid_stream", {
+          detail: { trigger: "cli_disconnected" },
+          userText: "Response interrupted — the backend disconnected before finishing. Trying to reconnect…",
+        });
+      } else {
+        noteSessionEvent(sessionId, "cli_disconnected", {
+          detail: { trigger: "cli_disconnected", hadDraft: false },
+        });
+      }
       break;
     }
 

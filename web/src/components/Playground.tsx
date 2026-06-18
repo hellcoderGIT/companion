@@ -392,6 +392,32 @@ const MSG_ASSISTANT_STREAMING_THINKING: ChatMessage = {
   timestamp: Date.now() - 34000,
 };
 
+// Empty streaming draft: a turn that has begun (isStreaming) but produced no
+// content yet — renders as a lone avatar/sparkle. This is a legitimate transient
+// state, but if the CLI is interrupted mid-stream (crash/relaunch/disconnect)
+// before any result arrives, the draft must be cleared (see ws.ts cli_disconnected
+// / session_phase handlers). Left behind, it becomes a permanently stuck sparkle
+// with no "Generating" indicator.
+const MSG_ASSISTANT_STREAMING_EMPTY: ChatMessage = {
+  id: "msg-streaming-empty",
+  role: "assistant",
+  content: "",
+  isStreaming: true,
+  timestamp: Date.now() - 33000,
+};
+
+// Companion-generated diagnostic notice (meta). Surfaced when a turn is cut
+// off mid-stream (crash/relaunch/disconnect) or the CLI returns a synthetic
+// no-op. Renders with the same subtle italic system style.
+const MSG_META_INTERRUPTED: ChatMessage = {
+  id: "msg-meta-interrupted",
+  role: "system",
+  content: "Response interrupted — the backend disconnected before finishing. Trying to reconnect…",
+  meta: true,
+  metaCode: "interrupted_mid_stream",
+  timestamp: Date.now() - 30000,
+};
+
 const MSG_SYSTEM: ChatMessage = {
   id: "msg-6",
   role: "system",
@@ -1053,11 +1079,17 @@ export function Playground() {
             <Card label="Assistant message (streaming thinking phase)">
               <MessageBubble message={MSG_ASSISTANT_STREAMING_THINKING} />
             </Card>
+            <Card label="Assistant message (empty streaming draft — lone sparkle)">
+              <MessageBubble message={MSG_ASSISTANT_STREAMING_EMPTY} />
+            </Card>
             <Card label="Assistant message (thinking block)">
               <MessageBubble message={MSG_ASSISTANT_THINKING} />
             </Card>
             <Card label="Tool result with error">
               <MessageBubble message={MSG_TOOL_ERROR} />
+            </Card>
+            <Card label="Meta notice (interruption / synthetic no-op)">
+              <MessageBubble message={MSG_META_INTERRUPTED} />
             </Card>
             <Card label="System message">
               <MessageBubble message={MSG_SYSTEM} />
