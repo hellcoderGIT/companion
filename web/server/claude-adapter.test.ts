@@ -836,6 +836,40 @@ describe("handleRawMessage() — incoming CLI message routing", () => {
     expect(msg.timestamp).toBeLessThanOrEqual(Date.now());
   });
 
+  it("synthetic no-op assistant turn → logs a diagnostic warning and still forwards", () => {
+    // The CLI fabricates a synthetic no-op turn (model "<synthetic>") when a
+    // resume replays an injected meta-continuation instead of the user's real
+    // prompt — a prime "stuck session" signature. We must log it to the
+    // Companion server log (full detail for the next error search) while still
+    // forwarding the message to the browser unchanged.
+    const spy = vi.spyOn(log, "warn").mockImplementation(() => {});
+    adapter.handleRawMessage(
+      makeAssistantMsg({
+        message: {
+          id: "msg-synth",
+          type: "message",
+          role: "assistant",
+          model: "<synthetic>",
+          content: [{ type: "text", text: "No response requested." }],
+          stop_reason: "stop_sequence",
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+      }),
+    );
+
+    // Logged with the session + the synthetic text for diagnosis.
+    expect(spy).toHaveBeenCalledWith(
+      "claude-adapter",
+      expect.stringContaining("synthetic no-op"),
+      expect.objectContaining({ stopReason: "stop_sequence", text: "No response requested." }),
+    );
+    // Still forwarded to the browser (the ws client decides how to render it).
+    expect(browserMessageCb).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "assistant" }),
+    );
+    spy.mockRestore();
+  });
+
   it("result → emits browserMessageCb with result data", () => {
     // A result message should be forwarded as-is in the data field.
     adapter.handleRawMessage(makeResultMsg());

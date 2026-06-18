@@ -965,6 +965,26 @@ export class ClaudeAdapter implements IBackendAdapter {
   // -- Assistant, result, stream ----------------------------------------------
 
   private handleAssistantMessage(msg: CLIAssistantMessage): void {
+    // Diagnostic: the CLI fabricates a synthetic, no-op assistant turn
+    // (model "<synthetic>", typically text "No response requested.") when a
+    // resume replays an injected meta-continuation instead of running the
+    // user's real prompt. This is a prime "stuck session" signature — surface
+    // it in the Companion server log so the next error search has the full
+    // context (the browser only sees the forwarded message).
+    if (msg.message?.model === "<synthetic>") {
+      const text = Array.isArray(msg.message.content)
+        ? msg.message.content
+            .map((b) => (b && b.type === "text" ? b.text : ""))
+            .join("")
+            .slice(0, 120)
+        : "";
+      log.warn("claude-adapter", "synthetic no-op assistant turn (resume replayed a meta-continuation, not the user's prompt)", {
+        sessionId: this.sessionId,
+        stopReason: msg.message.stop_reason,
+        text,
+        parentToolUseId: msg.parent_tool_use_id,
+      });
+    }
     this.browserMessageCb?.({
       type: "assistant",
       message: msg.message,

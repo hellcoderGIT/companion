@@ -487,6 +487,46 @@ describe("handleMessage: assistant", () => {
     expect(state.sessionStatus.get("s1")).toBe("running");
   });
 
+  // Regression: the CLI fabricates a synthetic no-op assistant turn (model
+  // "<synthetic>", e.g. "No response requested.") when a resume replays an
+  // injected meta-continuation. It must NOT render as a normal assistant bubble
+  // and must NOT flip the session to "running" — instead we drop any in-flight
+  // draft and surface a single italic meta notice so the user gets feedback.
+  it("suppresses a synthetic no-op turn and surfaces a meta notice", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    // A draft is in flight from a prior delta.
+    fireMessage({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "..." } },
+      parent_tool_use_id: null,
+    });
+    expect(useStore.getState().messages.get("s1")!.some((m) => m.isStreaming)).toBe(true);
+
+    fireMessage({
+      type: "assistant",
+      message: {
+        id: "msg-synth",
+        type: "message",
+        role: "assistant",
+        model: "<synthetic>",
+        content: [{ type: "text", text: "No response requested." }],
+        stop_reason: "stop_sequence",
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+      parent_tool_use_id: null,
+    });
+
+    const msgs = useStore.getState().messages.get("s1")!;
+    // No assistant bubble for the synthetic content, no orphaned draft.
+    expect(msgs.some((m) => m.role === "assistant")).toBe(false);
+    expect(msgs.some((m) => m.isStreaming)).toBe(false);
+    // A single meta notice is shown, and status was NOT flipped to running.
+    expect(msgs.some((m) => m.metaCode === "synthetic_noop")).toBe(true);
+    expect(useStore.getState().sessionStatus.get("s1")).not.toBe("running");
+  });
+
   it("replaces a streaming draft message instead of appending a second assistant bubble", () => {
     wsModule.connectSession("s1");
     fireMessage({ type: "session_init", session: makeSession("s1") });
@@ -1131,6 +1171,41 @@ describe("handleMessage: cli_disconnected/connected", () => {
     fireMessage({ type: "cli_connected" });
     expect(useStore.getState().cliConnected.get("s1")).toBe(true);
   });
+
+  // Regression: a mid-stream interruption (crash/SIGTERM/relaunch on the
+  // server) arrives as cli_disconnected while a streaming draft bubble is in
+  // the feed. Status is cleared (so the "Generating" bar — gated on
+  // sessionStatus==="running" — disappears), but the draft *message* must also
+  // be removed. Otherwise the feed keeps an empty isStreaming assistant bubble
+  // that renders as a lone avatar/sparkle with no Generating indicator and no
+  // recovery until the user retypes. This was the "stuck session" symptom.
+  it("clears the orphaned streaming draft bubble on cli_disconnected", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    // A partial delta creates the streaming draft bubble (isStreaming, no result yet).
+    fireMessage({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "Partial" } },
+      parent_tool_use_id: null,
+    });
+    expect(useStore.getState().messages.get("s1")).toHaveLength(1);
+    expect(useStore.getState().messages.get("s1")![0].isStreaming).toBe(true);
+
+    // The backend dies mid-turn — no result will ever arrive.
+    fireMessage({ type: "cli_disconnected" });
+
+    // The orphaned sparkle (isStreaming draft) must be gone, status cleared,
+    // and the user should see a single italic "interrupted" meta notice instead.
+    const msgs = useStore.getState().messages.get("s1")!;
+    expect(msgs.some((m) => m.isStreaming)).toBe(false);
+    expect(useStore.getState().sessionStatus.get("s1")).toBeNull();
+    expect(useStore.getState().streaming.has("s1")).toBe(false);
+    const notice = msgs.find((m) => m.metaCode === "interrupted_mid_stream");
+    expect(notice).toBeDefined();
+    expect(notice!.role).toBe("system");
+    expect(notice!.meta).toBe(true);
+  });
 });
 // ===========================================================================
 // handleMessage: session_phase
@@ -1181,6 +1256,28 @@ describe("handleMessage: session_phase", () => {
     expect(useStore.getState().sessionStatus.get("s1")).toBeNull();
   });
 
+  // Regression (same orphaned-draft bug as cli_disconnected): an interruption
+  // can also surface as a session_phase "terminated"/"reconnecting" event. Both
+  // end the in-flight turn with no result, so the streaming draft bubble must
+  // be cleared — otherwise the lone-sparkle stuck state persists.
+  it("clears the orphaned streaming draft bubble on terminated phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+    fireMessage({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "Partial" } },
+      parent_tool_use_id: null,
+    });
+    expect(useStore.getState().messages.get("s1")![0].isStreaming).toBe(true);
+
+    fireMessage({ type: "session_phase", phase: "terminated", previousPhase: "streaming" });
+
+    const msgs = useStore.getState().messages.get("s1")!;
+    expect(msgs.some((m) => m.isStreaming)).toBe(false);
+    expect(useStore.getState().sessionStatus.get("s1")).toBeNull();
+    expect(msgs.some((m) => m.metaCode === "interrupted_mid_stream")).toBe(true);
+  });
+
   it("sets cliConnected=false for reconnecting phase", () => {
     wsModule.connectSession("s1");
     fireMessage({ type: "session_init", session: makeSession("s1") });
@@ -1188,6 +1285,24 @@ describe("handleMessage: session_phase", () => {
     fireMessage({ type: "session_phase", phase: "reconnecting", previousPhase: "ready" });
     expect(useStore.getState().cliConnected.get("s1")).toBe(false);
     expect(useStore.getState().sessionStatus.get("s1")).toBeNull();
+  });
+
+  it("clears the orphaned streaming draft bubble on reconnecting phase", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+    fireMessage({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "Partial" } },
+      parent_tool_use_id: null,
+    });
+    expect(useStore.getState().messages.get("s1")![0].isStreaming).toBe(true);
+
+    fireMessage({ type: "session_phase", phase: "reconnecting", previousPhase: "streaming" });
+
+    const msgs = useStore.getState().messages.get("s1")!;
+    expect(msgs.some((m) => m.isStreaming)).toBe(false);
+    expect(useStore.getState().sessionStatus.get("s1")).toBeNull();
+    expect(msgs.some((m) => m.metaCode === "interrupted_mid_stream")).toBe(true);
   });
 
   it("sets cliConnected=false for starting phase", () => {

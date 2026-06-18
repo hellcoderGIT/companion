@@ -854,6 +854,15 @@ export class WsBridge {
     if (session.backendAdapter instanceof ClaudeAdapter) {
       session.backendAdapter.detachWebSocket(ws);
     }
+    // Capture the phase BEFORE we transition to "reconnecting": a close while
+    // the session was mid-turn (streaming / awaiting_permission / compacting)
+    // is the case that orphans an in-flight reply on the client (the "stuck
+    // sparkle"). The debounced log below uses this to flag mid-turn interruptions.
+    const phaseAtClose = session.stateMachine.phase;
+    const interruptedMidTurn =
+      phaseAtClose === "streaming" ||
+      phaseAtClose === "awaiting_permission" ||
+      phaseAtClose === "compacting";
     session.stateMachine.transition("reconnecting", "cli_ws_closed");
 
     // Debounce: delay disconnect notification by 15s.
@@ -867,7 +876,11 @@ export class WsBridge {
       this.disconnectTimers.delete(sessionId);
       // Check if CLI reconnected during grace period
       if (session.backendAdapter?.isConnected()) return;
-      log.warn("ws-bridge", "CLI disconnect confirmed", { sessionId });
+      log.warn("ws-bridge", "CLI disconnect confirmed", {
+        sessionId,
+        phaseAtClose,
+        interruptedMidTurn,
+      });
       session.stateMachine.transition("terminated", "disconnect_confirmed");
       this.broadcastToBrowsers(session, { type: "cli_disconnected" });
       for (const [reqId] of session.pendingPermissions) {

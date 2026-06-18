@@ -26,6 +26,13 @@ export interface ChatMessage {
   streamingPhase?: "thinking" | "text";
   model?: string;
   stopReason?: string | null;
+  /** Marks a Companion-generated diagnostic notice (rendered as a subtle
+   * italic system line) rather than a real CLI system message. Used for
+   * surfacing interruptions / synthetic no-op turns to the user. */
+  meta?: boolean;
+  /** Stable event code for a meta notice (e.g. "interrupted_mid_stream"),
+   * used to dedupe repeated notices during reconnect storms. */
+  metaCode?: string;
 }
 
 export interface TaskItem {
