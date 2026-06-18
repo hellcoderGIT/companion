@@ -796,6 +796,66 @@ describe("HomePage", () => {
         );
       });
     });
+
+    it("defaults the session prefix to the user's initials when none is saved", async () => {
+      // beforeEach seeds cc-user-name="Tester" and no prefix → initials "T".
+      const storeMock = buildStoreMock();
+      mockStoreGetState.mockReturnValue(storeMock);
+      createSessionStreamMock.mockResolvedValue({
+        sessionId: "new-session-xyz",
+        state: "starting",
+        cwd: "/repo",
+      });
+
+      render(<HomePage />);
+      await waitFor(() => expect(screen.getByText("repo")).toBeInTheDocument());
+
+      const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+      fireEvent.change(textarea, { target: { value: "Fix it" } });
+      fireEvent.click(screen.getByTitle("Send message"));
+
+      await waitFor(() => {
+        expect(storeMock.setSessionName).toHaveBeenCalledWith(
+          "new-session-xyz",
+          expect.stringMatching(/^T_/),
+        );
+      });
+    });
+
+    it("uses the topic as the session name base when provided ({prefix}_{topic})", async () => {
+      localStorage.setItem("cc-session-prefix", "billing");
+      const storeMock = buildStoreMock();
+      mockStoreGetState.mockReturnValue(storeMock);
+      createSessionStreamMock.mockResolvedValue({
+        sessionId: "new-session-xyz",
+        state: "starting",
+        cwd: "/repo",
+      });
+
+      render(<HomePage />);
+      await waitFor(() => expect(screen.getByText("repo")).toBeInTheDocument());
+
+      // The optional Topic input replaces the auto-generated name.
+      fireEvent.change(screen.getByLabelText("Session topic"), {
+        target: { value: "InvoicePdf" },
+      });
+      const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...");
+      fireEvent.change(textarea, { target: { value: "Fix it" } });
+      fireEvent.click(screen.getByTitle("Send message"));
+
+      await waitFor(() => {
+        expect(storeMock.setSessionName).toHaveBeenCalledWith(
+          "new-session-xyz",
+          "billing_InvoicePdf",
+        );
+      });
+    });
+
+    it("limits the topic input to 50 characters", () => {
+      render(<HomePage />);
+      const topic = screen.getByLabelText("Session topic") as HTMLInputElement;
+      expect(topic.maxLength).toBe(50);
+    });
   });
 
   it("displays an error when session creation fails", async () => {
