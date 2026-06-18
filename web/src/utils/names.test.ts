@@ -1,4 +1,4 @@
-import { generateSessionName, generateUniqueSessionName } from "./names.js";
+import { generateSessionName, generateUniqueSessionName, initialsFromName } from "./names.js";
 
 describe("generateSessionName", () => {
   it("returns a string with two words separated by a space", () => {
@@ -119,5 +119,27 @@ describe("generateUniqueSessionName", () => {
     } finally {
       Math.random = originalRandom;
     }
+  });
+});
+
+describe("initialsFromName", () => {
+  it("returns first+last initials for multi-word names", () => {
+    expect(initialsFromName("Moritz Aschoff")).toBe("MA");
+    // Only the first two words are used for three-word names.
+    expect(initialsFromName("Jean Luc Picard")).toBe("JL");
+  });
+
+  it("returns a single uppercase initial for single-word names", () => {
+    expect(initialsFromName("Moritz")).toBe("M");
+    expect(initialsFromName("alice")).toBe("A");
+  });
+
+  it("ignores surrounding and extra whitespace", () => {
+    expect(initialsFromName("  Moritz   Aschoff  ")).toBe("MA");
+  });
+
+  it("returns an empty string for empty/whitespace-only input", () => {
+    expect(initialsFromName("")).toBe("");
+    expect(initialsFromName("   ")).toBe("");
   });
 });

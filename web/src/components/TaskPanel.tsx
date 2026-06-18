@@ -8,6 +8,7 @@ import { ClaudeConfigBrowser } from "./ClaudeConfigBrowser.js";
 import { SECTION_DEFINITIONS } from "./task-panel-sections.js";
 import { formatResetTime, formatCodexResetTime, formatWindowDuration, formatTokenCount } from "../utils/format.js";
 import { timeAgo } from "../utils/time-ago.js";
+import { initialsFromName } from "../utils/names.js";
 import { captureException } from "../analytics.js";
 import { SectionErrorBoundary } from "./SectionErrorBoundary.js";
 
@@ -157,7 +158,7 @@ function IdentitySection() {
               setPrefix(v);
               localStorage.setItem("cc-session-prefix", v);
             }}
-            placeholder="e.g. billing"
+            placeholder={initialsFromName(name) || "e.g. MA"}
             aria-label="Session prefix"
             className="w-full px-2.5 py-1.5 text-[13px] bg-cc-input-bg border border-cc-border rounded-md focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
           />

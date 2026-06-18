@@ -14,7 +14,7 @@ import {
 } from "../api.js";
 import { connectSession, createClientMessageId, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
-import { generateUniqueSessionName } from "../utils/names.js";
+import { generateUniqueSessionName, initialsFromName } from "../utils/names.js";
 import { getRecentDirs, addRecentDir } from "../utils/recent-dirs.js";
 import { navigateToSession } from "../utils/routing.js";
 import { isSandboxEnabled } from "../feature-flags.js";
@@ -108,6 +108,10 @@ export function HomePage() {
   const [identityInputsShown] = useState(() => !(localStorage.getItem("cc-user-name") || "").trim());
   const [userName, setUserName] = useState(() => localStorage.getItem("cc-user-name") || "");
   const [sessionPrefix, setSessionPrefix] = useState(() => localStorage.getItem("cc-session-prefix") || "");
+  // Optional per-session topic. When set, it replaces the auto-generated name so
+  // the session is named "{prefix}_{topic}" (e.g. "MA_InvoicePdf"). Not persisted
+  // — it's specific to the session being created.
+  const [sessionTopic, setSessionTopic] = useState("");
   const [backend, setBackend] = useState<BackendType>(() =>
     (localStorage.getItem("cc-backend") as BackendType) || "claude",
   );
@@ -721,16 +725,23 @@ export function HomePage() {
         },
       ]);
 
-      // Assign a random session name, optionally prefixed: {prefix}_{Generated Name}
+      // Name the session "{prefix}_{base}". The prefix defaults to the user's
+      // initials when not explicitly set. The base is the optional topic if
+      // provided (e.g. "InvoicePdf"), otherwise a random generated name.
       const existingNames = new Set(useStore.getState().sessionNames.values());
       const generatedName = generateUniqueSessionName(existingNames);
-      const prefix = sessionPrefix.trim();
-      const sessionName = prefix ? `${prefix}_${generatedName}` : generatedName;
+      const prefix = sessionPrefix.trim() || initialsFromName(userName);
+      const topic = sessionTopic.trim();
+      const base = topic || generatedName;
+      const sessionName = prefix ? `${prefix}_${base}` : base;
       useStore.getState().setSessionName(sessionId, sessionName);
       // Persist server-side too (mirrors the sidebar rename flow) so the name —
       // including the prefix — is visible from other browsers/clients, not just
       // the one that created the session.
       api.renameSession(sessionId, sessionName).catch(() => {});
+      // Topic is consumed for this session only — reset so it doesn't leak into
+      // the next one created from the same screen.
+      setSessionTopic("");
 
       // Save cwd to recent dirs
       if (effectiveCwd) addRecentDir(effectiveCwd);
@@ -938,13 +949,38 @@ export function HomePage() {
                   setSessionPrefix(v);
                   localStorage.setItem("cc-session-prefix", v);
                 }}
-                placeholder="e.g. billing"
+                placeholder={initialsFromName(userName) || "e.g. MA"}
                 aria-label="Session prefix"
                 className="w-full px-3 py-2 text-sm bg-cc-card border border-cc-border rounded-lg focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
               />
             </label>
           </div>
         )}
+
+        {/* Optional topic — names the session "{prefix}_{topic}" instead of using
+            an auto-generated name. Always shown so it's available per session. */}
+        <label className="flex flex-col gap-1 mb-4">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-cc-muted">
+            Topic <span className="text-cc-muted/60 normal-case">(optional)</span>
+          </span>
+          <input
+            type="text"
+            value={sessionTopic}
+            onChange={(e) => setSessionTopic(e.target.value)}
+            maxLength={50}
+            placeholder="e.g. InvoicePdf"
+            aria-label="Session topic"
+            className="w-full px-3 py-2 text-sm bg-cc-card border border-cc-border rounded-lg focus:outline-none focus:border-cc-primary text-cc-fg placeholder:text-cc-muted/70"
+          />
+          <span className="text-[10px] text-cc-muted/70 leading-snug">
+            When set, the session is named{" "}
+            <span className="font-mono-code">
+              {(sessionPrefix.trim() || initialsFromName(userName) || "MA")}_
+              {sessionTopic.trim() || "InvoicePdf"}
+            </span>
+            .
+          </span>
+        </label>
 
         {/* Hidden file input */}
         <input
