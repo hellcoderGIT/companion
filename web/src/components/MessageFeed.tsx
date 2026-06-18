@@ -17,6 +17,11 @@ import { ToolTurnSummary } from "./ToolTurnSummary.js";
 const FEED_PAGE_SIZE = 100;
 const RESUME_HISTORY_PAGE_SIZE = 40;
 const SCROLL_TOP_PREFETCH_PX = 120;
+// Stall-detection thresholds for the "Generating" indicator. Below QUIET the
+// agent is visibly streaming; between QUIET and STALLED it's working silently
+// (e.g. a long tool call); past STALLED it may be stuck and we warn the user.
+const ACTIVITY_QUIET_MS = 10_000;
+const ACTIVITY_STALLED_MS = 60_000;
 const savedDistanceFromBottomBySession = new Map<string, number>();
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -594,6 +599,7 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
     s.streamingOutputTokens.get(sessionId),
   );
   const sessionStatus = useStore((s) => s.sessionStatus.get(sessionId));
+  const lastActivityAt = useStore((s) => s.lastActivityAt.get(sessionId));
   const toolProgress = useStore((s) => s.toolProgress.get(sessionId));
   const toolActivity = useStore((s) => s.toolActivity.get(sessionId));
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -913,6 +919,22 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
     );
   }
 
+  // Derive the activity tier for the "Generating" indicator. While running, we
+  // measure time since the last activity-bearing message (re-evaluated on each
+  // 1s elapsed tick) to tell the user whether the agent is streaming, working
+  // silently, or possibly stalled. Date.now() here is fine — the elapsed timer
+  // forces a re-render every second while running.
+  const sinceActivity =
+    sessionStatus === "running" && lastActivityAt != null
+      ? Math.max(0, Date.now() - lastActivityAt)
+      : 0;
+  const activityTier: "active" | "quiet" | "stalled" =
+    sinceActivity >= ACTIVITY_STALLED_MS
+      ? "stalled"
+      : sinceActivity >= ACTIVITY_QUIET_MS
+        ? "quiet"
+        : "active";
+
   return (
     <div className="flex-1 min-h-0 relative overflow-hidden">
       {/* Top fade — softens the scroll edge under the top bar */}
@@ -1013,17 +1035,48 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
             </div>
           )}
 
-          {/* Generation stats bar */}
-          {sessionStatus === "running" && elapsed > 0 && (
-            <div className="flex items-center gap-2 text-[11px] text-cc-muted font-mono-code pl-10 stats-glow py-1">
-              <span className="inline-block w-2 h-2 rounded-full bg-cc-primary animate-[typing-breathe_1.5s_ease-in-out_infinite]" />
-              <span className="text-cc-fg/70">Generating</span>
-              <span className="text-cc-muted/30">|</span>
-              <span className="tabular-nums">{formatElapsed(elapsed)}</span>
-              {(streamingOutputTokens ?? 0) > 0 && (
+          {/* Generation stats bar — tiered by activity so the user can always
+              tell whether the agent is streaming, working silently, or stalled. */}
+          {sessionStatus === "running" && elapsed >= 0 && (
+            <div
+              data-testid="activity-indicator"
+              data-activity-tier={activityTier}
+              className={`flex items-center gap-2 text-[11px] font-mono-code pl-10 stats-glow py-1 ${
+                activityTier === "stalled" ? "text-cc-warning" : "text-cc-muted"
+              }`}
+            >
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  activityTier === "stalled"
+                    ? "bg-cc-warning animate-[typing-breathe_1.5s_ease-in-out_infinite]"
+                    : "bg-cc-primary animate-[typing-breathe_1.5s_ease-in-out_infinite]"
+                }`}
+              />
+              {activityTier === "stalled" ? (
+                <span>
+                  No activity for {formatElapsed(sinceActivity)} — the agent may be stuck
+                </span>
+              ) : activityTier === "quiet" ? (
                 <>
+                  <span className="text-cc-fg/70">Still working…</span>
                   <span className="text-cc-muted/30">|</span>
-                  <span className="tabular-nums">{formatTokenCount(streamingOutputTokens!)} tokens</span>
+                  <span className="tabular-nums">
+                    no update for {formatElapsed(sinceActivity)}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-cc-fg/70">Generating</span>
+                  <span className="text-cc-muted/30">|</span>
+                  <span className="tabular-nums">{formatElapsed(elapsed)}</span>
+                  {(streamingOutputTokens ?? 0) > 0 && (
+                    <>
+                      <span className="text-cc-muted/30">|</span>
+                      <span className="tabular-nums">
+                        {formatTokenCount(streamingOutputTokens!)} tokens
+                      </span>
+                    </>
+                  )}
                 </>
               )}
             </div>

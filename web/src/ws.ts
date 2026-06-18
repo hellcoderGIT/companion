@@ -6,6 +6,25 @@ import { getPreview } from "./components/ToolBlock.js";
 import type { ToolActivityEntry } from "./store/tasks-slice.js";
 
 const WS_RECONNECT_DELAY_MS = 2000;
+
+/** Message types that prove the agent is actively working. Receiving any of
+ * these bumps the session's lastActivityAt, which the "Generating" indicator
+ * uses to distinguish active vs quiet vs stalled. Connection/lifecycle messages
+ * (cli_disconnected, session_phase, keep_alive) are intentionally excluded. */
+const ACTIVITY_MESSAGE_TYPES = new Set<BrowserIncomingMessage["type"]>([
+  "assistant",
+  "stream_event",
+  "result",
+  "tool_progress",
+  "tool_use_summary",
+  "status_change",
+  "system_event",
+  "permission_request",
+  "permission_auto_resolved",
+  "streamlined_text",
+  "streamlined_tool_use_summary",
+]);
+
 const sockets = new Map<string, WebSocket>();
 const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastSeqBySession = new Map<string, number>();
@@ -640,6 +659,14 @@ function handleParsedMessage(
     }
   }
 
+  // Record activity so the "Generating" indicator can detect stalls. Any message
+  // that proves the agent is still doing work counts; connection/lifecycle
+  // messages (cli_disconnected, session_phase terminated) are excluded because
+  // they signal the opposite — they have their own status handling below.
+  if (ACTIVITY_MESSAGE_TYPES.has(data.type)) {
+    store.setLastActivity(sessionId, Date.now());
+  }
+
   switch (data.type) {
     case "session_init": {
       const existingSession = store.sessions.get(sessionId);
@@ -745,6 +772,9 @@ function handleParsedMessage(
           streamingPhaseBySession.delete(sessionId);
           streamingBlocksBySession.delete(sessionId);
           clearStreamingDraftMessage(sessionId);
+          // Flip status to "running" so the "Generating" indicator shows during
+          // streaming even when the backend doesn't emit a session_phase event.
+          store.setSessionStatus(sessionId, "running");
           if (!store.streamingStartedAt.has(sessionId)) {
             store.setStreamingStats(sessionId, { startedAt: Date.now(), outputTokens: 0 });
           }

@@ -44,6 +44,9 @@ const mockAppendMessage = vi.fn();
 const mockUpdateSession = vi.fn();
 const mockSetPreviousPermissionMode = vi.fn();
 const mockClearPromptSuggestions = vi.fn();
+const mockSetSessionStatus = vi.fn();
+const mockSetStreamingStats = vi.fn();
+const mockSetLastActivity = vi.fn();
 
 vi.mock("../store.js", () => {
   // Create a mock store function that acts like zustand's useStore
@@ -121,6 +124,10 @@ function setupMockStore(overrides: {
     setSdkSessions: vi.fn(),
     promptSuggestions: new Map<string, string[]>(),
     clearPromptSuggestions: mockClearPromptSuggestions,
+    setSessionStatus: mockSetSessionStatus,
+    setStreamingStats: mockSetStreamingStats,
+    setLastActivity: mockSetLastActivity,
+    streamingStartedAt: new Map<string, number>(),
   };
 }
 
@@ -193,6 +200,44 @@ describe("Composer sending messages", () => {
       content: "test message",
       session_id: "s1",
     }));
+  });
+
+  // Regression: the "Generating" indicator (gated on sessionStatus === "running")
+  // used to be missing during the wait between sending a message and the first
+  // event arriving from the agent — the window where users can't tell if the
+  // agent is working or has died. Sending now optimistically flips the status to
+  // "running" and starts the elapsed timer so the indicator shows immediately.
+  it("optimistically marks the session running and starts the timer on send", () => {
+    const { container } = render(<Composer sessionId="s1" />);
+    const textarea = container.querySelector("textarea")!;
+
+    fireEvent.change(textarea, { target: { value: "test message" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+
+    expect(mockSetSessionStatus).toHaveBeenCalledWith("s1", "running");
+    // Timer is started with a startedAt timestamp so elapsed time can tick.
+    expect(mockSetStreamingStats).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({ startedAt: expect.any(Number) }),
+    );
+    // Activity is recorded so the indicator starts in the "active" tier rather
+    // than immediately reading as stalled before the first event arrives.
+    expect(mockSetLastActivity).toHaveBeenCalledWith("s1", expect.any(Number));
+  });
+
+  it("does not overwrite an already-running timer on send", () => {
+    // If a timer is already in flight (streamingStartedAt set), sending must not
+    // reset startedAt — the elapsed counter should keep counting from the start.
+    setupMockStore();
+    (mockStoreState.streamingStartedAt as Map<string, number>).set("s1", 123);
+    const { container } = render(<Composer sessionId="s1" />);
+    const textarea = container.querySelector("textarea")!;
+
+    fireEvent.change(textarea, { target: { value: "test message" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+
+    expect(mockSetSessionStatus).toHaveBeenCalledWith("s1", "running");
+    expect(mockSetStreamingStats).not.toHaveBeenCalled();
   });
 
   it("pressing Shift+Enter does NOT send the message", () => {

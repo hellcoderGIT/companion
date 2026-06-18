@@ -205,6 +205,22 @@ describe("Streaming", () => {
     expect(useStore.getState().streamingStartedAt.has("s1")).toBe(false);
     expect(useStore.getState().streamingOutputTokens.has("s1")).toBe(false);
   });
+
+  // lastActivityAt drives the stall-aware "Generating" indicator: it records
+  // when the agent was last seen doing work so the UI can distinguish active
+  // streaming from a silent stall.
+  it("setLastActivity: records the timestamp per session", () => {
+    useStore.getState().setLastActivity("s1", 5000);
+    expect(useStore.getState().lastActivityAt.get("s1")).toBe(5000);
+  });
+
+  it("setLastActivity: overwrites only the targeted session", () => {
+    useStore.getState().setLastActivity("s1", 1000);
+    useStore.getState().setLastActivity("s2", 2000);
+    useStore.getState().setLastActivity("s1", 3000);
+    expect(useStore.getState().lastActivityAt.get("s1")).toBe(3000);
+    expect(useStore.getState().lastActivityAt.get("s2")).toBe(2000);
+  });
 });
 
 describe("Prompt suggestions", () => {
