@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.104.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.104.0...companion-v0.104.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **session:** clear orphaned streaming draft on interruption + add stuck-session diagnostics ([#42](https://github.com/hellcoderGIT/companion/issues/42)) ([8af1867](https://github.com/hellcoderGIT/companion/commit/8af18671e5190c3693a865bb0e55f31e30b93f26))
+
 ## [0.104.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.103.0...companion-v0.104.0) (2026-06-18)
 
 
