@@ -21,7 +21,10 @@ const SCROLL_TOP_PREFETCH_PX = 120;
 // agent is visibly streaming; between QUIET and STALLED it's working silently
 // (e.g. a long tool call); past STALLED it may be stuck and we warn the user.
 const ACTIVITY_QUIET_MS = 10_000;
-const ACTIVITY_STALLED_MS = 60_000;
+// Agents legitimately run long tool calls (builds, large web fetches, subagents)
+// that emit no visible output for several minutes. Only warn "may be stuck" after
+// a genuinely unusual silence so the warning stays meaningful.
+const ACTIVITY_STALLED_MS = 7 * 60_000;
 const savedDistanceFromBottomBySession = new Map<string, number>();
 
 const EMPTY_MESSAGES: ChatMessage[] = [];

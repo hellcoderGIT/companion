@@ -2314,7 +2314,7 @@ export function Playground() {
             <Card label="Generation stats bar — stalled (may be stuck)">
               <div className="flex items-center gap-2 text-[11px] text-cc-warning font-mono-code pl-10 stats-glow py-1">
                 <span className="inline-block w-2 h-2 rounded-full bg-cc-warning animate-[typing-breathe_1.5s_ease-in-out_infinite]" />
-                <span>No activity for 1m 5s &mdash; the agent may be stuck</span>
+                <span>No activity for 7m 12s &mdash; the agent may be stuck</span>
               </div>
             </Card>
           </div>

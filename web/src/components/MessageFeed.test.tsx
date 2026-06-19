@@ -350,12 +350,12 @@ describe("MessageFeed - activity tiers", () => {
     expect(screen.getByText(/no update for \d+s/)).toBeTruthy();
   });
 
-  it("shows the 'stalled' tier (may be stuck) after ~60s of silence", () => {
+  it("shows the 'stalled' tier (may be stuck) after ~7min of silence", () => {
     const sid = "test-tier-stalled";
     setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
     setStoreStatus(sid, "running");
-    setStoreStreamingStartedAt(sid, Date.now() - 90_000);
-    setStoreLastActivity(sid, Date.now() - 65_000); // 65s ago → stalled
+    setStoreStreamingStartedAt(sid, Date.now() - 8 * 60_000);
+    setStoreLastActivity(sid, Date.now() - 7 * 60_000 - 5_000); // ~7m5s ago → stalled
 
     render(<MessageFeed sessionId={sid} />);
 
