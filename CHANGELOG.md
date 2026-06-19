@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.104.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.104.1...companion-v0.104.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* stop invisible CLI relaunch loops and delay stuck warning to 7m ([#44](https://github.com/hellcoderGIT/companion/issues/44)) ([edae64b](https://github.com/hellcoderGIT/companion/commit/edae64b586427e80a921003e854c759f4bb84d08))
+
 ## [0.104.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.104.0...companion-v0.104.1) (2026-06-18)
 
 
