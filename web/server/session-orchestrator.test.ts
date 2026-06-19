@@ -480,6 +480,81 @@ describe("SessionOrchestrator", () => {
 
       vi.useRealTimers();
     });
+
+    it("pauses a session that keeps crashing even though each relaunch briefly recovers", async () => {
+      // The crux of the swallowed-turn loop: a CLI that crashes every minute or
+      // two stays connected just long enough (> HEALTHY_UPTIME_MS) for
+      // scheduleHealthyReset to wipe the per-attempt budget every cycle. The
+      // per-attempt cap therefore NEVER trips, so under the old code the session
+      // relaunched forever and the user only saw an endless "reconnecting"
+      // banner. The rolling-window cap must accumulate across these fake
+      // recoveries and eventually pause auto-restart with a visible message.
+      vi.useFakeTimers();
+      deps.launcher.getSession.mockReturnValue({ archived: false, state: "exited", pid: undefined } as any);
+      deps.launcher.relaunch.mockResolvedValue({ ok: true });
+      orchestrator.initialize();
+
+      // 7 crash→relaunch→"recover for 61s" cycles. Each 61s recovery fires the
+      // healthy-reset (clearing the per-attempt count), so only the rolling cap
+      // can stop the loop.
+      for (let i = 0; i < 7; i++) {
+        deps.wsBridge.isCliConnected.mockReturnValue(false);
+        companionBus.emit("session:exited", { sessionId: "s1", exitCode: 143 });
+        await vi.advanceTimersByTimeAsync(45_000); // grace + backoff + cooldown → relaunch fires
+        await vi.advanceTimersByTimeAsync(0);
+        // Session comes back and stays up past HEALTHY_UPTIME_MS, so the
+        // per-attempt budget is restored — but the rolling history is not.
+        deps.wsBridge.isCliConnected.mockReturnValue(true);
+        await vi.advanceTimersByTimeAsync(61_000);
+      }
+
+      // It relaunched up to the rolling cap, then stopped — NOT all 7 times.
+      expect(deps.launcher.relaunch).toHaveBeenCalledTimes(5);
+      // ...and surfaced a distinct "keeps crashing / paused" message to the user.
+      const errorBroadcasts = deps.wsBridge.broadcastToSession.mock.calls.filter(
+        ([, msg]: [string, any]) => msg?.type === "error",
+      );
+      expect(errorBroadcasts.length).toBeGreaterThanOrEqual(1);
+      expect(errorBroadcasts[errorBroadcasts.length - 1][1].message).toMatch(/restarted .* times in the last .* minutes/i);
+
+      vi.useRealTimers();
+    });
+
+    it("a genuine long recovery (history ages out of the window) earns a fresh budget", async () => {
+      // The rolling cap must not be a permanent death sentence: if a session
+      // recovers and stays healthy *longer than the window*, its old relaunch
+      // timestamps age out and a later, unrelated crash streak is not penalized.
+      vi.useFakeTimers();
+      deps.launcher.getSession.mockReturnValue({ archived: false, state: "exited", pid: undefined } as any);
+      deps.launcher.relaunch.mockResolvedValue({ ok: true });
+      orchestrator.initialize();
+
+      // Build up 4 relaunches across brief recoveries (just under the rolling cap).
+      for (let i = 0; i < 4; i++) {
+        deps.wsBridge.isCliConnected.mockReturnValue(false);
+        companionBus.emit("session:exited", { sessionId: "s1", exitCode: 143 });
+        await vi.advanceTimersByTimeAsync(45_000);
+        await vi.advanceTimersByTimeAsync(0);
+        deps.wsBridge.isCliConnected.mockReturnValue(true);
+        await vi.advanceTimersByTimeAsync(61_000);
+      }
+      expect(deps.launcher.relaunch).toHaveBeenCalledTimes(4);
+
+      // Now it genuinely recovers and stays up well past the 10-minute window,
+      // so every prior relaunch timestamp ages out.
+      deps.wsBridge.isCliConnected.mockReturnValue(true);
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
+
+      // A fresh crash relaunches normally instead of being blocked by the cap.
+      deps.launcher.relaunch.mockClear();
+      deps.wsBridge.isCliConnected.mockReturnValue(false);
+      companionBus.emit("session:exited", { sessionId: "s1", exitCode: 143 });
+      await vi.advanceTimersByTimeAsync(45_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(deps.launcher.relaunch).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
   });
 
   // ── Session Creation ──────────────────────────────────────────────────────

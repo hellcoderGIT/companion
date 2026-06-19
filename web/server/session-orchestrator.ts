@@ -45,6 +45,19 @@ const KEEPALIVE_BASE_DELAY_MS = 3_000;
 // terminates with a visible "keeps crashing" message instead.
 const HEALTHY_UPTIME_MS = 60_000;
 
+// Long-horizon backstop for "slow" crash loops. The per-attempt budget above
+// only catches *fast* re-crashes (a resume that dies before HEALTHY_UPTIME_MS).
+// A session can also crash every minute or two — staying up just long enough
+// each time for scheduleHealthyReset to wipe the per-attempt budget — and so
+// relaunch forever, invisibly, never reaching MAX_AUTO_RELAUNCHES. To stop that,
+// we also count relaunches within a rolling window that healthy-resets do NOT
+// clear; once a session exceeds MAX_RELAUNCHES_PER_WINDOW relaunches inside
+// RELAUNCH_WINDOW_MS, auto-restart is paused with a visible message. Entries
+// age out by time, so a session that genuinely recovers (stays up well past the
+// window) earns a clean slate without any explicit reset.
+const RELAUNCH_WINDOW_MS = 10 * 60_000;
+const MAX_RELAUNCHES_PER_WINDOW = 5;
+
 const VSCODE_EDITOR_CONTAINER_PORT = 13337;
 const CODEX_APP_SERVER_CONTAINER_PORT = Number(
   process.env.COMPANION_CODEX_CONTAINER_WS_PORT || "4502",
@@ -152,6 +165,11 @@ export class SessionOrchestrator {
   // for HEALTHY_UPTIME_MS after a relaunch. Cancelled if it re-crashes first, so
   // a crash-loop accumulates toward MAX_AUTO_RELAUNCHES instead of resetting.
   private healthyResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Timestamps of recent relaunch attempts, used for the rolling-window cap.
+  // Unlike autoRelaunchCounts this is NOT cleared by scheduleHealthyReset — a
+  // session that briefly recovers between crashes must still accumulate toward
+  // the long-horizon cap. Entries are pruned by age (RELAUNCH_WINDOW_MS).
+  private relaunchHistory = new Map<string, number[]>();
 
   // Idempotency guard for initialize()
   private _initialized = false;
@@ -748,6 +766,7 @@ export class SessionOrchestrator {
     this.wsBridge.closeSession(sessionId);
     this.autoRelaunchCounts.delete(sessionId);
     this.relaunchExhaustedNotified.delete(sessionId);
+    this.relaunchHistory.delete(sessionId);
     this.relaunchingSet.delete(sessionId);
     this.intentionalKills.delete(sessionId);
     return { ok: true, worktree: worktreeResult };
@@ -766,6 +785,7 @@ export class SessionOrchestrator {
   clearAutoRelaunchCount(sessionId: string): void {
     this.autoRelaunchCounts.delete(sessionId);
     this.relaunchExhaustedNotified.delete(sessionId);
+    this.relaunchHistory.delete(sessionId);
     this.cancelHealthyReset(sessionId);
   }
 
@@ -848,8 +868,38 @@ export class SessionOrchestrator {
       return;
     }
 
+    // Long-horizon cap: even when each relaunch briefly recovers (long enough for
+    // scheduleHealthyReset to clear the per-attempt count above), a session that
+    // keeps crashing should not relaunch forever. Count relaunches in a rolling
+    // window that healthy-resets do not clear, and pause once it's clearly a loop.
+    const now = Date.now();
+    const recent = (this.relaunchHistory.get(sessionId) ?? []).filter(
+      (ts) => now - ts < RELAUNCH_WINDOW_MS,
+    );
+    if (recent.length >= MAX_RELAUNCHES_PER_WINDOW) {
+      metricsCollector.recordRelaunchExhausted();
+      log.warn("orchestrator", "Relaunch rolling-window cap reached", {
+        sessionId,
+        count: recent.length,
+        windowMs: RELAUNCH_WINDOW_MS,
+      });
+      this.wsBridge.broadcastToSession(sessionId, {
+        type: "error",
+        message:
+          `This session has restarted ${recent.length} times in the last ` +
+          `${Math.round(RELAUNCH_WINDOW_MS / 60_000)} minutes — it keeps crashing a ` +
+          `short while after each resume. Auto-restart is paused so it stops looping. ` +
+          `Use Reconnect to try again; if it keeps crashing, edit or remove the last message and resend.`,
+      });
+      this.relaunchExhaustedNotified.add(sessionId);
+      this.relaunchHistory.set(sessionId, recent);
+      this.relaunchingSet.delete(sessionId);
+      return;
+    }
+
     if (freshInfo && freshInfo.state !== "starting") {
       this.autoRelaunchCounts.set(sessionId, count + 1);
+      this.relaunchHistory.set(sessionId, [...recent, now]);
       metricsCollector.recordRelaunchAttempted();
       log.info("orchestrator", "Auto-relaunching CLI", { sessionId, attempt: count + 1, maxAttempts: MAX_AUTO_RELAUNCHES });
       const session = this.wsBridge.getSession(sessionId);
