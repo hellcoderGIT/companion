@@ -1530,21 +1530,52 @@ function createMockProc() {
 }
 
 describe("stdio transport disconnect propagation", () => {
-  it("fires disconnect and kills a lingering process when stdout closes while alive", async () => {
+  it("kills a wedged process that does not exit within the grace period", async () => {
     // The wedge case: the worker stops emitting (e.g. after a 429) and closes
-    // stdout but the process keeps running. The adapter must kill it (so the
-    // relaunch path's PID-liveness guard is cleared) and report disconnect.
-    const { proc, endStdout } = createMockProc();
-    adapter.attachStdio(proc);
-    expect(adapter.isConnected()).toBe(true);
+    // stdout but the process keeps running and never exits. After the grace
+    // window the adapter must kill it (so the relaunch path's PID-liveness guard
+    // is cleared) and report disconnect.
+    vi.useFakeTimers();
+    try {
+      const { proc, endStdout } = createMockProc();
+      adapter.attachStdio(proc);
+      expect(adapter.isConnected()).toBe(true);
 
-    endStdout();
-    // Let the async stdout reader observe the close and run its finally block.
-    await new Promise((r) => setTimeout(r, 0));
+      endStdout();
+      // Within the grace window the process is still alive → not killed yet.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proc.kill).not.toHaveBeenCalled();
 
-    expect(proc.kill).toHaveBeenCalledTimes(1);
-    expect(adapter.isConnected()).toBe(false);
-    expect(disconnectCb).toHaveBeenCalledTimes(1);
+      // Past the grace window with no self-exit → treated as wedged and killed.
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(proc.kill).toHaveBeenCalledTimes(1);
+      expect(adapter.isConnected()).toBe(false);
+      expect(disconnectCb).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does NOT kill a process that exits on its own within the grace period", async () => {
+    // The common, healthy case: the CLI closes stdout a beat before it exits
+    // cleanly (e.g. right after a `result`). Killing here would convert a code-0
+    // exit into a SIGTERM (143) and force a needless relaunch, so the adapter
+    // must wait out the grace and let the process exit on its own.
+    vi.useFakeTimers();
+    try {
+      const { proc, endStdout, resolveExit } = createMockProc();
+      adapter.attachStdio(proc);
+
+      endStdout();      // stdout closes while the process is still alive
+      resolveExit();    // ...but the process exits on its own during the grace
+      await vi.advanceTimersByTimeAsync(2100);
+
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(adapter.isConnected()).toBe(false);
+      expect(disconnectCb).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fires disconnect on process exit", async () => {

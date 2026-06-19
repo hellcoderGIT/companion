@@ -55,6 +55,16 @@ import { reportProtocolDrift } from "./protocol-monitor.js";
 /** Number of recent CLI message hashes to track for deduplication on WS reconnect. */
 const CLI_DEDUP_WINDOW = 2000;
 
+/**
+ * Grace period after stdout closes before we kill a still-alive CLI process.
+ * The CLI's stdout often EOFs a beat *before* the process exits cleanly (e.g.
+ * right after emitting a `result`). Killing immediately turns that code-0 exit
+ * into a SIGTERM (143) and forces a needless relaunch. We wait this long for the
+ * process to exit on its own; only a process that is still alive afterwards is
+ * treated as genuinely wedged and killed. Overridable for tests/tuning.
+ */
+const STDOUT_CLOSE_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_GRACE_MS) || 2000;
+
 // --- Claude Code Adapter ------------------------------------------------------
 
 export class ClaudeAdapter implements IBackendAdapter {
@@ -277,22 +287,33 @@ export class ClaudeAdapter implements IBackendAdapter {
       });
     } finally {
       // The stdout stream ended: the stream-json transport is dead and cannot
-      // be revived on this process. If the child somehow lingers (e.g. it
-      // stopped emitting after a fatal API error such as a 429 but never
-      // exited), kill it so `proc.exited` resolves and the launcher's
-      // `session:exited` → proactive `--resume` relaunch can recover it. Left
-      // alive, the process would keep `handleAutoRelaunch`'s PID-liveness guard
-      // satisfied, blocking every relaunch path indefinitely.
+      // be revived on this process. The process is now in one of two states:
+      //   (a) Exiting cleanly — its stdout EOFs a beat before it exits (e.g.
+      //       right after a `result`). Killing here converts a code-0 exit into
+      //       a SIGTERM (143) and forces a needless relaunch.
+      //   (b) Wedged — it stopped emitting (e.g. after a fatal API error such
+      //       as a 429) but will never exit, leaving `handleAutoRelaunch`'s
+      //       PID-liveness guard satisfied and blocking recovery indefinitely.
+      // Give it a short grace to exit on its own; only kill if it is STILL alive
+      // afterwards. That distinguishes (a) from (b) instead of clobbering every
+      // session that simply closed stdout on the way out.
       const proc = this.stdioProc;
       if (proc && proc.exitCode === null && !proc.killed) {
-        log.warn("claude-adapter", "stdout closed while process still alive; killing stale process", {
-          sessionId: this.sessionId,
-          pid: proc.pid,
-        });
-        try {
-          proc.kill();
-        } catch {
-          // Process may have exited between the check and the kill.
+        const exitedOnOwn = await Promise.race([
+          proc.exited.then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_GRACE_MS)),
+        ]);
+        if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
+          log.warn("claude-adapter", "stdout closed and process did not exit within grace; killing stale process", {
+            sessionId: this.sessionId,
+            pid: proc.pid,
+            graceMs: STDOUT_CLOSE_GRACE_MS,
+          });
+          try {
+            proc.kill();
+          } catch {
+            // Process may have exited between the check and the kill.
+          }
         }
       }
       this.notifyStdioDisconnect();
