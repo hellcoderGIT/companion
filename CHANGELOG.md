@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.104.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.104.2...companion-v0.104.3) (2026-06-19)
+
+
+### Bug Fixes
+
+* **adapter:** grace period before killing a CLI whose stdout closed ([#46](https://github.com/hellcoderGIT/companion/issues/46)) ([0143a81](https://github.com/hellcoderGIT/companion/commit/0143a8187bc115b7a92143d80db46d6e94e77582))
+
 ## [0.104.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.104.1...companion-v0.104.2) (2026-06-19)
 
 
