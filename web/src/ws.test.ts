@@ -981,6 +981,71 @@ describe("handleMessage: result", () => {
     expect(msgs[0].role).toBe("system");
     expect(msgs[0].content).toBe("Error: Something went wrong, Another error");
   });
+
+  // Regression: a 401 auth failure arrives as a result with is_error:true but an
+  // EMPTY errors[] (the text lives in `result`/`api_error_status`). The old
+  // `r.is_error && r.errors?.length` gate dropped it silently — "token expired,
+  // UI showed nothing". It must now render an explicit re-login banner.
+  it("surfaces an expired-token (401) result as a re-login banner", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        api_error_status: 401,
+        result: "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+        duration_ms: 3120,
+        duration_api_ms: 0,
+        num_turns: 1,
+        total_cost_usd: 0,
+        stop_reason: "stop_sequence",
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "u-auth",
+        session_id: "s1",
+      },
+    });
+
+    const msgs = useStore.getState().messages.get("s1")!;
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].role).toBe("system");
+    expect(msgs[0].content).toMatch(/claude login/i);
+    expect(msgs[0].content).toMatch(/re-authenticate/i);
+    // The underlying detail is still included for debugging.
+    expect(msgs[0].content).toMatch(/401 Invalid authentication credentials/);
+  });
+
+  // A non-auth error result with no errors[] must fall back to the `result` text
+  // instead of rendering nothing.
+  it("surfaces an is_error result with no errors[] using the result text", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        result: "Tool execution exploded",
+        duration_ms: 100,
+        duration_api_ms: 50,
+        num_turns: 1,
+        total_cost_usd: 0.01,
+        stop_reason: null,
+        usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "u-nonauth",
+        session_id: "s1",
+      },
+    });
+
+    const msgs = useStore.getState().messages.get("s1")!;
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].content).toBe("Error: Tool execution exploded");
+  });
 });
 
 // ===========================================================================

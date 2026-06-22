@@ -1931,4 +1931,69 @@ describe("SessionOrchestrator", () => {
       expect(deps.launcher.relaunch).not.toHaveBeenCalled();
     });
   });
+
+  // ── Auth-failure exits: never auto-relaunch, surface re-login ──────────────
+  describe("auth-failure exits", () => {
+    it("skips auto-relaunch and broadcasts auth_status on an auth-classified exit", () => {
+      vi.useFakeTimers();
+      orchestrator.initialize();
+      // A session that would otherwise be a relaunch candidate.
+      deps.launcher.getSession.mockReturnValue({ archived: false, state: "exited", pid: undefined } as any);
+      deps.wsBridge.isCliConnected.mockReturnValue(false);
+
+      companionBus.emit("session:exited", { sessionId: "s1", exitCode: 1, reason: "auth" });
+      // Even after any keepalive backoff window, no relaunch must occur.
+      vi.advanceTimersByTime(60_000);
+
+      expect(deps.wsBridge.broadcastToSession).toHaveBeenCalledWith(
+        "s1",
+        expect.objectContaining({ type: "auth_status" }),
+      );
+      expect(deps.launcher.relaunch).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it("skips auto-relaunch when the session is authBlocked (401 seen on the running CLI)", () => {
+      vi.useFakeTimers();
+      orchestrator.initialize();
+      deps.launcher.getSession.mockReturnValue({ archived: false, state: "exited", pid: undefined } as any);
+      deps.wsBridge.getSession.mockReturnValue({ authBlocked: true } as any);
+      deps.wsBridge.isCliConnected.mockReturnValue(false);
+
+      // reason is a generic crash here — the skip is driven by session.authBlocked.
+      companionBus.emit("session:exited", { sessionId: "s1", exitCode: 1, reason: "crash" });
+      vi.advanceTimersByTime(60_000);
+
+      expect(deps.wsBridge.broadcastToSession).toHaveBeenCalledWith(
+        "s1",
+        expect.objectContaining({ type: "auth_status" }),
+      );
+      expect(deps.launcher.relaunch).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    // Regression: the PRIMARY auth signal (a 401 result on a still-running CLI)
+    // sets session.authBlocked WITHOUT a process exit, so the guard is reached
+    // via session:relaunch-needed (disconnect / browser-connect), not
+    // session:exited. handleAutoRelaunch must honor authBlocked on this path too
+    // or the --resume CLI loops straight back into the same expired credentials.
+    it("skips auto-relaunch on the relaunch-needed path when authBlocked", async () => {
+      vi.useFakeTimers();
+      orchestrator.initialize();
+      deps.launcher.getSession.mockReturnValue({ archived: false, state: "exited", pid: undefined } as any);
+      deps.wsBridge.getSession.mockReturnValue({ authBlocked: true } as any);
+      deps.wsBridge.isCliConnected.mockReturnValue(false);
+
+      companionBus.emit("session:relaunch-needed", { sessionId: "s1" });
+      // Flush the async handler and any backoff window.
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(deps.wsBridge.broadcastToSession).toHaveBeenCalledWith(
+        "s1",
+        expect.objectContaining({ type: "auth_status" }),
+      );
+      expect(deps.launcher.relaunch).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+  });
 });

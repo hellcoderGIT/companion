@@ -547,6 +547,36 @@ describe("CLI handlers", () => {
     expect(session.state.model).toBe("claude-opus-4-6");
   });
 
+  it("clears authBlocked when the CLI (re)initializes via session_init", async () => {
+    // Regression: after an auth failure sets authBlocked=true, a freshly booted/
+    // reattached CLI (e.g. user re-ran `claude login` + Reconnect) must clear the
+    // block. Otherwise a later UNRELATED crash is wrongly treated as auth and
+    // denied keepalive relaunch, leaving the session silently dead.
+    mockExecSync.mockImplementation(() => { throw new Error("not a git repo"); });
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    await bridge.handleCLIMessage(cli, makeInitMsg());
+
+    const session = bridge.getSession("s1")!;
+    session.authBlocked = true;
+
+    // Re-init through the adapter pipeline (the server-owned adapter path where
+    // the authBlocked clear lives).
+    const adapter = session.backendAdapter as any;
+    adapter.browserMessageCb({
+      type: "session_init",
+      session: {
+        session_id: "cli-internal",
+        model: "claude-sonnet-4-6",
+        cwd: "/test",
+        tools: [],
+        permissionMode: "default",
+      },
+    });
+
+    expect(session.authBlocked).toBe(false);
+  });
+
   it("handleCLIMessage: updates state from init (model, cwd, tools, permissionMode)", async () => {
     mockExecSync.mockImplementation(() => {
       throw new Error("not a git repo");
@@ -4793,5 +4823,153 @@ describe("User message during initializing phase", () => {
     // State machine transitions to streaming — the adapter queues the
     // message internally until the backend is ready.
     expect(session.stateMachine.phase).toBe("streaming");
+  });
+});
+
+// ─── In-flight turn replay + auth surfacing ──────────────────────────────────
+// These cover the two reported failures: (A) a user prompt sent to a CLI that
+// dies before answering must be replayed after relaunch instead of being lost
+// ("no answers"); (B) a 401 auth result must flag the session and surface an
+// auth banner instead of silently looping.
+describe("in-flight user turn replay", () => {
+  function makeAdapter(opts: { connected?: boolean; send?: any } = {}) {
+    let onBrowserMessage: ((msg: any) => void) | undefined;
+    const send = opts.send ?? vi.fn(() => true);
+    const adapter = {
+      isConnected: () => opts.connected ?? true,
+      send,
+      disconnect: async () => {},
+      onBrowserMessage: (cb: (msg: any) => void) => { onBrowserMessage = cb; },
+      onSessionMeta: () => {},
+      onDisconnect: () => {},
+      onInitError: () => {},
+    };
+    return { adapter, send, fire: (msg: any) => onBrowserMessage?.(msg) };
+  }
+
+  it("sets inFlightUserTurn on dispatch and clears it when the backend produces output", () => {
+    const browser = makeBrowserSocket("inflight-1");
+    bridge.handleBrowserOpen(browser, "inflight-1");
+    const { adapter, fire } = makeAdapter();
+    bridge.attachBackendAdapter("inflight-1", adapter as any, "codex");
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({ type: "user_message", content: "do the thing" }));
+
+    const session = bridge.getSession("inflight-1")!;
+    expect(session.inFlightUserTurn).toBeDefined();
+    expect(JSON.parse(session.inFlightUserTurn!).content).toBe("do the thing");
+    expect(session.inFlightTurnReplayed).toBe(false);
+
+    // First sign of output for the turn clears the replay copy.
+    fire({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } }, parent_tool_use_id: null });
+    expect(session.inFlightUserTurn).toBeUndefined();
+  });
+
+  it("replays an unanswered in-flight turn through the relaunched adapter", () => {
+    const browser = makeBrowserSocket("inflight-2");
+    bridge.handleBrowserOpen(browser, "inflight-2");
+    const first = makeAdapter();
+    bridge.attachBackendAdapter("inflight-2", first.adapter as any, "codex");
+
+    bridge.handleBrowserMessage(browser, JSON.stringify({ type: "user_message", content: "unanswered prompt" }));
+    const session = bridge.getSession("inflight-2")!;
+    expect(session.inFlightUserTurn).toBeDefined();
+    // It was delivered (send returned true), so it is NOT sitting in the queue.
+    expect(session.pendingMessages).toHaveLength(0);
+
+    // CLI dies before answering → a fresh adapter attaches (relaunch).
+    const second = makeAdapter();
+    bridge.attachBackendAdapter("inflight-2", second.adapter as any, "codex");
+
+    const replayed = (second.send.mock.calls as any[][]).find(([m]) => m?.type === "user_message");
+    expect(replayed?.[0]?.content).toBe("unanswered prompt");
+    expect(session.inFlightTurnReplayed).toBe(true);
+    expect(session.pendingMessages).toHaveLength(0);
+  });
+
+  it("does not replay the same in-flight turn twice (poison-prompt guard)", () => {
+    const browser = makeBrowserSocket("inflight-3");
+    bridge.handleBrowserOpen(browser, "inflight-3");
+    bridge.attachBackendAdapter("inflight-3", makeAdapter().adapter as any, "codex");
+    bridge.handleBrowserMessage(browser, JSON.stringify({ type: "user_message", content: "poison" }));
+
+    // First relaunch replays it.
+    bridge.attachBackendAdapter("inflight-3", makeAdapter().adapter as any, "codex");
+    const session = bridge.getSession("inflight-3")!;
+    expect(session.inFlightTurnReplayed).toBe(true);
+
+    // Second relaunch (still no answer) must NOT replay again.
+    const third = makeAdapter();
+    bridge.attachBackendAdapter("inflight-3", third.adapter as any, "codex");
+    const replayedAgain = (third.send.mock.calls as any[][]).find(([m]) => m?.type === "user_message");
+    expect(replayedAgain).toBeUndefined();
+  });
+
+  it("flags authBlocked on a 401 result and forwards it without a duplicate auth_status bubble", () => {
+    const browser = makeBrowserSocket("auth-1");
+    bridge.handleBrowserOpen(browser, "auth-1");
+    const { adapter, fire } = makeAdapter();
+    bridge.attachBackendAdapter("auth-1", adapter as any, "codex");
+    browser.send.mockClear();
+
+    fire({
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        api_error_status: 401,
+        result: "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+        duration_ms: 1,
+        duration_api_ms: 0,
+        num_turns: 1,
+        total_cost_usd: 0,
+        stop_reason: null,
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "u-auth",
+        session_id: "auth-1",
+      },
+    });
+
+    const session = bridge.getSession("auth-1")!;
+    // The session is flagged so auto-relaunch is skipped (the orchestrator
+    // surfaces the re-login banner when it declines to relaunch).
+    expect(session.authBlocked).toBe(true);
+    const broadcast = (browser.send.mock.calls as any[][]).map(([raw]) => JSON.parse(raw));
+    // The raw result is forwarded so the client renders the re-login banner via
+    // describeResultError (guidance + the specific error detail)...
+    expect(broadcast.some((m: any) => m.type === "result")).toBe(true);
+    // ...and we do NOT also emit an auth_status bubble on this path — that would
+    // duplicate the same guidance in a second stacked system message.
+    expect(broadcast.some((m: any) => m.type === "auth_status")).toBe(false);
+  });
+
+  it("clears authBlocked after a subsequent successful result", () => {
+    const browser = makeBrowserSocket("auth-2");
+    bridge.handleBrowserOpen(browser, "auth-2");
+    const { adapter, fire } = makeAdapter();
+    bridge.attachBackendAdapter("auth-2", adapter as any, "codex");
+
+    const session = bridge.getSession("auth-2")!;
+    session.authBlocked = true;
+
+    fire({
+      type: "result",
+      data: {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 1,
+        duration_api_ms: 0,
+        num_turns: 1,
+        total_cost_usd: 0,
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        uuid: "u-ok",
+        session_id: "auth-2",
+      },
+    });
+
+    expect(session.authBlocked).toBe(false);
   });
 });

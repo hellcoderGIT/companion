@@ -1385,3 +1385,75 @@ describe("isCmdScript platform guard", () => {
     expect(cmdAndArgs[0]).not.toBe("cmd.exe");
   });
 });
+
+// ─── Exit classification (auth vs crash vs normal) ───────────────────────────
+// The orchestrator must NOT auto-relaunch a CLI that exited because its
+// credentials are invalid/expired — relaunching just loops into the same 401.
+// cli-launcher classifies the exit from a tail of stderr + the exit code and
+// stamps `reason` onto the session:exited event.
+describe("exit reason classification", () => {
+  function makeProcWithStderr(stderrText: string) {
+    let resolveExit: (c: number) => void;
+    const exited = new Promise<number>((r) => { resolveExit = r; });
+    const proc = {
+      pid: 4242,
+      kill: vi.fn(),
+      exited,
+      stdin: new WritableStream<Uint8Array>(),
+      stdout: new ReadableStream<Uint8Array>({ start() {} }),
+      stderr: new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (stderrText) controller.enqueue(new TextEncoder().encode(stderrText));
+          controller.close();
+        },
+      }),
+    };
+    return { proc, resolveExit: resolveExit! };
+  }
+
+  it("classifies a 401 stderr exit as reason 'auth'", async () => {
+    const { proc, resolveExit } = makeProcWithStderr(
+      "API Error: 401 Invalid authentication credentials\n",
+    );
+    mockSpawn.mockReturnValueOnce(proc);
+    const events: any[] = [];
+    companionBus.on("session:exited", (e) => { events.push(e); });
+
+    launcher.launch({ cwd: "/tmp" });
+    // Let pipeStream drain the stderr chunk into the tail before the exit fires.
+    await new Promise((r) => setTimeout(r, 10));
+    resolveExit(1);
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].reason).toBe("auth");
+  });
+
+  it("classifies a clean (code 0) exit with no auth stderr as 'normal'", async () => {
+    const { proc, resolveExit } = makeProcWithStderr("");
+    mockSpawn.mockReturnValueOnce(proc);
+    const events: any[] = [];
+    companionBus.on("session:exited", (e) => { events.push(e); });
+
+    launcher.launch({ cwd: "/tmp" });
+    await new Promise((r) => setTimeout(r, 10));
+    resolveExit(0);
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(events[0].reason).toBe("normal");
+  });
+
+  it("classifies a non-zero exit with no auth stderr as 'crash'", async () => {
+    const { proc, resolveExit } = makeProcWithStderr("Segmentation fault\n");
+    mockSpawn.mockReturnValueOnce(proc);
+    const events: any[] = [];
+    companionBus.on("session:exited", (e) => { events.push(e); });
+
+    launcher.launch({ cwd: "/tmp" });
+    await new Promise((r) => setTimeout(r, 10));
+    resolveExit(139);
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(events[0].reason).toBe("crash");
+  });
+});

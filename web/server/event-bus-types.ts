@@ -12,8 +12,16 @@ export interface CompanionEventMap {
   /** CLI reported its internal session ID (used for --resume). */
   "session:cli-id-received": { sessionId: string; cliSessionId: string };
 
-  /** CLI/Codex process exited. */
-  "session:exited": { sessionId: string; exitCode: number | null };
+  /**
+   * CLI/Codex process exited. `reason` classifies why, derived from the exit
+   * code and a tail of stderr: "auth" (expired/invalid credentials — must NOT
+   * auto-relaunch), "normal" (clean exit), or "crash"/undefined (recoverable).
+   */
+  "session:exited": {
+    sessionId: string;
+    exitCode: number | null;
+    reason?: "auth" | "normal" | "crash";
+  };
 
   /** CLI WebSocket disconnected and a browser needs a relaunch. */
   "session:relaunch-needed": { sessionId: string };

@@ -139,6 +139,12 @@ export interface CLIResultMessage {
   is_error: boolean;
   result?: string;
   errors?: string[];
+  /**
+   * HTTP status of the underlying API error, when the turn failed at the API
+   * layer (e.g. 401 for expired/invalid credentials). Present on the wire but
+   * historically untyped — declared here so auth failures can be surfaced.
+   */
+  api_error_status?: number;
   duration_ms: number;
   duration_api_ms: number;
   num_turns: number;
@@ -163,6 +169,57 @@ export interface CLIResultMessage {
   total_lines_removed?: number;
   uuid: string;
   session_id: string;
+}
+
+/**
+ * User-facing guidance shown when a turn fails because the Claude credentials
+ * are missing/expired/invalid. Shared by the server (auth banner on relaunch
+ * skip) and the client (error bubble) so the wording stays consistent.
+ */
+export const AUTH_EXPIRED_MESSAGE =
+  "Your Claude login has expired or is invalid — re-authenticate (run `claude login` in a terminal), then use Reconnect to resume this session.";
+
+/**
+ * Text patterns that reliably indicate an authentication/authorization failure
+ * in free-form output (a CLI `result` message or a tail of stderr).
+ *
+ * Bare "401"/"403" and a standalone "unauthorized" are deliberately NOT matched:
+ * they appear in stack-trace line numbers, tool exit codes, file-permission
+ * messages and unrelated HTTP logs, and matching them would misclassify a
+ * RECOVERABLE crash as an auth failure — which suppresses auto-relaunch and
+ * leaves the session dead (a brand-new hang, the opposite of the intent). We
+ * require an explicit auth phrase, or a status code paired with
+ * unauthorized/forbidden. The structured `api_error_status` field (checked in
+ * isAuthErrorResult) remains the primary, reliable signal.
+ */
+const AUTH_ERROR_TEXT_RE =
+  /invalid authentication credentials|authentication_failed|\b40[13]\s+(?:unauthorized|forbidden)\b|(?:unauthorized|forbidden)[^\n]{0,12}\b40[13]\b|please run\s+`?\/?login|claude login|credentials?\s+(?:expired|invalid|revoked)|oauth token|token\s+(?:expired|revoked)/i;
+
+/**
+ * True when free-form text (a result message or stderr tail) looks like an
+ * auth/credential failure. Shared by isAuthErrorResult and the launcher's
+ * process-exit classifier so the two cannot drift.
+ */
+export function looksLikeAuthErrorText(text: string): boolean {
+  return AUTH_ERROR_TEXT_RE.test(text);
+}
+
+/**
+ * True when a CLI `result` indicates an authentication/authorization failure.
+ * The CLI reports these as a result with `is_error` and either
+ * `api_error_status` 401/403 or an auth phrase in `result`/`errors` — it does
+ * NOT populate the `errors[]` array, which is why the old `errors?.length`
+ * gate silently swallowed expired-token results.
+ */
+export function isAuthErrorResult(r: {
+  is_error?: boolean;
+  api_error_status?: number;
+  result?: string;
+  errors?: string[];
+}): boolean {
+  if (!r.is_error) return false;
+  if (r.api_error_status === 401 || r.api_error_status === 403) return true;
+  return looksLikeAuthErrorText(`${r.result ?? ""} ${(r.errors ?? []).join(" ")}`);
 }
 
 export interface CLIStreamEventMessage {

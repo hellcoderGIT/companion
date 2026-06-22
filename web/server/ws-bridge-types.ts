@@ -61,6 +61,26 @@ export interface Session {
   stateMachine: SessionStateMachine;
   /** Cleanup function for state machine transition listener — call on session teardown. */
   unsubscribeStateMachine?: () => void;
+  /**
+   * Serialized (JSON) user_message that has been dispatched to the backend but
+   * has not yet produced any model output (assistant/stream_event/result).
+   * If the CLI dies before responding, this is replayed to the relaunched
+   * `--resume` process so the prompt isn't silently lost. Cleared the moment
+   * any output for the turn arrives. Runtime-only (not persisted).
+   */
+  inFlightUserTurn?: string;
+  /**
+   * Guards against replaying a "poison" prompt that crashes the CLI on every
+   * resume: an in-flight turn is replayed at most once per turn. Reset when a
+   * new user_message is dispatched.
+   */
+  inFlightTurnReplayed?: boolean;
+  /**
+   * Set when the last turn failed authentication (expired/invalid credentials).
+   * Auto-relaunch is skipped while this is set — relaunching cannot fix auth —
+   * and a re-login banner is surfaced instead. Cleared on a successful result.
+   */
+  authBlocked?: boolean;
 }
 
 export type GitSessionKey =

@@ -7,6 +7,7 @@ import type {
   BackendType,
   McpServerConfig,
 } from "./session-types.js";
+import { isAuthErrorResult } from "./session-types.js";
 import type { SessionStore } from "./session-store.js";
 import type { IBackendAdapter } from "./backend-adapter.js";
 import { ClaudeAdapter } from "./claude-adapter.js";
@@ -442,6 +443,12 @@ export class WsBridge {
           ...cwdOverride,
           backend_type: session.backendType,
         };
+        // A freshly booted/reattached CLI invalidates any prior auth-block: the
+        // credentials may have been refreshed out-of-band (e.g. `claude login`
+        // + Reconnect). Clear it here so a later unrelated crash isn't wrongly
+        // treated as an auth failure and denied keepalive relaunch. authBlocked
+        // is re-set the moment another auth-error result arrives.
+        session.authBlocked = false;
         this.refreshGitInfo(session, { notifyPoller: true });
         this.broadcastToBrowsers(session, { type: "session_init", session: session.state });
         session.stateMachine.transition("ready", "system_init");
@@ -501,6 +508,9 @@ export class WsBridge {
 
       // -- assistant: append to history, notify listeners ------------------
       if (msg.type === "assistant") {
+        // The turn is producing output — it was delivered, so drop the in-flight
+        // replay copy (no need to re-send it after a future relaunch).
+        session.inFlightUserTurn = undefined;
         const assistantMsg = { ...msg, timestamp: msg.timestamp || Date.now() };
         this.appendHistory(session, assistantMsg);
         this.persistSession(session);
@@ -508,12 +518,29 @@ export class WsBridge {
       }
 
       if (msg.type === "stream_event") {
+        session.inFlightUserTurn = undefined;
         companionBus.emit("message:stream_event", { sessionId: session.id, message: msg });
       }
 
       // -- result: update session cost/turns, refresh git, notify listeners
       if (msg.type === "result") {
         const resultData = msg.data;
+        // The turn completed (even if it errored) — no replay needed.
+        session.inFlightUserTurn = undefined;
+        // Detect auth failures (expired/invalid credentials). The CLI keeps
+        // running in stream-json mode, so this is the primary auth signal — not
+        // a process exit. Flag the session so auto-relaunch is skipped (the
+        // orchestrator surfaces a re-login banner when it declines to relaunch).
+        // We do NOT broadcast auth_status here: the raw result is forwarded to
+        // browsers below (catch-all broadcast) and the client renders it via
+        // describeResultError, which already includes the re-login guidance plus
+        // the specific error detail — a second auth_status bubble would just
+        // duplicate that same guidance.
+        if (isAuthErrorResult(resultData)) {
+          session.authBlocked = true;
+        } else if (!resultData.is_error) {
+          session.authBlocked = false;
+        }
         session.state.total_cost_usd = resultData.total_cost_usd;
         session.state.num_turns = resultData.num_turns;
         if (typeof resultData.total_lines_added === "number") {
@@ -673,6 +700,28 @@ export class WsBridge {
       log.error("ws-bridge", "Backend init error", { sessionId, error });
       this.broadcastToBrowsers(session, { type: "error", message: error });
     });
+
+    // Replay a turn that was dispatched but never answered before the previous
+    // CLI died. --resume restores the conversation context but does NOT re-run
+    // an unanswered prompt, so without this the relaunched session sits idle
+    // forever ("no answer"). Replay at most once per turn to avoid a poison
+    // prompt looping the CLI. Prepended so it runs ahead of any later queue.
+    if (
+      !isLegacyWsClaude &&
+      session.inFlightUserTurn &&
+      !session.inFlightTurnReplayed &&
+      !session.pendingMessages.includes(session.inFlightUserTurn)
+    ) {
+      session.pendingMessages.unshift(session.inFlightUserTurn);
+      session.inFlightTurnReplayed = true;
+      log.info("ws-bridge", "Replaying in-flight user turn after relaunch", {
+        sessionId,
+      });
+      this.broadcastToBrowsers(session, {
+        type: "error",
+        message: "Reconnected — re-sending your last message, which the previous session didn't answer.",
+      });
+    }
 
     // Flush pending messages for server-owned backends (Codex + stdio Claude),
     // where attachment is the transport-open event. The legacy WS Claude
@@ -1170,6 +1219,16 @@ export class WsBridge {
       }
       this.persistSession(session);
       this.broadcastToBrowsers(session, userMessage);
+      // Track this turn as in-flight so it can be replayed if the CLI dies
+      // before answering. Stored as the original outgoing message so the
+      // relaunch flush can re-send it verbatim. A new turn resets the
+      // one-shot replay guard.
+      session.inFlightUserTurn = JSON.stringify(msg);
+      session.inFlightTurnReplayed = false;
+      // A fresh turn is an attempt to make progress (e.g. after the user
+      // re-authenticated), so clear any stale auth-block — a genuine crash on
+      // this new turn should be allowed to auto-relaunch again.
+      session.authBlocked = false;
     }
 
     // -- permission_response: populate updatedInput fallback from pending, then remove -------
