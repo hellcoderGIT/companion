@@ -12,6 +12,12 @@ export interface ModeOption {
   label: string;
 }
 
+export interface EffortOption {
+  /** Empty string means "use the model's built-in default effort" (no --effort flag). */
+  value: string;
+  label: string;
+}
+
 // ─── Icon assignment for dynamically fetched models ──────────────────────────
 
 const MODEL_ICONS: Record<string, string> = {
@@ -69,6 +75,20 @@ export const CODEX_MODES: ModeOption[] = [
   { value: "plan", label: "Plan" },
 ];
 
+// Reasoning-effort levels accepted by the Claude Code CLI's `--effort` flag
+// (low, medium, high, xhigh, max). The first entry ("Default") passes no flag,
+// so the model uses its own built-in default effort. Codex bakes reasoning
+// effort into the model name (e.g. gpt-5.3-codex-xhigh), so it has no separate
+// effort selector — see getEffortsForBackend.
+export const CLAUDE_EFFORTS: EffortOption[] = [
+  { value: "", label: "Default" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "xHigh" },
+  { value: "max", label: "Max" },
+];
+
 // Agent-specific modes: "plan" is excluded because agents are autonomous
 // and cannot wait for human plan approval.
 export const CLAUDE_AGENT_MODES: ModeOption[] = [
@@ -106,4 +126,15 @@ export function getDefaultMode(backend: BackendType): string {
 
 export function getDefaultAgentMode(backend: BackendType): string {
   return backend === "codex" ? CODEX_AGENT_MODES[0].value : CLAUDE_AGENT_MODES[0].value;
+}
+
+// Codex selects reasoning effort via the model variant, so it returns no effort
+// options and the selector is hidden for that backend.
+export function getEffortsForBackend(backend: BackendType): EffortOption[] {
+  return backend === "codex" ? [] : CLAUDE_EFFORTS;
+}
+
+export function getDefaultEffort(_backend: BackendType): string {
+  // Empty = let the model use its own default effort (no --effort flag passed).
+  return "";
 }

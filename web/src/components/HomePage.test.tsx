@@ -410,6 +410,90 @@ describe("HomePage", () => {
     expect(screen.getByText("Sonnet 4.6")).toBeInTheDocument(); // now selected
   });
 
+  // ─── Effort dropdown interaction ────────────────────────────────────────────
+
+  it("opens, selects, and persists the reasoning effort (Claude)", async () => {
+    // Verifies the new effort selector: default label is "Default" (no flag),
+    // selecting "xHigh" updates the label and persists to localStorage so it
+    // sticks across reloads.
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    const effortButton = screen.getByLabelText("Reasoning effort");
+    expect(effortButton).toHaveTextContent("Default");
+
+    // Open the dropdown and pick the xHigh level.
+    fireEvent.click(effortButton);
+    fireEvent.click(screen.getByText("xHigh"));
+
+    // Label updates and the choice is persisted.
+    expect(screen.getByLabelText("Reasoning effort")).toHaveTextContent("xHigh");
+    expect(localStorage.getItem("cc-effort")).toBe("xhigh");
+  });
+
+  it("omits effort from the create payload when left at the default", async () => {
+    // The default sentinel ("") must send `effort: undefined` so the model keeps
+    // its own built-in default effort.
+    mockStoreGetState.mockReturnValue(buildStoreMock());
+    createSessionStreamMock.mockResolvedValue({
+      sessionId: "s-effort-default",
+      state: "starting",
+      cwd: "/repo",
+    });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("repo")).toBeInTheDocument());
+
+    fireEvent.change(
+      screen.getByPlaceholderText("Fix a bug, build a feature, refactor code..."),
+      { target: { value: "do a thing" } },
+    );
+    fireEvent.click(screen.getByTitle("Send message"));
+    await waitFor(() => {
+      expect(createSessionStreamMock).toHaveBeenCalledWith(
+        expect.objectContaining({ effort: undefined }),
+        expect.any(Function),
+      );
+    });
+  });
+
+  it("passes the chosen effort to createSessionStream", async () => {
+    // A non-default selection flows into the create payload as the CLI level.
+    mockStoreGetState.mockReturnValue(buildStoreMock());
+    createSessionStreamMock.mockResolvedValue({
+      sessionId: "s-effort-max",
+      state: "starting",
+      cwd: "/repo",
+    });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("repo")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText("Reasoning effort"));
+    fireEvent.click(screen.getByText("Max"));
+    fireEvent.change(
+      screen.getByPlaceholderText("Fix a bug, build a feature, refactor code..."),
+      { target: { value: "do a thing" } },
+    );
+    fireEvent.click(screen.getByTitle("Send message"));
+    await waitFor(() => {
+      expect(createSessionStreamMock).toHaveBeenCalledWith(
+        expect.objectContaining({ effort: "max" }),
+        expect.any(Function),
+      );
+    });
+  });
+
+  it("hides the effort selector for the Codex backend", async () => {
+    // Codex bakes reasoning effort into the model name, so the dedicated effort
+    // selector must not render when the backend is restored as codex.
+    mockApi.getBackendModels.mockResolvedValue([]);
+    localStorage.setItem("cc-backend", "codex");
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    expect(screen.queryByLabelText("Reasoning effort")).not.toBeInTheDocument();
+  });
+
   // ─── Mode dropdown interaction ──────────────────────────────────────────────
 
   it("opens and selects from the mode dropdown", async () => {

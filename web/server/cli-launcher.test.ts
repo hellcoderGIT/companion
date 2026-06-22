@@ -256,6 +256,26 @@ describe("launch", () => {
     expect(cmdAndArgs[modeIdx + 1]).toBe("bypassPermissions");
   });
 
+  it("passes --effort when an effort level is provided", () => {
+    // The reasoning-effort selector sends e.g. "xhigh"; it must reach the CLI
+    // as `--effort xhigh`.
+    launcher.launch({ effort: "xhigh", cwd: "/tmp" });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    const effortIdx = cmdAndArgs.indexOf("--effort");
+    expect(effortIdx).toBeGreaterThan(-1);
+    expect(cmdAndArgs[effortIdx + 1]).toBe("xhigh");
+  });
+
+  it("omits --effort when no effort level is provided (model default)", () => {
+    // Empty/undefined effort means "use the model's built-in default" — the flag
+    // must not appear at all so the CLI doesn't override the default.
+    launcher.launch({ cwd: "/tmp" });
+
+    const [cmdAndArgs] = mockSpawn.mock.calls[0];
+    expect(cmdAndArgs).not.toContain("--effort");
+  });
+
   it("downgrades bypassPermissions to acceptEdits for containerized Claude sessions", () => {
     launcher.launch({
       cwd: "/tmp/project",

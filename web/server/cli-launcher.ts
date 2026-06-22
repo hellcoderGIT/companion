@@ -84,6 +84,8 @@ export interface SdkSessionInfo {
   exitCode?: number | null;
   model?: string;
   permissionMode?: string;
+  /** Reasoning-effort level (low|medium|high|xhigh|max) passed to the CLI's --effort flag. Empty/undefined = model default. Claude only. */
+  effort?: string;
   cwd: string;
   createdAt: number;
   /** The CLI's internal session ID (from system.init), used for --resume */
@@ -149,6 +151,8 @@ export interface SdkSessionInfo {
 export interface LaunchOptions {
   model?: string;
   permissionMode?: string;
+  /** Reasoning-effort level (low|medium|high|xhigh|max). Empty/undefined = model default. Claude only. */
+  effort?: string;
   cwd?: string;
   claudeBinary?: string;
   codexBinary?: string;
@@ -309,6 +313,7 @@ export class CliLauncher {
       state: "starting",
       model: options.model,
       permissionMode: options.permissionMode,
+      effort: options.effort,
       cwd,
       createdAt: Date.now(),
       backendType,
@@ -459,6 +464,7 @@ export class CliLauncher {
       this.spawnCLI(sessionId, info, {
         model: info.model,
         permissionMode: info.permissionMode,
+        effort: info.effort,
         cwd: info.cwd,
         resumeSessionId: info.cliSessionId,
         containerId: info.containerId,
@@ -531,6 +537,11 @@ export class CliLauncher {
 
     if (options.model) {
       args.push("--model", options.model);
+    }
+    if (options.effort) {
+      // Reasoning-effort level (low|medium|high|xhigh|max). Omitted when empty so
+      // the model falls back to its built-in default effort.
+      args.push("--effort", options.effort);
     }
     if (effectivePermissionMode) {
       args.push("--permission-mode", effectivePermissionMode);

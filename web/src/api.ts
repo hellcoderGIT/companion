@@ -212,6 +212,8 @@ export interface CloudProviderPlan {
 export interface CreateSessionOpts {
   model?: string;
   permissionMode?: string;
+  /** Reasoning-effort level (low|medium|high|xhigh|max). Empty/undefined = model default. Claude only. */
+  effort?: string;
   cwd?: string;
   claudeBinary?: string;
   codexBinary?: string;
