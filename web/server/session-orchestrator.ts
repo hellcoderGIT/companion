@@ -83,6 +83,8 @@ export interface CreateSessionRequest {
   backend?: string;
   model?: string;
   permissionMode?: string;
+  /** Reasoning-effort level (low|medium|high|xhigh|max). Empty/undefined = model default. Claude only. */
+  effort?: string;
   cwd?: string;
   claudeBinary?: string;
   codexBinary?: string;
@@ -626,6 +628,7 @@ export class SessionOrchestrator {
         session = this.launcher.launch({
           model: body.model,
           permissionMode: body.permissionMode,
+          effort: body.effort,
           cwd,
           claudeBinary: body.claudeBinary,
           codexBinary: body.codexBinary,

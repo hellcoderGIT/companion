@@ -7,12 +7,15 @@ import {
   getDefaultModel,
   getDefaultMode,
   getDefaultAgentMode,
+  getEffortsForBackend,
+  getDefaultEffort,
   CLAUDE_MODELS,
   CODEX_MODELS,
   CLAUDE_MODES,
   CODEX_MODES,
   CLAUDE_AGENT_MODES,
   CODEX_AGENT_MODES,
+  CLAUDE_EFFORTS,
 } from "./backends.js";
 
 describe("toModelOptions", () => {
@@ -141,6 +144,42 @@ describe("getDefaultAgentMode", () => {
 
   it("returns first codex agent mode for codex backend", () => {
     expect(getDefaultAgentMode("codex")).toBe(CODEX_AGENT_MODES[0].value);
+  });
+});
+
+describe("getEffortsForBackend", () => {
+  // Claude exposes the CLI's --effort levels as a dropdown; Codex bakes
+  // reasoning effort into the model name, so it gets no effort options.
+  it("returns the Claude effort levels for claude backend", () => {
+    expect(getEffortsForBackend("claude")).toBe(CLAUDE_EFFORTS);
+  });
+
+  it("returns no effort options for codex backend", () => {
+    expect(getEffortsForBackend("codex")).toEqual([]);
+  });
+});
+
+describe("getDefaultEffort", () => {
+  // Empty string is the sentinel for "no --effort flag" so the model uses its
+  // own built-in default effort — matches the user's requirement to keep the
+  // Opus 4.8 default untouched unless explicitly changed.
+  it("defaults to empty (model default) for both backends", () => {
+    expect(getDefaultEffort("claude")).toBe("");
+    expect(getDefaultEffort("codex")).toBe("");
+  });
+});
+
+describe("CLAUDE_EFFORTS", () => {
+  // The CLI accepts exactly: low, medium, high, xhigh, max. The first entry is
+  // the empty "Default" sentinel which must never be sent as a flag value.
+  it("first entry is the empty default sentinel", () => {
+    expect(CLAUDE_EFFORTS[0].value).toBe("");
+    expect(CLAUDE_EFFORTS[0].label).toBe("Default");
+  });
+
+  it("exposes exactly the CLI-supported effort levels", () => {
+    const levels = CLAUDE_EFFORTS.map((e) => e.value).filter(Boolean);
+    expect(levels).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 });
 

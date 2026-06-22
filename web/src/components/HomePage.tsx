@@ -18,7 +18,7 @@ import { generateUniqueSessionName } from "../utils/names.js";
 import { getRecentDirs, addRecentDir } from "../utils/recent-dirs.js";
 import { navigateToSession } from "../utils/routing.js";
 import { isSandboxEnabled } from "../feature-flags.js";
-import { getModelsForBackend, getModesForBackend, getDefaultModel, getDefaultMode, toModelOptions, type ModelOption } from "../utils/backends.js";
+import { getModelsForBackend, getModesForBackend, getEffortsForBackend, getDefaultModel, getDefaultMode, toModelOptions, type ModelOption } from "../utils/backends.js";
 import type { BackendType } from "../types.js";
 import { EnvManager } from "./EnvManager.js";
 import { FolderPicker } from "./FolderPicker.js";
@@ -122,6 +122,9 @@ export function HomePage() {
   const [mode, setMode] = useState(() => getDefaultMode(
     (localStorage.getItem("cc-backend") as BackendType) || "claude",
   ));
+  // Reasoning-effort level for Claude sessions. Persisted across reloads so the
+  // user's chosen effort sticks; empty string = the model's built-in default.
+  const [effort, setEffort] = useState(() => localStorage.getItem("cc-effort") || "");
   const [cwd, setCwd] = useState(() => getRecentDirs()[0] || "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -137,6 +140,7 @@ export function HomePage() {
 
   const MODELS = dynamicModels || getModelsForBackend(backend);
   const MODES = getModesForBackend(backend);
+  const EFFORTS = getEffortsForBackend(backend);
 
   // Environment state
   const [envs, setEnvs] = useState<CompanionEnv[]>([]);
@@ -162,6 +166,7 @@ export function HomePage() {
   // Dropdown states
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showModeDropdown, setShowModeDropdown] = useState(false);
+  const [showEffortDropdown, setShowEffortDropdown] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [showBranchingControls, setShowBranchingControls] = useState(false);
   const [resumeSessionAt, setResumeSessionAt] = useState("");
@@ -191,6 +196,7 @@ export function HomePage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
+  const effortDropdownRef = useRef<HTMLDivElement>(null);
   const envDropdownRef = useRef<HTMLDivElement>(null);
 
   const currentSessionId = useStore((s) => s.currentSessionId);
@@ -318,6 +324,9 @@ export function HomePage() {
       if (modeDropdownRef.current && !modeDropdownRef.current.contains(e.target as Node)) {
         setShowModeDropdown(false);
       }
+      if (effortDropdownRef.current && !effortDropdownRef.current.contains(e.target as Node)) {
+        setShowEffortDropdown(false);
+      }
       if (envDropdownRef.current && !envDropdownRef.current.contains(e.target as Node)) {
         setShowEnvDropdown(false);
       }
@@ -348,6 +357,7 @@ export function HomePage() {
 
   const selectedModel = MODELS.find((m) => m.value === model) || MODELS[0];
   const selectedMode = MODES.find((m) => m.value === mode) || MODES[0];
+  const selectedEffort = EFFORTS.find((e) => e.value === effort) || EFFORTS[0];
   const logoSrc = backend === "codex" ? "/logo-codex.svg" : "/logo.svg";
   const dirLabel = cwd ? cwd.split("/").pop() || cwd : "Select folder";
   const trimmedResumeSessionAt = useMemo(() => resumeSessionAt.trim(), [resumeSessionAt]);
@@ -678,6 +688,8 @@ export function HomePage() {
         {
           model,
           permissionMode: mode,
+          // Empty effort = let the model use its default; Codex has no effort selector.
+          effort: backend === "claude" && effort ? effort : undefined,
           cwd: effectiveCwd || undefined,
           envSlug: selectedEnv || undefined,
           sandboxEnabled: sandboxEnabled ? true : undefined,
@@ -1084,6 +1096,46 @@ export function HomePage() {
                 </div>
               )}
             </div>
+
+            {/* Effort selector (Claude only — Codex bakes effort into the model) */}
+            {EFFORTS.length > 0 && (
+              <div className="relative" ref={effortDropdownRef}>
+                <button
+                  onClick={() => setShowEffortDropdown(!showEffortDropdown)}
+                  aria-expanded={showEffortDropdown}
+                  aria-label="Reasoning effort"
+                  title="Reasoning effort"
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] sm:text-xs text-cc-muted hover:text-cc-fg rounded-lg hover:bg-cc-hover transition-colors cursor-pointer"
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3">
+                    <path d="M2 13l3.5-3.5L8 12l5.5-6.5M13.5 5.5h-2.5M13.5 5.5v2.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span>{selectedEffort.label}</span>
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 opacity-40">
+                    <path d="M4 6l4 4 4-4" />
+                  </svg>
+                </button>
+                {showEffortDropdown && (
+                  <div className="absolute left-0 bottom-full mb-1 w-40 bg-cc-card border border-cc-border rounded-[10px] shadow-lg z-10 py-1 overflow-hidden">
+                    {EFFORTS.map((e) => (
+                      <button
+                        key={e.value || "default"}
+                        onClick={() => {
+                          setEffort(e.value);
+                          localStorage.setItem("cc-effort", e.value);
+                          setShowEffortDropdown(false);
+                        }}
+                        className={`w-full px-3 py-2 text-xs text-left hover:bg-cc-hover transition-colors cursor-pointer ${
+                          e.value === effort ? "text-cc-primary font-medium" : "text-cc-fg"
+                        }`}
+                      >
+                        {e.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Mode dropdown */}
             <div className="relative" ref={modeDropdownRef}>
