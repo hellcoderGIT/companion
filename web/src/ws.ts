@@ -1,5 +1,7 @@
 import { useStore } from "./store.js";
 import type { BrowserIncomingMessage, BrowserOutgoingMessage, ContentBlock, ChatMessage, TaskItem, ProcessItem, ProcessStatus, SdkSessionInfo, McpServerConfig, BackgroundAgentItem } from "./types.js";
+import type { CLIResultMessage } from "../server/session-types.js";
+import { AUTH_EXPIRED_MESSAGE, isAuthErrorResult } from "../server/session-types.js";
 import { generateUniqueSessionName } from "./utils/names.js";
 import { playNotificationSound } from "./utils/notification-sound.js";
 import { getPreview } from "./components/ToolBlock.js";
@@ -385,6 +387,23 @@ let idCounter = 0;
 let clientMsgCounter = 0;
 function nextId(): string {
   return `msg-${Date.now()}-${++idCounter}`;
+}
+
+/**
+ * Build the user-facing text for a failed (`is_error`) result. The CLI puts the
+ * human-readable reason in `result` (and a machine code in `api_error_status`),
+ * NOT in `errors[]` — so we fall back through both. Auth failures (e.g. an
+ * expired token, which renders as nothing before this fix) get an explicit
+ * re-login banner instead of a bare "Error:" line.
+ */
+function describeResultError(r: CLIResultMessage): string {
+  const raw = r.errors?.length
+    ? r.errors.join(", ")
+    : r.result ||
+      (r.api_error_status
+        ? `API error ${r.api_error_status}`
+        : "The turn ended with an error but no details were provided.");
+  return isAuthErrorResult(r) ? `${AUTH_EXPIRED_MESSAGE}\n\nDetails: ${raw}` : `Error: ${raw}`;
 }
 
 function enqueueOutgoing(sessionId: string, msg: BrowserOutgoingMessage) {
@@ -931,11 +950,11 @@ function handleParsedMessage(
       if (!document.hasFocus() && store.notificationDesktop) {
         sendBrowserNotification("Session completed", "Claude finished the task", sessionId);
       }
-      if (r.is_error && r.errors?.length) {
+      if (r.is_error) {
         store.appendMessage(sessionId, {
           id: nextId(),
           role: "system",
-          content: `Error: ${r.errors.join(", ")}`,
+          content: describeResultError(r),
           timestamp: Date.now(),
         });
       }
@@ -1255,11 +1274,11 @@ function handleParsedMessage(
           }
         } else if (histMsg.type === "result") {
           const r = histMsg.data;
-          if (r.is_error && r.errors?.length) {
+          if (r.is_error) {
             chatMessages.push({
               id: `hist-error-${i}`,
               role: "system",
-              content: `Error: ${r.errors.join(", ")}`,
+              content: describeResultError(r),
               timestamp: Date.now(),
             });
           }

@@ -4,6 +4,7 @@ import type { SessionStore } from "./session-store.js";
 import type { WorktreeTracker } from "./worktree-tracker.js";
 import type { AgentExecutor } from "./agent-executor.js";
 import type { BackendType, CreationStepId } from "./session-types.js";
+import { AUTH_EXPIRED_MESSAGE } from "./session-types.js";
 import type { ContainerConfig, ContainerInfo } from "./container-manager.js";
 import { containerManager } from "./container-manager.js";
 import { imagePullManager } from "./image-pull-manager.js";
@@ -234,10 +235,26 @@ export class SessionOrchestrator {
     // a browser connected. This ensures long-running sessions (agents, cron
     // jobs) stay alive. Intentional kills (idle-kill, manual delete/archive)
     // are excluded via the intentionalKills set.
-    companionBus.on("session:exited", ({ sessionId }) => {
+    companionBus.on("session:exited", ({ sessionId, reason }) => {
       // The session died before earning its budget back — cancel the pending
       // "healthy" reset so this crash counts toward MAX_AUTO_RELAUNCHES.
       this.cancelHealthyReset(sessionId);
+      // Auth failures cannot be fixed by relaunching — a relaunched CLI just
+      // hits the same expired/invalid credentials and silently loops. Skip the
+      // keepalive and surface a re-login affordance instead. Detected either
+      // from the exit classification (reason) or from a 401 result observed on
+      // the still-running CLI before it exited (session.authBlocked).
+      const session = this.wsBridge.getSession(sessionId);
+      if (reason === "auth" || session?.authBlocked) {
+        log.warn("orchestrator", "Skipping auto-relaunch — authentication failure", { sessionId });
+        this.wsBridge.broadcastToSession(sessionId, {
+          type: "auth_status",
+          isAuthenticating: false,
+          output: [],
+          error: AUTH_EXPIRED_MESSAGE,
+        });
+        return;
+      }
       this.scheduleProactiveRelaunch(sessionId);
     });
 
@@ -818,6 +835,25 @@ export class SessionOrchestrator {
     if (this.relaunchingSet.has(sessionId)) return;
     const info = this.launcher.getSession(sessionId);
     if (info?.archived) return;
+
+    // Auth failures cannot be fixed by relaunching — a `--resume` CLI just hits
+    // the same expired/invalid credentials and loops. The PRIMARY auth signal is
+    // an auth-error `result` on a still-running CLI (no process exit), so the
+    // `session:exited` guard never sees it; when that CLI later disconnects, the
+    // relaunch is requested via `session:relaunch-needed` / browser-connect,
+    // which routes here. Honor session.authBlocked on this path too and surface
+    // a re-login affordance instead of churning relaunches. (This also covers
+    // the proactive-keepalive path, which delegates to handleAutoRelaunch.)
+    if (this.wsBridge.getSession(sessionId)?.authBlocked) {
+      log.warn("orchestrator", "Skipping auto-relaunch — authentication failure", { sessionId });
+      this.wsBridge.broadcastToSession(sessionId, {
+        type: "auth_status",
+        isAuthenticating: false,
+        output: [],
+        error: AUTH_EXPIRED_MESSAGE,
+      });
+      return;
+    }
 
     // If we've already notified the user about relaunch exhaustion, bail out
     // silently. Without this, every reconnect event from a dead session

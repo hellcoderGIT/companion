@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
 import type { SessionStore } from "./session-store.js";
 import type { BackendType } from "./session-types.js";
+import { looksLikeAuthErrorText } from "./session-types.js";
 import type { RecorderManager } from "./recorder.js";
 import { CodexAdapter } from "./codex-adapter.js";
 import { ClaudeAdapter } from "./claude-adapter.js";
@@ -193,6 +194,12 @@ export class CliLauncher {
   private claimedCodexWsPorts = new Set<number>();
   /** Runtime-only env vars per session (kept out of persisted launcher state). */
   private sessionEnvs = new Map<string, Record<string, string>>();
+  /**
+   * Rolling tail of recent stderr per session, used to classify WHY a process
+   * exited (e.g. an auth failure vs a recoverable crash). Capped per session.
+   */
+  private stderrTails = new Map<string, string>();
+  private static readonly STDERR_TAIL_MAX = 4096;
   private store: SessionStore | null = null;
   private recorder: RecorderManager | null = null;
 
@@ -640,7 +647,9 @@ export class CliLauncher {
       }
       this.processes.delete(sessionId);
       this.persistState();
-      companionBus.emit("session:exited", { sessionId, exitCode });
+      const reason = this.classifyExitReason(sessionId, exitCode);
+      this.stderrTails.delete(sessionId);
+      companionBus.emit("session:exited", { sessionId, exitCode, reason });
     });
 
     this.persistState();
@@ -1269,6 +1278,28 @@ export class CliLauncher {
     await Promise.all(ids.map((id) => this.kill(id)));
   }
 
+  /**
+   * Classify why a CLI process exited from its exit code and a tail of stderr.
+   * "auth" means expired/invalid credentials — the orchestrator must NOT
+   * auto-relaunch (it would loop straight back into the same failure) and
+   * should surface a re-login affordance instead. "normal" is a clean exit;
+   * everything else is a recoverable "crash".
+   */
+  private classifyExitReason(
+    sessionId: string,
+    exitCode: number | null,
+  ): "auth" | "normal" | "crash" {
+    const stderr = this.stderrTails.get(sessionId) ?? "";
+    // Uses the shared, tightened matcher (see looksLikeAuthErrorText): bare
+    // status numbers in stderr — stack-trace line offsets, tool exit codes —
+    // must NOT be read as auth, or a recoverable crash gets its relaunch
+    // suppressed and the session hangs dead.
+    if (looksLikeAuthErrorText(stderr)) {
+      return "auth";
+    }
+    return exitCode === 0 ? "normal" : "crash";
+  }
+
   private async pipeStream(
     sessionId: string,
     stream: ReadableStream<Uint8Array> | null,
@@ -1285,6 +1316,17 @@ export class CliLauncher {
         const text = decoder.decode(value);
         if (text.trim()) {
           log(`[session:${sessionId}:${label}] ${text.trimEnd()}`);
+        }
+        // Keep a rolling tail of stderr so process-exit can be classified
+        // (auth failure vs recoverable crash) without a second reader.
+        if (label === "stderr" && text) {
+          const merged = (this.stderrTails.get(sessionId) ?? "") + text;
+          this.stderrTails.set(
+            sessionId,
+            merged.length > CliLauncher.STDERR_TAIL_MAX
+              ? merged.slice(-CliLauncher.STDERR_TAIL_MAX)
+              : merged,
+          );
         }
       }
     } catch {

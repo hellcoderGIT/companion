@@ -560,8 +560,9 @@ export class ClaudeAdapter implements IBackendAdapter {
       parent_tool_use_id: null,
       session_id: msg.session_id || "",
     });
-    this.sendToBackend(ndjson);
-    return true;
+    // Propagate delivery success so the bridge re-queues an undelivered prompt
+    // (write to a dying stdio pipe) rather than treating send() as delivery.
+    return this.sendToBackend(ndjson);
   }
 
   /**
@@ -1185,18 +1186,20 @@ export class ClaudeAdapter implements IBackendAdapter {
    * Send an NDJSON string to the CLI. If the CLI socket is not yet connected,
    * queues the message for later delivery (flushed in attachWebSocket).
    */
-  private sendToBackend(ndjson: string): void {
+  private sendToBackend(ndjson: string): boolean {
     if (!this.isConnected()) {
       console.log(
         `[claude-adapter] CLI not yet connected for session ${this.sessionId}, queuing message`,
       );
       this.pendingMessages.push(ndjson);
-      return;
+      // Safely queued in the adapter's own pre-init buffer — the caller should
+      // NOT also re-queue it (returning true means "handled, don't re-queue").
+      return true;
     }
     // In stdio mode, send the one-time initialize handshake before the first
     // real message (enables the can_use_tool permission flow).
     if (this.transportKind === "stdio") this.ensureStdioInitialized(ndjson);
-    this.sendRaw(ndjson);
+    return this.sendRaw(ndjson);
   }
 
   /**
@@ -1204,7 +1207,7 @@ export class ClaudeAdapter implements IBackendAdapter {
    * delimiter and records the outgoing message. Assumes the transport is
    * connected (callers gate on isConnected() / flush after attach).
    */
-  private sendRaw(ndjson: string): void {
+  private sendRaw(ndjson: string): boolean {
     // Record raw outgoing CLI message
     this.recorder?.record(
       this.sessionId, "out", ndjson, "cli", "claude", "",
@@ -1212,15 +1215,22 @@ export class ClaudeAdapter implements IBackendAdapter {
     try {
       // NDJSON requires a newline delimiter
       if (this.transportKind === "stdio") {
-        this.stdioWriter?.write(new TextEncoder().encode(ndjson + "\n"));
+        // A null writer means the transport is gone (process exiting/exited)
+        // even though isConnected() may not have flipped yet. Report failure so
+        // the caller re-queues the message instead of losing it down a dead pipe.
+        if (!this.stdioWriter) return false;
+        this.stdioWriter.write(new TextEncoder().encode(ndjson + "\n"));
       } else {
-        this.cliSocket!.send(ndjson + "\n");
+        if (!this.cliSocket) return false;
+        this.cliSocket.send(ndjson + "\n");
       }
+      return true;
     } catch (err) {
       console.error(
         `[claude-adapter] Failed to send to CLI for session ${this.sessionId}:`,
         err,
       );
+      return false;
     }
   }
 }
