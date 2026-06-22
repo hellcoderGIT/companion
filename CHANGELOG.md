@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.105.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.104.3...companion-v0.105.0) (2026-06-22)
+
+
+### Features
+
+* **home:** add reasoning-effort selector to the new-session screen ([280fa4c](https://github.com/hellcoderGIT/companion/commit/280fa4c64d7c214f4e2998e381cb07c6b4e42ae0))
+
+
+### Bug Fixes
+
+* **cli:** recover sessions that hang after CLI death or auth failure ([d720c0a](https://github.com/hellcoderGIT/companion/commit/d720c0a8e1beb90855c8775303e0e6801864b2a4))
+
 ## [0.104.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.104.2...companion-v0.104.3) (2026-06-19)
 
 
