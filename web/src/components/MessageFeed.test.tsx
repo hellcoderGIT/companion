@@ -350,18 +350,34 @@ describe("MessageFeed - activity tiers", () => {
     expect(screen.getByText(/no update for \d+s/)).toBeTruthy();
   });
 
-  it("shows the 'stalled' tier (may be stuck) after ~7min of silence", () => {
+  it("shows the 'stalled' tier (may be stuck) after ~15min of silence", () => {
     const sid = "test-tier-stalled";
     setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
     setStoreStatus(sid, "running");
-    setStoreStreamingStartedAt(sid, Date.now() - 8 * 60_000);
-    setStoreLastActivity(sid, Date.now() - 7 * 60_000 - 5_000); // ~7m5s ago → stalled
+    setStoreStreamingStartedAt(sid, Date.now() - 16 * 60_000);
+    setStoreLastActivity(sid, Date.now() - 15 * 60_000 - 5_000); // ~15m5s ago → stalled
 
     render(<MessageFeed sessionId={sid} />);
 
     const bar = screen.getByTestId("activity-indicator");
     expect(bar.getAttribute("data-activity-tier")).toBe("stalled");
     expect(screen.getByText(/the agent may be stuck/)).toBeTruthy();
+  });
+
+  it("stays 'quiet' (not stalled) at ~10min of silence — long tool calls are normal", () => {
+    // Regression guard for the 15-min threshold: up to ~10 min of silence is
+    // entirely normal (long builds, subagents) and must NOT warn "may be stuck".
+    const sid = "test-tier-quiet-long";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 11 * 60_000);
+    setStoreLastActivity(sid, Date.now() - 10 * 60_000); // 10m ago → still quiet
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("quiet");
+    expect(screen.queryByText(/the agent may be stuck/)).toBeNull();
   });
 
   it("falls back to 'active' when no activity timestamp exists yet", () => {
