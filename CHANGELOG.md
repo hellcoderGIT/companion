@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.105.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.105.0...companion-v0.105.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **codex:** fetch model list live from app-server, drop stale cache ([#52](https://github.com/hellcoderGIT/companion/issues/52)) ([191e342](https://github.com/hellcoderGIT/companion/commit/191e34274de2d2f801b61833d61509409d9ccc21))
+* **feed:** raise "may be stuck" warning to 15min ([#50](https://github.com/hellcoderGIT/companion/issues/50)) ([10d7236](https://github.com/hellcoderGIT/companion/commit/10d7236f3c5818e486a5d690e8ebf07b25d50043))
+
 ## [0.105.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.104.3...companion-v0.105.0) (2026-06-22)
 
 
