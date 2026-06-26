@@ -230,10 +230,13 @@ describe("static model/mode lists", () => {
     expect(slugs).toContain("claude-fable-5");
   });
 
-  it("lists gpt-5.3-codex-max and gpt-5.3-codex-xhigh in Codex models", () => {
+  // The static list is only a fallback — the live list comes from the Codex
+  // app-server `model/list` RPC. We assert the current frontier model (gpt-5.5)
+  // and that the default is the first entry.
+  it("lists gpt-5.5 as the first Codex model (default fallback)", () => {
     const slugs = CODEX_MODELS.map((m) => m.value);
-    expect(slugs).toContain("gpt-5.3-codex-max");
-    expect(slugs).toContain("gpt-5.3-codex-xhigh");
+    expect(slugs).toContain("gpt-5.5");
+    expect(CODEX_MODELS[0].value).toBe("gpt-5.5");
   });
 
   it("claude agent modes include acceptEdits for middle ground", () => {

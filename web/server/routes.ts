@@ -3,6 +3,7 @@ import { getCookie, setCookie } from "hono/cookie";
 import { streamSSE } from "hono/streaming";
 import { execSync } from "node:child_process";
 import { resolveBinary } from "./path-resolver.js";
+import { fetchCodexModels } from "./codex-models.js";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -1203,39 +1204,52 @@ export function createRoutes(
     return c.json(backends);
   });
 
-  api.get("/backends/:id/models", (c) => {
+  api.get("/backends/:id/models", async (c) => {
     const backendId = c.req.param("id");
 
     if (backendId === "codex") {
-      // Read Codex model list from its local cache file
-      const cachePath = join(homedir(), ".codex", "models_cache.json");
-      if (!existsSync(cachePath)) {
-        return c.json({ error: "Codex models cache not found. Run codex once to populate it." }, 404);
-      }
+      // Fetch the live model list from the Codex app-server. Recent Codex
+      // releases no longer write ~/.codex/models_cache.json and instead serve
+      // models over the app-server `model/list` RPC — so we query the CLI
+      // directly. Falls back to the legacy cache file if the RPC yields nothing.
       try {
-        const raw = readFileSync(cachePath, "utf-8");
-        const cache = JSON.parse(raw) as {
-          models: Array<{
-            slug: string;
-            display_name?: string;
-            description?: string;
-            visibility?: string;
-            priority?: number;
-          }>;
-        };
-        // Only return visible models, sorted by priority
-        const models = cache.models
-          .filter((m) => m.visibility === "list")
-          .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
-          .map((m) => ({
-            value: m.slug,
-            label: m.display_name || m.slug,
-            description: m.description || "",
-          }));
-        return c.json(models);
-      } catch (e) {
-        return c.json({ error: "Failed to parse Codex models cache" }, 500);
+        const models = await fetchCodexModels();
+        if (models.length > 0) {
+          return c.json(models.map((m) => ({ value: m.value, label: m.label, description: m.description })));
+        }
+      } catch {
+        // fall through to legacy cache / 404
       }
+
+      const cachePath = join(homedir(), ".codex", "models_cache.json");
+      if (existsSync(cachePath)) {
+        try {
+          const raw = readFileSync(cachePath, "utf-8");
+          const cache = JSON.parse(raw) as {
+            models: Array<{
+              slug: string;
+              display_name?: string;
+              description?: string;
+              visibility?: string;
+              priority?: number;
+            }>;
+          };
+          const models = cache.models
+            .filter((m) => m.visibility === "list")
+            .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
+            .map((m) => ({
+              value: m.slug,
+              label: m.display_name || m.slug,
+              description: m.description || "",
+            }));
+          if (models.length > 0) return c.json(models);
+        } catch {
+          // ignore parse errors and fall through
+        }
+      }
+
+      // Nothing available — the frontend falls back to its static CODEX_MODELS list.
+      return c.json({ error: "Codex models unavailable. Ensure the codex CLI is installed and authenticated." }, 404);
     }
 
     // Claude models are hardcoded on the frontend
