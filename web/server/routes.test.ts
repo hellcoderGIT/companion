@@ -44,6 +44,11 @@ vi.mock("./path-resolver.js", () => ({
   resolveBinary: mockResolveBinary,
 }));
 
+const mockFetchCodexModels = vi.hoisted(() => vi.fn(async () => [] as Array<{ value: string; label: string; description: string; isDefault?: boolean }>));
+vi.mock("./codex-models.js", () => ({
+  fetchCodexModels: mockFetchCodexModels,
+}));
+
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
@@ -3565,7 +3570,33 @@ describe("GET /api/backends", () => {
 });
 
 describe("GET /api/backends/:id/models", () => {
-  it("returns codex models from cache file sorted by priority", async () => {
+  beforeEach(() => {
+    mockFetchCodexModels.mockReset();
+  });
+
+  // The primary path: models come live from the Codex app-server `model/list`
+  // RPC (recent Codex releases no longer write models_cache.json).
+  it("returns codex models from the live app-server RPC", async () => {
+    mockFetchCodexModels.mockResolvedValue([
+      { value: "gpt-5.5", label: "GPT-5.5", description: "Frontier model", isDefault: true },
+      { value: "gpt-5.3-codex", label: "gpt-5.3-codex", description: "Codex model" },
+    ]);
+
+    const res = await app.request("/api/backends/codex/models", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // isDefault is an internal hint and must not leak into the API contract.
+    expect(json).toEqual([
+      { value: "gpt-5.5", label: "GPT-5.5", description: "Frontier model" },
+      { value: "gpt-5.3-codex", label: "gpt-5.3-codex", description: "Codex model" },
+    ]);
+  });
+
+  // Fallback path: if the RPC yields nothing, the legacy cache file (if present)
+  // is still honored so older Codex installs keep working.
+  it("falls back to the legacy cache file when the RPC returns no models", async () => {
+    mockFetchCodexModels.mockResolvedValue([]);
     const cacheContent = JSON.stringify({
       models: [
         { slug: "gpt-5.1-codex-mini", display_name: "gpt-5.1-codex-mini", description: "Fast model", visibility: "list", priority: 10 },
@@ -3580,32 +3611,32 @@ describe("GET /api/backends/:id/models", () => {
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    // Should only include visible models, sorted by priority
     expect(json).toEqual([
       { value: "gpt-5.2-codex", label: "gpt-5.2-codex", description: "Frontier model" },
       { value: "gpt-5.1-codex-mini", label: "gpt-5.1-codex-mini", description: "Fast model" },
     ]);
   });
 
-  it("returns 404 when codex cache file does not exist", async () => {
+  it("returns 404 when neither the RPC nor a cache file yields models", async () => {
+    mockFetchCodexModels.mockResolvedValue([]);
     vi.mocked(existsSync).mockReturnValue(false);
 
     const res = await app.request("/api/backends/codex/models", { method: "GET" });
 
     expect(res.status).toBe(404);
     const json = await res.json();
-    expect(json.error).toContain("Codex models cache not found");
+    expect(json.error).toContain("Codex models unavailable");
   });
 
-  it("returns 500 when cache file is malformed", async () => {
+  // A malformed legacy cache must not crash the endpoint — it falls through to 404.
+  it("returns 404 (not 500) when the cache file is malformed and the RPC is empty", async () => {
+    mockFetchCodexModels.mockResolvedValue([]);
     vi.mocked(existsSync).mockReturnValue(true);
     vi.mocked(readFileSync).mockReturnValue("not valid json{{{");
 
     const res = await app.request("/api/backends/codex/models", { method: "GET" });
 
-    expect(res.status).toBe(500);
-    const json = await res.json();
-    expect(json.error).toContain("Failed to parse");
+    expect(res.status).toBe(404);
   });
 
   it("returns 404 for claude backend (uses frontend defaults)", async () => {

@@ -55,14 +55,16 @@ export const CLAUDE_MODELS: ModelOption[] = [
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", icon: "" },
 ];
 
+// Static fallback only \u2014 the live list is fetched from the Codex app-server's
+// `model/list` RPC (see server route `/backends/codex/models`). Kept roughly in
+// sync with recent Codex releases so the picker is sane when the CLI is
+// unreachable; the live fetch is the source of truth.
 export const CODEX_MODELS: ModelOption[] = [
-  { value: "gpt-5.3-codex-max", label: "GPT-5.3 Max", icon: "\u25A0" },
-  { value: "gpt-5.3-codex-xhigh", label: "GPT-5.3 xHigh", icon: "\u2605" },
-  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex", icon: "\u2733" },
-  { value: "gpt-5.2-codex", label: "GPT-5.2 Codex", icon: "\u25C6" },
-  { value: "gpt-5.1-codex-max", label: "GPT-5.1 Max", icon: "\u25A0" },
+  { value: "gpt-5.5", label: "GPT-5.5", icon: "\u25A0" },
+  { value: "gpt-5.4", label: "GPT-5.4", icon: "\u2733" },
+  { value: "gpt-5.4-mini", label: "GPT-5.4 Mini", icon: "\u26A1" },
+  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex", icon: "\u25C6" },
   { value: "gpt-5.2", label: "GPT-5.2", icon: "\u25CF" },
-  { value: "gpt-5.1-codex-mini", label: "GPT-5.1 Mini", icon: "\u26A1" },
 ];
 
 export const CLAUDE_MODES: ModeOption[] = [
@@ -77,9 +79,10 @@ export const CODEX_MODES: ModeOption[] = [
 
 // Reasoning-effort levels accepted by the Claude Code CLI's `--effort` flag
 // (low, medium, high, xhigh, max). The first entry ("Default") passes no flag,
-// so the model uses its own built-in default effort. Codex bakes reasoning
-// effort into the model name (e.g. gpt-5.3-codex-xhigh), so it has no separate
-// effort selector — see getEffortsForBackend.
+// so the model uses its own built-in default effort. Codex has no separate
+// effort selector in the UI — it falls back to each model's default reasoning
+// effort (Codex models expose efforts via model/list; a dedicated Codex effort
+// selector is a possible future enhancement). See getEffortsForBackend.
 export const CLAUDE_EFFORTS: EffortOption[] = [
   { value: "", label: "Default" },
   { value: "low", label: "Low" },
