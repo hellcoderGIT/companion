@@ -65,6 +65,15 @@ const CLI_DEDUP_WINDOW = 2000;
  */
 const STDOUT_CLOSE_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_GRACE_MS) || 2000;
 
+/**
+ * Longer grace used when stdout EOFs right after a terminal `result` (a clean
+ * end-of-turn shutdown). We give the process generous time to flush teardown
+ * (MCP servers, etc.) and exit code-0 on its own instead of SIGTERM-ing it.
+ * Still bounded so a process that wedges *after* a result (e.g. a teardown
+ * deadlock) cannot hang the reader and block recovery indefinitely.
+ */
+const STDOUT_CLOSE_RESULT_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_RESULT_GRACE_MS) || 10000;
+
 // --- Claude Code Adapter ------------------------------------------------------
 
 export class ClaudeAdapter implements IBackendAdapter {
@@ -92,6 +101,14 @@ export class ClaudeAdapter implements IBackendAdapter {
    *  matter which teardown path (stdout reader end, reader error, or process
    *  exit) trips first. Mirrors CodexAdapter.disconnectFired. */
   private disconnectFired = false;
+  /** Whether the most recent substantive CLI message was a terminal `result`
+   *  (end-of-turn). Used by the stdout-EOF handler to distinguish a process
+   *  that closed stdout while *finishing a turn cleanly* (exiting on its own —
+   *  do not force-kill) from one that EOF'd mid-stream (a genuine wedge that
+   *  must be killed so recovery can proceed). Transport-level noise
+   *  (`keep_alive`, `system` status/keepalive) does not reset it; any
+   *  substantive turn activity does. */
+  private lastInboundWasResult = false;
 
   // Callbacks registered by the bridge via on*() methods
   private browserMessageCb: ((msg: BrowserIncomingMessage) => void) | null = null;
@@ -294,25 +311,54 @@ export class ClaudeAdapter implements IBackendAdapter {
       //   (b) Wedged — it stopped emitting (e.g. after a fatal API error such
       //       as a 429) but will never exit, leaving `handleAutoRelaunch`'s
       //       PID-liveness guard satisfied and blocking recovery indefinitely.
-      // Give it a short grace to exit on its own; only kill if it is STILL alive
-      // afterwards. That distinguishes (a) from (b) instead of clobbering every
-      // session that simply closed stdout on the way out.
+      // We distinguish them two ways and only kill genuine wedges (b):
+      //   1. If the last substantive message was a terminal `result`, the CLI
+      //      finished a turn and is shutting down cleanly — wait a generous
+      //      (but bounded) grace for it to exit on its own rather than SIGTERM a
+      //      code-0 exit. This is the dominant source of the 143-exit relaunch
+      //      churn on busy hosts.
+      //   2. Otherwise (mid-stream EOF) give it a short grace; kill only if it
+      //      is STILL alive afterwards, so a true wedge can't block recovery.
       const proc = this.stdioProc;
       if (proc && proc.exitCode === null && !proc.killed) {
-        const exitedOnOwn = await Promise.race([
-          proc.exited.then(() => true),
-          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_GRACE_MS)),
-        ]);
-        if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
-          log.warn("claude-adapter", "stdout closed and process did not exit within grace; killing stale process", {
-            sessionId: this.sessionId,
-            pid: proc.pid,
-            graceMs: STDOUT_CLOSE_GRACE_MS,
-          });
-          try {
-            proc.kill();
-          } catch {
-            // Process may have exited between the check and the kill.
+        if (this.lastInboundWasResult) {
+          // Clean end-of-turn shutdown: let the process flush teardown (MCP
+          // servers, etc.) and exit code-0 instead of SIGTERM-ing a code-0 exit.
+          // Use a generous grace so we don't clobber a slow-but-clean exit, but
+          // keep it bounded — a process that wedges *after* a result must still
+          // be killed so recovery isn't blocked indefinitely.
+          const exitedOnOwn = await Promise.race([
+            proc.exited.then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_RESULT_GRACE_MS)),
+          ]);
+          if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
+            log.warn("claude-adapter", "stdout closed after result but process did not exit within grace; killing wedged process", {
+              sessionId: this.sessionId,
+              pid: proc.pid,
+              graceMs: STDOUT_CLOSE_RESULT_GRACE_MS,
+            });
+            try {
+              proc.kill();
+            } catch {
+              // Process may have exited between the check and the kill.
+            }
+          }
+        } else {
+          const exitedOnOwn = await Promise.race([
+            proc.exited.then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_GRACE_MS)),
+          ]);
+          if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
+            log.warn("claude-adapter", "stdout closed mid-stream and process did not exit within grace; killing wedged process", {
+              sessionId: this.sessionId,
+              pid: proc.pid,
+              graceMs: STDOUT_CLOSE_GRACE_MS,
+            });
+            try {
+              proc.kill();
+            } catch {
+              // Process may have exited between the check and the kill.
+            }
           }
         }
       }
@@ -741,6 +787,17 @@ export class ClaudeAdapter implements IBackendAdapter {
     // Track activity for idle detection (skip keepalives -- they don't indicate real work)
     if (msg.type !== "keep_alive") {
       this.onActivityUpdate?.();
+    }
+
+    // Track whether the last substantive message was a turn-ending `result`, so
+    // the stdout-EOF handler can tell a clean end-of-turn shutdown apart from a
+    // mid-stream wedge. `result` marks end-of-turn; any other substantive turn
+    // activity clears it. Transport-level noise (`keep_alive`, `system`) is
+    // ignored so trailing status/keepalive lines after a result don't mask it.
+    if (msg.type === "result") {
+      this.lastInboundWasResult = true;
+    } else if (msg.type !== "keep_alive" && msg.type !== "system") {
+      this.lastInboundWasResult = false;
     }
 
     switch (msg.type) {

@@ -1522,6 +1522,7 @@ function createMockProc() {
   return {
     proc: proc as any,
     endStdout: () => stdoutController.close(),
+    pushStdout: (line: string) => stdoutController.enqueue(new TextEncoder().encode(line)),
     resolveExit: () => {
       proc.exitCode = 0;
       resolveExit();
@@ -1571,6 +1572,67 @@ describe("stdio transport disconnect propagation", () => {
       await vi.advanceTimersByTimeAsync(2100);
 
       expect(proc.kill).not.toHaveBeenCalled();
+      expect(adapter.isConnected()).toBe(false);
+      expect(disconnectCb).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does NOT kill a process that closed stdout after a terminal result, even past the short grace", async () => {
+    // Regression for the dominant 143-exit relaunch churn on busy hosts: after a
+    // turn-ending `result`, the CLI closes stdout but can take longer than the
+    // short (mid-stream) grace to flush teardown (MCP servers, etc.) and exit
+    // code-0. Because the last substantive message was a `result`, the adapter
+    // must treat the EOF as a clean shutdown and wait the longer result-grace
+    // instead of SIGTERM-ing a code-0 exit into a 143 + needless relaunch.
+    vi.useFakeTimers();
+    try {
+      const { proc, endStdout, pushStdout, resolveExit } = createMockProc();
+      adapter.attachStdio(proc);
+
+      // The CLI finishes a turn cleanly, then its stdout EOFs while still alive.
+      pushStdout('{"type":"result","subtype":"success"}\n');
+      await vi.advanceTimersByTimeAsync(0); // let the reader route the result
+      endStdout();
+
+      // Past the SHORT grace (2s) the process is still alive — but the result
+      // marker means we must NOT kill it yet (the mid-stream path would have).
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(adapter.isConnected()).toBe(true); // still finishing its clean exit
+
+      // It exits on its own within the longer result grace → never killed.
+      resolveExit();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(adapter.isConnected()).toBe(false);
+      expect(disconnectCb).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("kills a process that wedges AFTER a result, once the longer result grace elapses", async () => {
+    // The result-grace is generous but BOUNDED: a turn can end cleanly and the
+    // process then deadlock in teardown and never exit. Recovery must not be
+    // blocked forever — past the longer grace the wedged process is still killed.
+    vi.useFakeTimers();
+    try {
+      const { proc, endStdout, pushStdout } = createMockProc();
+      adapter.attachStdio(proc);
+
+      pushStdout('{"type":"result","subtype":"success"}\n');
+      await vi.advanceTimersByTimeAsync(0);
+      endStdout();
+
+      // Short grace passes without a kill (result path uses the longer grace)...
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(proc.kill).not.toHaveBeenCalled();
+
+      // ...but past the longer result grace (10s) with no self-exit → killed.
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(proc.kill).toHaveBeenCalledTimes(1);
       expect(adapter.isConnected()).toBe(false);
       expect(disconnectCb).toHaveBeenCalledTimes(1);
     } finally {
