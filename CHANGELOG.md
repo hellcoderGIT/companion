@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.105.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.105.1...companion-v0.105.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* **claude-adapter:** stop relaunch churn from premature SIGTERM on clean turn-end ([#53](https://github.com/hellcoderGIT/companion/issues/53)) ([464c71f](https://github.com/hellcoderGIT/companion/commit/464c71f0511afccc385b25a2bdd342ccf90ab906))
+
 ## [0.105.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.105.0...companion-v0.105.1) (2026-06-26)
 
 
