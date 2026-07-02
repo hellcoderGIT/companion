@@ -131,8 +131,8 @@ export class ClaudeAdapter implements IBackendAdapter {
   private recorder: RecorderManager | null;
 
   // Session cwd used to stage non-inline attachments (anything other than
-  // image/* and application/pdf) inside the working directory so the model
-  // can Read them via its file tools. Initially set by the bridge at
+  // image/*, i.e. PDFs and all other files) inside the working directory so the
+  // model can Read them via its file tools. Initially set by the bridge at
   // construction time (the bridge always knows the cwd before spawning the
   // CLI) and refreshed from system_init for safety.
   private sessionCwd: string | null = null;
@@ -559,9 +559,15 @@ export class ClaudeAdapter implements IBackendAdapter {
   ): boolean {
     // Dispatch each attachment by media type:
     //   image/*           → inline as { type: "image", source: { base64 } } block
-    //   application/pdf   → inline as { type: "document", source: { base64 } } block
     //   everything else   → write to <cwd>/.companion-uploads/<id>-<name> and
     //                       reference by relative path so the model can Read it
+    //
+    // PDFs and other documents are staged to disk (not inlined as base64
+    // `document` blocks): inlining pushes the whole file into every turn's
+    // context — expensive and context-blowing for large files — and the user's
+    // expectation is that uploads land in the working dir and Claude is told
+    // where. Claude's Read tool handles PDFs from disk. This mirrors the Codex
+    // adapter, which also inlines only images and stages everything else.
     let content: string | unknown[];
     if (msg.attachments?.length) {
       const blocks: unknown[] = [];
@@ -571,11 +577,6 @@ export class ClaudeAdapter implements IBackendAdapter {
         if (att.media_type.startsWith("image/")) {
           blocks.push({
             type: "image",
-            source: { type: "base64", media_type: att.media_type, data: att.data },
-          });
-        } else if (att.media_type === "application/pdf") {
-          blocks.push({
-            type: "document",
             source: { type: "base64", media_type: att.media_type, data: att.data },
           });
         } else {
