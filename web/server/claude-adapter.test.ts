@@ -552,20 +552,47 @@ describe("send() — outgoing message translation", () => {
     expect(sent.message.content[1].text).toBe("Describe this");
   });
 
-  it("user_message with PDF attachment → emits a document content block", () => {
-    // PDFs should be encoded as `document` content blocks with base64 source.
-    adapter.send({
-      type: "user_message",
-      content: "Summarize",
-      attachments: [{ name: "doc.pdf", media_type: "application/pdf", data: "pdfdata", size: 7 }],
-    });
-    const sent = getLastSent();
-    expect(sent.message.content[0].type).toBe("document");
-    expect(sent.message.content[0].source.type).toBe("base64");
-    expect(sent.message.content[0].source.media_type).toBe("application/pdf");
-    expect(sent.message.content[0].source.data).toBe("pdfdata");
-    expect(sent.message.content[1].type).toBe("text");
-    expect(sent.message.content[1].text).toBe("Summarize");
+  it("user_message with PDF attachment → stages to disk and references by path (NOT inlined)", async () => {
+    // Regression: PDFs must NOT be inlined as base64 `document` blocks (that
+    // pushes the whole file into every turn's context and isn't what the user
+    // wants). Like every non-image file, a PDF is written to
+    // <cwd>/.companion-uploads/ and referenced by relative path so Claude reads
+    // it from disk with its Read tool. Mirrors the Codex adapter's behavior.
+    const { mkdtempSync, existsSync, readdirSync, readFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const tmpCwd = mkdtempSync(join(tmpdir(), "companion-pdf-stage-"));
+    try {
+      const a = new ClaudeAdapter("sess-pdf", { cwd: tmpCwd });
+      const sentRaw: string[] = [];
+      a.attachWebSocket({ send: (s: string) => sentRaw.push(s), readyState: 1 } as any);
+      a.send({
+        type: "user_message",
+        content: "Summarize",
+        // base64 of "%PDF-1.4\n" → "JVBERi0xLjQK"
+        attachments: [{ name: "doc.pdf", media_type: "application/pdf", data: "JVBERi0xLjQK", size: 9 }],
+      });
+      const sent = JSON.parse(sentRaw[0].trim());
+
+      // No inline document block — content is [text] only.
+      expect(sent.message.content.some((b: any) => b.type === "document")).toBe(false);
+
+      // File staged to disk with its decoded content intact.
+      const stagingDir = join(tmpCwd, ".companion-uploads");
+      expect(existsSync(stagingDir)).toBe(true);
+      const files = readdirSync(stagingDir);
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatch(/^.{8}-doc\.pdf$/);
+      expect(readFileSync(join(stagingDir, files[0]!), "utf-8")).toBe("%PDF-1.4\n");
+
+      // The text block references the staged path so the model can Read it.
+      const textBlock = sent.message.content.find((b: any) => b.type === "text");
+      expect(textBlock.text).toContain("Summarize");
+      expect(textBlock.text).toContain("./.companion-uploads/");
+      expect(textBlock.text).toContain("doc.pdf");
+    } finally {
+      rmSync(tmpCwd, { recursive: true, force: true });
+    }
   });
 
   it("user_message with non-image, non-PDF attachment falls back to text mention when no cwd", () => {
