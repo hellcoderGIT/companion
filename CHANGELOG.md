@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.105.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.105.2...companion-v0.105.3) (2026-07-02)
+
+
+### Bug Fixes
+
+* **claude-adapter:** stage PDFs to disk instead of inlining to Claude ([#55](https://github.com/hellcoderGIT/companion/issues/55)) ([e81f5cc](https://github.com/hellcoderGIT/companion/commit/e81f5cca3bd51243856a516e06d982f0a437409a))
+
 ## [0.105.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.105.1...companion-v0.105.2) (2026-07-01)
 
 
