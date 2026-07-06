@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.106.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.105.3...companion-v0.106.0) (2026-07-06)
+
+
+### Features
+
+* **agents:** terminate leftover session before scheduled runs ([#57](https://github.com/hellcoderGIT/companion/issues/57)) ([86a5a73](https://github.com/hellcoderGIT/companion/commit/86a5a7315f6baace1812efeb88e622577a355a1b))
+* **settings:** add kill-switch to disable proactive keepalive relaunch ([#58](https://github.com/hellcoderGIT/companion/issues/58)) ([903b01f](https://github.com/hellcoderGIT/companion/commit/903b01f92e6b8a537e652c737ea1b6eb97625602))
+
 ## [0.105.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.105.2...companion-v0.105.3) (2026-07-02)
 
 
