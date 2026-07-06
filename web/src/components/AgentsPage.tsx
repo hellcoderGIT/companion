@@ -150,6 +150,7 @@ export function AgentsPage({ route }: Props) {
       scheduleEnabled: agent.triggers?.schedule?.enabled ?? false,
       scheduleExpression: agent.triggers?.schedule?.expression || "0 8 * * *",
       scheduleRecurring: agent.triggers?.schedule?.recurring ?? true,
+      restartMode: agent.restartMode ?? "terminate",
       linearEnabled: agent.triggers?.linear?.enabled ?? false,
       linearOAuthConnectionId: agent.triggers?.linear?.oauthConnectionId ?? "",
     });
@@ -250,6 +251,7 @@ export function AgentsPage({ route }: Props) {
         envSlug: form.envSlug || undefined,
         env: Object.keys(envRecord).length > 0 ? envRecord : undefined,
         codexInternetAccess: form.backendType === "codex" ? form.codexInternetAccess : undefined,
+        restartMode: form.restartMode,
         branch: form.branch || undefined,
         createBranch: form.branch ? form.createBranch : undefined,
         useWorktree: form.branch ? form.useWorktree : undefined,

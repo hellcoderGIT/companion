@@ -187,6 +187,13 @@ export class SessionOrchestrator {
     this.worktreeTracker = deps.worktreeTracker;
     this.prPoller = deps.prPoller;
     this.agentExecutor = deps.agentExecutor;
+
+    // Let the agent executor terminate a leftover session before a new run
+    // (restartMode "terminate"). Routing through archiveSession registers the
+    // kill as intentional, so the proactive keepalive does not respawn it.
+    this.agentExecutor.setArchivePreviousSession(async (sessionId) => {
+      await this.archiveSession(sessionId);
+    });
   }
 
   // ── Initialization (event wiring) ──────────────────────────────────────────

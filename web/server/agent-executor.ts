@@ -34,9 +34,22 @@ export class AgentExecutor {
   /** Persistent execution store (JSONL on disk) */
   private executionStore = new ExecutionStore();
 
+  /**
+   * Callback used to intentionally terminate a leftover session before starting
+   * a new run (restartMode "terminate"). Wired by the orchestrator to its
+   * archiveSession() so the kill is registered as intentional — otherwise the
+   * keepalive relaunch would immediately respawn the process.
+   */
+  private archivePreviousSession?: (sessionId: string) => Promise<void>;
+
   constructor(launcher: CliLauncher, wsBridge: WsBridge) {
     this.launcher = launcher;
     this.wsBridge = wsBridge;
+  }
+
+  /** Wire the callback used to archive a leftover session (see field docs). */
+  setArchivePreviousSession(fn: (sessionId: string) => Promise<void>): void {
+    this.archivePreviousSession = fn;
   }
 
   /** Start all enabled agents with schedule triggers from disk. Called once at server startup. */
@@ -123,10 +136,27 @@ export class AgentExecutor {
     if (!agent) return;
     if (!agent.enabled && !opts?.force) return;
 
-    // Overlap prevention: skip if previous execution is still running (unless forced)
-    if (!opts?.force && agent.lastSessionId && this.launcher.isAlive(agent.lastSessionId)) {
-      console.log(`[agent-executor] Skipping "${agent.name}" — previous execution still running (${agent.lastSessionId})`);
-      return;
+    // Overlap handling: a previous run's session may still be open. Because the
+    // CLI process stays alive after a turn finishes (it only exits on
+    // archive/kill), we can't distinguish "still working" from "idle but open"
+    // via liveness alone — so the agent's restartMode decides what to do.
+    if (agent.lastSessionId && this.launcher.isAlive(agent.lastSessionId)) {
+      const restartMode = agent.restartMode ?? "terminate";
+      if (restartMode === "terminate") {
+        // Terminate the leftover session (intentional kill) before starting fresh.
+        console.log(`[agent-executor] Terminating leftover session for "${agent.name}" before new run (${agent.lastSessionId})`);
+        if (this.archivePreviousSession) {
+          await this.archivePreviousSession(agent.lastSessionId).catch((err) => {
+            console.error(`[agent-executor] Failed to terminate leftover session ${agent.lastSessionId}:`, err);
+          });
+        } else {
+          console.warn(`[agent-executor] restartMode="terminate" but no archive callback wired; leftover session ${agent.lastSessionId} left running`);
+        }
+      } else if (!opts?.force) {
+        // restartMode "skip": don't start while the previous run is still open.
+        console.log(`[agent-executor] Skipping "${agent.name}" — previous execution still open (${agent.lastSessionId})`);
+        return;
+      }
     }
 
     const triggerType = opts?.triggerType || "manual";

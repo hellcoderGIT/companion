@@ -201,7 +201,7 @@ function createDeps(overrides?: Partial<SessionOrchestratorDeps>) {
   const sessionStore = createMockStore();
   const worktreeTracker = createMockTracker();
   const prPoller = { watch: vi.fn(), unwatch: vi.fn() };
-  const agentExecutor = { handleSessionExited: vi.fn() } as any;
+  const agentExecutor = { handleSessionExited: vi.fn(), setArchivePreviousSession: vi.fn() } as any;
   return {
     launcher,
     wsBridge,

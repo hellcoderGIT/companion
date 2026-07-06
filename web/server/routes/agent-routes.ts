@@ -11,7 +11,7 @@ import { getOAuthConnection, createOAuthConnection } from "../linear-oauth-conne
 const EDITABLE_FIELDS = [
   "name", "description", "icon", "version",
   "backendType", "model", "permissionMode", "cwd",
-  "envSlug", "env", "allowedTools", "codexInternetAccess",
+  "envSlug", "env", "allowedTools", "codexInternetAccess", "restartMode",
   "prompt", "mcpServers", "skills",
   "container", "branch", "createBranch", "useWorktree",
   "triggers", "enabled",
@@ -42,6 +42,7 @@ function buildCreateInput(
     env: body.env as Record<string, string> | undefined,
     allowedTools: body.allowedTools as string[] | undefined,
     codexInternetAccess: body.codexInternetAccess as boolean | undefined,
+    restartMode: body.restartMode as AgentConfig["restartMode"] | undefined,
     prompt: (body.prompt as string | undefined) || "",
     mcpServers: body.mcpServers as AgentConfig["mcpServers"] | undefined,
     skills: body.skills as string[] | undefined,

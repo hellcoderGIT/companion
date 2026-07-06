@@ -173,6 +173,36 @@ describe("AgentEditor", () => {
     expect(setForm).toHaveBeenCalled();
   });
 
+  // ── Restart mode (leftover session handling) ───────────────────────────────
+
+  it("shows the restart-mode choices when schedule is enabled, with terminate selected by default", () => {
+    // The EMPTY_FORM default is restartMode "terminate", so its button should be
+    // highlighted (border-cc-primary) while "Skip this run" is not.
+    renderEditor({ scheduleEnabled: true });
+
+    const terminateBtn = screen.getByText("Terminate it & start fresh");
+    const skipBtn = screen.getByText("Skip this run");
+    expect(terminateBtn).toBeInTheDocument();
+    expect(skipBtn).toBeInTheDocument();
+    expect(terminateBtn.className).toContain("border-cc-primary");
+    expect(skipBtn.className).not.toContain("border-cc-primary");
+  });
+
+  it("calls setForm to select skip mode when 'Skip this run' is clicked", () => {
+    const { setForm, getForm } = renderEditor({ scheduleEnabled: true });
+
+    fireEvent.click(screen.getByText("Skip this run"));
+
+    expect(setForm).toHaveBeenCalled();
+    expect(getForm().restartMode).toBe("skip");
+  });
+
+  it("does not render the restart-mode choices when schedule is disabled", () => {
+    // The control lives inside the scheduleEnabled block.
+    renderEditor({ scheduleEnabled: false });
+    expect(screen.queryByText("Terminate it & start fresh")).not.toBeInTheDocument();
+  });
+
   // ── MCP Server: URL type (SSE/HTTP) ────────────────────────────────────────
 
   it("shows URL input when MCP form is opened and type is changed to SSE", () => {
