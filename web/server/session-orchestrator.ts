@@ -992,6 +992,13 @@ export class SessionOrchestrator {
    * - Sessions that have exhausted their relaunch budget
    */
   private scheduleProactiveRelaunch(sessionId: string): void {
+    // Respect the global kill-switch — lets operators experiment with letting
+    // dead sessions stay dead instead of being auto-respawned.
+    if (!getSettings().proactiveKeepaliveEnabled) {
+      log.info("orchestrator", "Proactive keepalive disabled by settings; not relaunching", { sessionId });
+      return;
+    }
+
     // Skip if this was an intentional kill. Use has() instead of delete() so
     // the guard is preserved for handleAutoRelaunch (debounce path fires later).
     if (this.intentionalKills.has(sessionId)) return;

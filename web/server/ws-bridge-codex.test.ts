@@ -135,6 +135,7 @@ describe("attachCodexAdapterHandlers", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
   });
@@ -1121,6 +1122,7 @@ describe("attachCodexAdapterHandlers", () => {
         publicUrl: "",
         updateChannel: "stable",
         dockerAutoUpdate: false,
+        proactiveKeepaliveEnabled: true,
         updatedAt: 0,
       });
     }
@@ -1297,6 +1299,7 @@ describe("attachCodexAdapterHandlers", () => {
         publicUrl: "",
         updateChannel: "stable",
         dockerAutoUpdate: false,
+        proactiveKeepaliveEnabled: true,
         updatedAt: 0,
       });
 
@@ -1343,6 +1346,7 @@ describe("attachCodexAdapterHandlers", () => {
         publicUrl: "",
         updateChannel: "stable",
         dockerAutoUpdate: false,
+        proactiveKeepaliveEnabled: true,
         updatedAt: 0,
       });
 
@@ -1454,6 +1458,7 @@ describe("attachCodexAdapterHandlers", () => {
         publicUrl: "",
         updateChannel: "stable",
         dockerAutoUpdate: false,
+        proactiveKeepaliveEnabled: true,
         updatedAt: 0,
       });
 
@@ -1584,6 +1589,7 @@ describe("attachCodexAdapterHandlers", () => {
         publicUrl: "",
         updateChannel: "stable",
         dockerAutoUpdate: false,
+        proactiveKeepaliveEnabled: true,
         updatedAt: 0,
       });
 

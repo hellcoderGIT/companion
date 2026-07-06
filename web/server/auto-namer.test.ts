@@ -37,6 +37,7 @@ beforeEach(() => {
     publicUrl: "",
     updateChannel: "stable",
     dockerAutoUpdate: false,
+    proactiveKeepaliveEnabled: true,
     updatedAt: 0,
   });
 });
@@ -80,6 +81,7 @@ describe("generateSessionTitle", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -130,6 +132,7 @@ describe("generateSessionTitle", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({
@@ -209,6 +212,7 @@ describe("generateSessionTitle", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({

@@ -49,6 +49,7 @@ vi.mock("./settings-manager.js", () => ({
     claudeCodeOAuthToken: "",
     openaiApiKey: "",
     onboardingCompleted: false,
+    proactiveKeepaliveEnabled: true,
   })),
 }));
 
@@ -229,6 +230,24 @@ describe("SessionOrchestrator", () => {
     // previous tests (clearAllMocks resets calls/results but NOT implementations).
     vi.mocked(hasContainerClaudeAuth).mockReturnValue(true);
     vi.mocked(hasContainerCodexAuth).mockReturnValue(true);
+    // Re-establish getSettings default — some tests override it with a minimal
+    // object via mockReturnValue, which persists across clearAllMocks and would
+    // otherwise drop proactiveKeepaliveEnabled (breaking the keepalive gate).
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      anthropicApiKey: "",
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKey: "",
+      linearAutoTransition: false,
+      linearAutoTransitionStateId: "",
+      linearAutoTransitionStateName: "",
+      linearArchiveTransition: false,
+      linearArchiveTransitionStateId: "",
+      linearArchiveTransitionStateName: "",
+      claudeCodeOAuthToken: "",
+      openaiApiKey: "",
+      onboardingCompleted: false,
+      proactiveKeepaliveEnabled: true,
+    } as any);
     vi.mocked(containerManager.createContainer).mockReturnValue({
       containerId: "cid-1",
       name: "companion-1",
@@ -1804,6 +1823,30 @@ describe("SessionOrchestrator", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(deps.launcher.relaunch).toHaveBeenCalledWith("s1");
+    });
+
+    it("does NOT proactively relaunch when proactiveKeepaliveEnabled is off", async () => {
+      // The global kill-switch lets operators disable auto-respawn so dead
+      // sessions stay dead.
+      vi.mocked(settingsManager.getSettings).mockReturnValue({
+        ...settingsManager.getSettings(),
+        proactiveKeepaliveEnabled: false,
+      });
+      deps.launcher.getSession.mockReturnValue({
+        archived: false,
+        state: "exited",
+        pid: undefined,
+      } as any);
+      deps.wsBridge.isCliConnected.mockReturnValue(false);
+      orchestrator.initialize();
+
+      companionBus.emit("session:exited", { sessionId: "s1", exitCode: 1 });
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(deps.launcher.relaunch).not.toHaveBeenCalled();
     });
 
     it("does NOT proactively relaunch after idle-kill (intentional kill)", async () => {

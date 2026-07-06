@@ -1149,6 +1149,7 @@ describe("GET /api/sessions/:id/archive-info", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
     const res = await app.request("/api/sessions/s1/archive-info", { method: "GET" });
@@ -1519,6 +1520,7 @@ describe("GET /api/settings", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 123,
     });
 
@@ -1547,6 +1549,7 @@ describe("GET /api/settings", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
     });
   });
 
@@ -1575,6 +1578,7 @@ describe("GET /api/settings", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 123,
     });
 
@@ -1603,6 +1607,7 @@ describe("GET /api/settings", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
     });
   });
 
@@ -1632,6 +1637,7 @@ describe("GET /api/settings", () => {
       publicUrl: "https://example.com",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 100,
     });
 
@@ -1669,6 +1675,7 @@ describe("PUT /api/settings", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 456,
     });
 
@@ -1719,6 +1726,7 @@ describe("PUT /api/settings", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
     });
   });
 
@@ -1747,6 +1755,7 @@ describe("PUT /api/settings", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 789,
     });
 
@@ -1792,6 +1801,7 @@ describe("PUT /api/settings", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 999,
     });
 
@@ -1888,6 +1898,7 @@ describe("PUT /api/settings", () => {
       publicUrl: "https://my-server.com",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 500,
     });
 
@@ -1992,6 +2003,31 @@ describe("PUT /api/settings", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json).toEqual({ error: "dockerAutoUpdate must be a boolean" });
+  });
+
+  // Validates that proactiveKeepaliveEnabled must be a boolean
+  it("returns 400 for non-boolean proactiveKeepaliveEnabled", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ proactiveKeepaliveEnabled: "nope" }),
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "proactiveKeepaliveEnabled must be a boolean" });
+  });
+
+  // Accepts a boolean proactiveKeepaliveEnabled and forwards it to updateSettings
+  it("accepts proactiveKeepaliveEnabled and forwards it to updateSettings", async () => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ proactiveKeepaliveEnabled: false }),
+    });
+    expect(res.status).toBe(200);
+    expect(settingsManager.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ proactiveKeepaliveEnabled: false }),
+    );
   });
 });
 
@@ -2114,6 +2150,7 @@ describe("GET /api/linear/issues", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2149,6 +2186,7 @@ describe("GET /api/linear/issues", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2237,6 +2275,7 @@ describe("GET /api/linear/issues", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2332,6 +2371,7 @@ describe("GET /api/linear/issues", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2392,6 +2432,7 @@ describe("GET /api/linear/connection", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2427,6 +2468,7 @@ describe("GET /api/linear/connection", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2484,6 +2526,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2523,6 +2566,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2561,6 +2605,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2601,6 +2646,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2675,6 +2721,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2728,6 +2775,7 @@ describe("GET /api/linear/projects", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2763,6 +2811,7 @@ describe("GET /api/linear/projects", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2828,6 +2877,7 @@ describe("GET /api/linear/project-issues", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2863,6 +2913,7 @@ describe("GET /api/linear/project-issues", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 
@@ -2943,6 +2994,7 @@ describe("GET /api/linear/project-issues", () => {
       publicUrl: "",
       updateChannel: "stable",
       dockerAutoUpdate: false,
+      proactiveKeepaliveEnabled: true,
       updatedAt: 0,
     });
 

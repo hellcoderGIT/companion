@@ -29,6 +29,7 @@ export function registerSettingsRoutes(api: Hono): void {
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
+      proactiveKeepaliveEnabled: settings.proactiveKeepaliveEnabled,
       cliBridgeMode: settings.cliBridgeMode,
     });
   });
@@ -104,6 +105,9 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.dockerAutoUpdate !== undefined && typeof body.dockerAutoUpdate !== "boolean") {
       return c.json({ error: "dockerAutoUpdate must be a boolean" }, 400);
     }
+    if (body.proactiveKeepaliveEnabled !== undefined && typeof body.proactiveKeepaliveEnabled !== "boolean") {
+      return c.json({ error: "proactiveKeepaliveEnabled must be a boolean" }, 400);
+    }
     if (body.cliBridgeMode !== undefined && body.cliBridgeMode !== "loopback" && body.cliBridgeMode !== "jsonHandoff") {
       return c.json({ error: "cliBridgeMode must be 'loopback' or 'jsonHandoff'" }, 400);
     }
@@ -121,6 +125,7 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.publicUrl !== undefined
       || body.updateChannel !== undefined
       || body.dockerAutoUpdate !== undefined
+      || body.proactiveKeepaliveEnabled !== undefined
       || body.cliBridgeMode !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
@@ -215,6 +220,10 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.dockerAutoUpdate === "boolean"
           ? body.dockerAutoUpdate
           : undefined,
+      proactiveKeepaliveEnabled:
+        typeof body.proactiveKeepaliveEnabled === "boolean"
+          ? body.proactiveKeepaliveEnabled
+          : undefined,
       cliBridgeMode:
         body.cliBridgeMode === "loopback" || body.cliBridgeMode === "jsonHandoff"
           ? (body.cliBridgeMode as CliBridgeMode)
@@ -243,6 +252,7 @@ export function registerSettingsRoutes(api: Hono): void {
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
+      proactiveKeepaliveEnabled: settings.proactiveKeepaliveEnabled,
       cliBridgeMode: settings.cliBridgeMode,
     });
   });

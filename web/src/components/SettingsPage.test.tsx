@@ -341,6 +341,38 @@ describe("SettingsPage", () => {
     expect(mockState.toggleDarkMode).toHaveBeenCalledTimes(1);
   });
 
+  it("toggles proactive keepalive relaunch and persists it via updateSettings", async () => {
+    // Default state is on; clicking should call updateSettings with false.
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Proactive keepalive relaunch/i });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ proactiveKeepaliveEnabled: false });
+    });
+  });
+
+  it("reflects proactiveKeepaliveEnabled=false loaded from the server", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      updateChannel: "stable",
+      publicUrl: "",
+      proactiveKeepaliveEnabled: false,
+    });
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Proactive keepalive relaunch/i });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
+
   it("toggles telemetry preference from settings", async () => {
     render(<SettingsPage />);
     await screen.findByText("Anthropic key configured");
