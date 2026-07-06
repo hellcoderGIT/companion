@@ -45,6 +45,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const notificationApiAvailable = typeof Notification !== "undefined";
   const [updateChannel, setUpdateChannel] = useState<"stable" | "prerelease">("stable");
   const [dockerAutoUpdate, setDockerAutoUpdate] = useState(false);
+  const [proactiveKeepaliveEnabled, setProactiveKeepaliveEnabled] = useState(true);
   const [cliBridgeMode, setCliBridgeMode] = useState<"loopback" | "jsonHandoff">("loopback");
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingApp, setUpdatingApp] = useState(false);
@@ -139,6 +140,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (typeof s.aiValidationAutoDeny === "boolean") setAiValidationAutoDeny(s.aiValidationAutoDeny);
         if (s.updateChannel === "stable" || s.updateChannel === "prerelease") setUpdateChannel(s.updateChannel);
         if (typeof s.dockerAutoUpdate === "boolean") setDockerAutoUpdate(s.dockerAutoUpdate);
+        if (typeof s.proactiveKeepaliveEnabled === "boolean") setProactiveKeepaliveEnabled(s.proactiveKeepaliveEnabled);
         if (s.cliBridgeMode === "loopback" || s.cliBridgeMode === "jsonHandoff") setCliBridgeMode(s.cliBridgeMode);
         if (typeof s.publicUrl === "string") {
           setPublicUrl(s.publicUrl);
@@ -370,6 +372,34 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       <option value="jsonHandoff">JSON handoff (experimental)</option>
                     </select>
                   </div>
+                </div>
+
+                <div className="pt-3 border-t border-cc-border">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={proactiveKeepaliveEnabled}
+                    aria-label="Proactive keepalive relaunch"
+                    onClick={async () => {
+                      const next = !proactiveKeepaliveEnabled;
+                      const prev = proactiveKeepaliveEnabled;
+                      setProactiveKeepaliveEnabled(next);
+                      try {
+                        await api.updateSettings({ proactiveKeepaliveEnabled: next });
+                      } catch {
+                        setProactiveKeepaliveEnabled(prev);
+                      }
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg text-sm bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+                  >
+                    <span>Proactive keepalive relaunch</span>
+                    <span className="text-xs text-cc-muted">{proactiveKeepaliveEnabled ? "On" : "Off"}</span>
+                  </button>
+                  <p className="mt-1 text-xs text-cc-muted px-1">
+                    When on (default), a CLI process that exits unexpectedly with no browser attached is
+                    automatically relaunched to keep long-running sessions (agents, cron) alive. Turn off to
+                    experiment with letting dead sessions stay dead.
+                  </p>
                 </div>
               </div>
             </section>

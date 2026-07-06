@@ -456,6 +456,7 @@ export interface AppSettings {
   publicUrl: string;
   updateChannel: "stable" | "prerelease";
   dockerAutoUpdate: boolean;
+  proactiveKeepaliveEnabled: boolean;
   cliBridgeMode: "loopback" | "jsonHandoff";
 }
 
@@ -1017,6 +1018,7 @@ export const api = {
     publicUrl?: string;
     updateChannel?: "stable" | "prerelease";
     dockerAutoUpdate?: boolean;
+    proactiveKeepaliveEnabled?: boolean;
     cliBridgeMode?: "loopback" | "jsonHandoff";
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>
