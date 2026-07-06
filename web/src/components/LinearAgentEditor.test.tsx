@@ -69,6 +69,7 @@ const defaultForm: AgentFormData = {
   scheduleEnabled: false,
   scheduleExpression: "",
   scheduleRecurring: true,
+  restartMode: "terminate",
   linearEnabled: true,
   linearOAuthConnectionId: "",
 };

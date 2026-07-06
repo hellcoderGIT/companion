@@ -43,6 +43,8 @@ export interface AgentFormData {
   scheduleEnabled: boolean;
   scheduleExpression: string;
   scheduleRecurring: boolean;
+  // What to do when a previous run's session is still open at trigger time
+  restartMode: "skip" | "terminate";
   // Linear Agent SDK trigger
   linearEnabled: boolean;
   linearOAuthConnectionId: string;
@@ -70,6 +72,7 @@ export const EMPTY_FORM: AgentFormData = {
   scheduleEnabled: false,
   scheduleExpression: "0 8 * * *",
   scheduleRecurring: true,
+  restartMode: "terminate",
   linearEnabled: false,
   linearOAuthConnectionId: "",
 };
@@ -743,6 +746,31 @@ export function AgentEditor({
                     className="w-full px-3 py-2 rounded-lg bg-cc-input-bg border border-cc-border text-cc-fg text-sm focus:outline-none focus:ring-1 focus:ring-cc-primary"
                   />
                 )}
+                <div className="pt-1">
+                  <div className="text-[10px] uppercase tracking-wide text-cc-muted mb-1">
+                    If a previous run is still open
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={() => updateField("restartMode", "terminate")}
+                      className={`px-2 py-1 text-[10px] rounded-lg border transition-colors cursor-pointer ${form.restartMode === "terminate" ? "border-cc-primary text-cc-primary" : "border-cc-border text-cc-muted hover:text-cc-fg"}`}
+                    >
+                      Terminate it &amp; start fresh
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateField("restartMode", "skip")}
+                      className={`px-2 py-1 text-[10px] rounded-lg border transition-colors cursor-pointer ${form.restartMode === "skip" ? "border-cc-primary text-cc-primary" : "border-cc-border text-cc-muted hover:text-cc-fg"}`}
+                    >
+                      Skip this run
+                    </button>
+                  </div>
+                  <p className="mt-1 text-[10px] text-cc-muted">
+                    Agent sessions stay open until archived. “Terminate” closes the leftover
+                    session so the next scheduled run can start; “Skip” keeps it and waits.
+                  </p>
+                </div>
               </div>
             )}
 

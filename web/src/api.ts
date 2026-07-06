@@ -657,6 +657,8 @@ export interface AgentInfo {
   env?: Record<string, string>;
   allowedTools?: string[];
   codexInternetAccess?: boolean;
+  /** What to do when a previous run's session is still open at trigger time */
+  restartMode?: "skip" | "terminate";
   prompt: string;
   mcpServers?: Record<string, McpServerConfigAgent>;
   skills?: string[];

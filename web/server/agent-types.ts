@@ -37,6 +37,16 @@ export interface AgentConfig {
   allowedTools?: string[];
   /** Codex-specific: internet access */
   codexInternetAccess?: boolean;
+  /**
+   * What to do when a previous run's session is still open (alive) at the moment
+   * this agent is triggered again:
+   *   - "terminate" (default): archive/kill the leftover session, then start fresh.
+   *   - "skip": don't start a new run while the previous one is still open.
+   * Because the CLI process stays alive after a turn finishes (it only exits on
+   * archive/kill), "skip" would otherwise block every future scheduled run until
+   * the session is manually archived.
+   */
+  restartMode?: "skip" | "terminate";
 
   // ── Prompt ──
   /** Prompt template. Use {{input}} as placeholder for trigger-provided input */

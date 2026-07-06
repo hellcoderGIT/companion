@@ -438,10 +438,11 @@ describe("AgentExecutor", () => {
       expect(launcher.launch).toHaveBeenCalledOnce();
     });
 
-    it("skips when previous execution is still running (overlap prevention)", async () => {
-      // Simulate an agent whose previous session is still alive
+    it("skips when previous execution is still open and restartMode is 'skip'", async () => {
+      // Simulate an agent (restartMode "skip") whose previous session is still alive
       const agent = makeAgent({
         id: "overlapping",
+        restartMode: "skip",
         lastSessionId: "still-running-session",
       });
       mockAgentStore.getAgent.mockReturnValue(agent);
@@ -720,6 +721,102 @@ describe("AgentExecutor", () => {
 
       const appendedExec = mockExecutionStoreInstance.append.mock.calls[0][0] as AgentExecution;
       expect(appendedExec.triggerType).toBe("schedule");
+    });
+  });
+
+  // =========================================================================
+  // restartMode — what happens when a previous run's session is still open
+  // =========================================================================
+  describe("restartMode (leftover session handling)", () => {
+    it("default 'terminate': archives the leftover session, then launches a fresh one", async () => {
+      // Regression test for the core bug: a scheduled agent's session stays alive
+      // after its turn finishes, so isAlive() is permanently true. With the default
+      // terminate mode we archive the leftover and start a new run instead of
+      // blocking forever.
+      const archiveSpy = vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined);
+      executor.setArchivePreviousSession(archiveSpy);
+
+      const agent = makeAgent({
+        id: "terminate-agent",
+        // no restartMode set -> defaults to "terminate"
+        lastSessionId: "leftover-session",
+      });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+      launcher.isAlive.mockReturnValue(true);
+
+      const result = await executor.executeAgent("terminate-agent", undefined, { triggerType: "schedule" });
+
+      // The leftover session should have been archived (intentional kill)...
+      expect(archiveSpy).toHaveBeenCalledWith("leftover-session");
+      // ...and a new session launched anyway.
+      expect(launcher.launch).toHaveBeenCalledOnce();
+      expect(result).toBeDefined();
+      expect(result!.sessionId).toBe("session-123");
+    });
+
+    it("does not archive when no previous session is alive", async () => {
+      const archiveSpy = vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined);
+      executor.setArchivePreviousSession(archiveSpy);
+
+      const agent = makeAgent({ id: "fresh-agent", lastSessionId: "old-session" });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+      // Previous session already exited.
+      launcher.isAlive.mockReturnValue(false);
+
+      await executor.executeAgent("fresh-agent");
+
+      expect(archiveSpy).not.toHaveBeenCalled();
+      expect(launcher.launch).toHaveBeenCalledOnce();
+    });
+
+    it("terminate mode still launches even if archiving the leftover fails", async () => {
+      // A failed archive should be logged but must not block the new run.
+      const archiveSpy = vi.fn<(id: string) => Promise<void>>().mockRejectedValue(new Error("kill failed"));
+      executor.setArchivePreviousSession(archiveSpy);
+
+      const agent = makeAgent({ id: "resilient-agent", lastSessionId: "leftover-session" });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+      launcher.isAlive.mockReturnValue(true);
+
+      const result = await executor.executeAgent("resilient-agent");
+
+      expect(archiveSpy).toHaveBeenCalledWith("leftover-session");
+      expect(launcher.launch).toHaveBeenCalledOnce();
+      expect(result).toBeDefined();
+    });
+
+    it("terminate mode without a wired archive callback warns but still launches", async () => {
+      // No setArchivePreviousSession() called -> callback undefined.
+      const agent = makeAgent({ id: "no-callback-agent", lastSessionId: "leftover-session" });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+      launcher.isAlive.mockReturnValue(true);
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = await executor.executeAgent("no-callback-agent");
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("no archive callback wired"));
+      // Still launches a fresh session rather than getting stuck.
+      expect(launcher.launch).toHaveBeenCalledOnce();
+      expect(result).toBeDefined();
+
+      warnSpy.mockRestore();
+    });
+
+    it("skip mode with force=true bypasses the skip and launches", async () => {
+      // Manual/forced runs should never be blocked by the skip guard.
+      const agent = makeAgent({
+        id: "skip-force-agent",
+        restartMode: "skip",
+        lastSessionId: "leftover-session",
+      });
+      mockAgentStore.getAgent.mockReturnValue(agent);
+      launcher.isAlive.mockReturnValue(true);
+
+      const result = await executor.executeAgent("skip-force-agent", undefined, { force: true });
+
+      expect(launcher.launch).toHaveBeenCalledOnce();
+      expect(result).toBeDefined();
     });
   });
 
