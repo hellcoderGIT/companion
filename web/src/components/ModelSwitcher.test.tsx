@@ -93,7 +93,7 @@ describe("ModelSwitcher", () => {
 
     expect(mockSendToSession).toHaveBeenCalledWith("s1", {
       type: "set_model",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
     });
   });
 
@@ -104,7 +104,7 @@ describe("ModelSwitcher", () => {
 
     expect(mockSetSdkSessions).toHaveBeenCalledOnce();
     const updatedSessions = mockSetSdkSessions.mock.calls[0][0];
-    expect(updatedSessions[0].model).toBe("claude-sonnet-4-6");
+    expect(updatedSessions[0].model).toBe("claude-sonnet-5");
   });
 
   it("does not send when selecting the already-active model", () => {
