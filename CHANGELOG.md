@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.107.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.106.0...companion-v0.107.0) (2026-07-08)
+
+
+### Features
+
+* **models:** add Sonnet 5 to Claude model picker ([#60](https://github.com/hellcoderGIT/companion/issues/60)) ([5b270e2](https://github.com/hellcoderGIT/companion/commit/5b270e2fb13d2c29e51a425c7853e5348c92554d))
+
 ## [0.106.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.105.3...companion-v0.106.0) (2026-07-06)
 
 
