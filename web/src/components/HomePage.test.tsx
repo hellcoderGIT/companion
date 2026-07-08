@@ -399,7 +399,7 @@ describe("HomePage", () => {
     fireEvent.click(modelButton);
 
     // Should see model options
-    const sonnetOption = screen.getByText("Sonnet 4.6");
+    const sonnetOption = screen.getByText("Sonnet 5");
     expect(sonnetOption).toBeInTheDocument();
 
     // Select Sonnet
@@ -407,7 +407,7 @@ describe("HomePage", () => {
 
     // Verify dropdown closed and Sonnet is now shown
     expect(screen.queryByText("Haiku 4.5")).not.toBeInTheDocument(); // dropdown closed
-    expect(screen.getByText("Sonnet 4.6")).toBeInTheDocument(); // now selected
+    expect(screen.getByText("Sonnet 5")).toBeInTheDocument(); // now selected
   });
 
   // ─── Effort dropdown interaction ────────────────────────────────────────────
@@ -1153,7 +1153,7 @@ describe("HomePage", () => {
     // Open model dropdown (default is now Opus 4.8).
     const modelButton = screen.getByText("Opus 4.8");
     fireEvent.click(modelButton);
-    expect(screen.getByText("Sonnet 4.6")).toBeInTheDocument();
+    expect(screen.getByText("Sonnet 5")).toBeInTheDocument();
 
     // Click outside (on the document body)
     fireEvent.pointerDown(document.body);

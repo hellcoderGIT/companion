@@ -230,6 +230,13 @@ describe("static model/mode lists", () => {
     expect(slugs).toContain("claude-fable-5");
   });
 
+  // Sonnet 5 — the Claude 5-family Sonnet — is selectable alongside the Opus
+  // and Haiku options.
+  it("includes claude-sonnet-5 in Claude models", () => {
+    const slugs = CLAUDE_MODELS.map((m) => m.value);
+    expect(slugs).toContain("claude-sonnet-5");
+  });
+
   // The static list is only a fallback — the live list comes from the Codex
   // app-server `model/list` RPC. We assert the current frontier model (gpt-5.5)
   // and that the default is the first entry.
