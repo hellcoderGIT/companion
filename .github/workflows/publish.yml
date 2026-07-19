@@ -3,6 +3,10 @@ name: Release & Publish
 on:
   push:
     branches: [main]
+  # Manual re-publish escape hatch: when the publish job fails after
+  # release-please has already tagged the release, dispatching this workflow
+  # publishes whatever version main's package.json carries.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,7 +26,7 @@ jobs:
 
   publish:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # Trusted Publishing (OIDC) — no NPM_PUBLISH_TOKEN needed.
     # The package on npm must list this workflow as a trusted publisher.
@@ -38,11 +42,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
+      # Pin npm 11: Trusted Publishing needs >= 11.5.1, and npm@latest (12+)
+      # requires newer Node than the runner may have.
       - name: Upgrade npm CLI (Trusted Publishing needs >= 11.5.1)
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Install dependencies
         working-directory: web
