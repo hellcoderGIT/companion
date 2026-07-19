@@ -337,9 +337,9 @@ export function DashboardPage() {
           <button
             type="button"
             onClick={onUpdateNow}
-            disabled={running || loading || !data?.anthropicApiKeyConfigured}
+            disabled={running || loading || !data?.claudeCliAvailable}
             className={`px-3 py-2 min-h-[40px] rounded-lg text-sm font-medium transition-colors ${
-              running || loading || !data?.anthropicApiKeyConfigured
+              running || loading || !data?.claudeCliAvailable
                 ? "bg-cc-hover text-cc-muted cursor-not-allowed"
                 : "bg-cc-primary hover:bg-cc-primary-hover text-white cursor-pointer"
             }`}
@@ -359,14 +359,14 @@ export function DashboardPage() {
           </div>
         )}
 
-        {data && !data.anthropicApiKeyConfigured && (
+        {data && !data.claudeCliAvailable && (
           <div className="px-3 py-2 rounded-lg bg-cc-warning/10 border border-cc-warning/20 text-xs text-cc-warning">
-            The dashboard needs an Anthropic API key to summarize sessions.{" "}
-            <a href="#/settings" className="underline hover:no-underline">Configure it in Settings</a>.
+            The Claude Code CLI was not found — the summarizer uses your Claude Code login to
+            generate summaries, so the CLI must be installed on this machine.
           </div>
         )}
 
-        {data && data.anthropicApiKeyConfigured && !data.enabled && (
+        {data && data.claudeCliAvailable && !data.enabled && (
           <div className="px-3 py-2 rounded-lg bg-cc-primary/10 border border-cc-primary/20 text-xs text-cc-fg">
             Nightly updates are off — summaries only refresh when you press "Update now".{" "}
             <a href="#/settings" className="underline hover:no-underline">Enable them in Settings</a>.

@@ -48,7 +48,7 @@ function makeData(overrides: Partial<DashboardData> = {}): DashboardData {
     enabled: true,
     model: "claude-haiku-4-5",
     runHour: 3,
-    anthropicApiKeyConfigured: true,
+    claudeCliAvailable: true,
     runMeta: {
       lastRunAt: Date.now() - 7_200_000,
       lastRunCompletedAt: Date.now() - 7_100_000,
@@ -126,14 +126,14 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("button", { name: "Updating..." })).toBeDisabled();
   });
 
-  // The button must be disabled (not silently failing) without an API key,
-  // and the user pointed at Settings
-  it("disables Update now and explains when no API key is configured", async () => {
-    mockApi.getDashboard.mockResolvedValue(makeData({ anthropicApiKeyConfigured: false }));
+  // The button must be disabled (not silently failing) when the Claude CLI
+  // (which provides the login the summarizer uses) is missing
+  it("disables Update now and explains when the Claude CLI is unavailable", async () => {
+    mockApi.getDashboard.mockResolvedValue(makeData({ claudeCliAvailable: false }));
     render(<DashboardPage />);
 
     expect(await screen.findByRole("button", { name: "Update now" })).toBeDisabled();
-    expect(screen.getByText(/needs an Anthropic API key/)).toBeInTheDocument();
+    expect(screen.getByText(/Claude Code CLI was not found/)).toBeInTheDocument();
   });
 
   // Filter chips narrow the visible sessions

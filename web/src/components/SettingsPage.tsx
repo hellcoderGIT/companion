@@ -958,8 +958,9 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 <p className="text-xs text-cc-muted leading-relaxed">
                   A nightly job summarizes every session with recent activity so the{" "}
                   <a href="#/dashboard" className="underline hover:no-underline">dashboard</a>{" "}
-                  can show where each project stands. This is opt-in because it spends
-                  API tokens every night. Requires an Anthropic API key. You can always
+                  can show where each project stands. It runs through the Claude Code CLI
+                  with the same login your normal sessions use — no separate API key needed.
+                  This is opt-in because it spends tokens every night. You can always
                   refresh manually with "Update now" on the dashboard, even when the
                   nightly run is off.
                 </p>
@@ -967,21 +968,13 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                 <button
                   type="button"
                   onClick={toggleDashboardEnabled}
-                  disabled={!configured}
-                  className={`w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg transition-colors ${
-                    !configured
-                      ? "bg-cc-hover text-cc-muted cursor-not-allowed opacity-60"
-                      : "bg-cc-hover hover:bg-cc-active text-cc-fg cursor-pointer"
-                  }`}
+                  className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
                 >
                   <span className="text-sm">Nightly dashboard updates</span>
-                  <span className={`text-xs font-medium ${dashboardEnabled && configured ? "text-cc-success" : "text-cc-muted"}`}>
-                    {dashboardEnabled && configured ? "On" : "Off"}
+                  <span className={`text-xs font-medium ${dashboardEnabled ? "text-cc-success" : "text-cc-muted"}`}>
+                    {dashboardEnabled ? "On" : "Off"}
                   </span>
                 </button>
-                {!configured && (
-                  <p className="text-[11px] text-cc-warning">Configure an Anthropic API key above to enable dashboard updates.</p>
-                )}
 
                 <div>
                   <label className="block text-sm font-medium mb-1.5" htmlFor="dashboard-model">

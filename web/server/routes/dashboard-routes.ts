@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { getSettings } from "../settings-manager.js";
+import { isClaudeCliAvailable } from "../claude-cli-runner.js";
 import { getDashboardStore, type DashboardStore } from "../dashboard-store.js";
 import {
   getDashboardRunProgress,
@@ -23,6 +24,8 @@ export interface CompanionSessionLink {
 export interface DashboardRouteDeps {
   listCompanionSessions?: () => CompanionSessionLink[];
   store?: DashboardStore;
+  /** Override the Claude CLI availability check (tests). */
+  isCliAvailable?: () => boolean;
 }
 
 export interface DashboardSessionEntry extends DashboardSessionSummary {
@@ -35,6 +38,7 @@ export interface DashboardSessionEntry extends DashboardSessionSummary {
 
 export function registerDashboardRoutes(api: Hono, deps: DashboardRouteDeps = {}): void {
   const store = () => deps.store || getDashboardStore();
+  const cliAvailable = () => (deps.isCliAvailable ? deps.isCliAvailable() : isClaudeCliAvailable());
 
   // Dashboard data — served purely from the nightly store, never from live sessions.
   api.get("/dashboard", (c) => {
@@ -65,7 +69,7 @@ export function registerDashboardRoutes(api: Hono, deps: DashboardRouteDeps = {}
       enabled: settings.dashboardEnabled,
       model: settings.dashboardModel,
       runHour: settings.dashboardRunHour,
-      anthropicApiKeyConfigured: !!settings.anthropicApiKey.trim(),
+      claudeCliAvailable: cliAvailable(),
       runMeta: store().loadRunMeta(),
       progress: getDashboardRunProgress(),
       sessions,
@@ -77,8 +81,8 @@ export function registerDashboardRoutes(api: Hono, deps: DashboardRouteDeps = {}
     if (isDashboardRunActive()) {
       return c.json({ error: "A dashboard update is already running", progress: getDashboardRunProgress() }, 409);
     }
-    if (!getSettings().anthropicApiKey.trim()) {
-      return c.json({ error: "Anthropic API key is not configured (Settings → Anthropic)" }, 400);
+    if (!cliAvailable()) {
+      return c.json({ error: "Claude Code CLI not found — the summarizer uses your Claude Code login" }, 400);
     }
 
     runDashboardUpdate({ trigger: "manual", store: deps.store }).catch((err) => {

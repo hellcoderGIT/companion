@@ -1,5 +1,6 @@
 import { Cron } from "croner";
 import { getSettings } from "./settings-manager.js";
+import { isClaudeCliAvailable } from "./claude-cli-runner.js";
 import { isDashboardRunActive, runDashboardUpdate } from "./dashboard-summarizer.js";
 
 // ─── Nightly dashboard scheduler ────────────────────────────────────────────
@@ -15,8 +16,8 @@ export async function runScheduledDashboardUpdateIfDue(now: Date = new Date()): 
   if (!settings.dashboardEnabled) return false;
   if (now.getHours() !== settings.dashboardRunHour) return false;
   if (isDashboardRunActive()) return false;
-  if (!settings.anthropicApiKey.trim()) {
-    console.warn("[dashboard] Nightly update skipped: Anthropic API key not configured");
+  if (!isClaudeCliAvailable()) {
+    console.warn("[dashboard] Nightly update skipped: Claude Code CLI not found");
     return false;
   }
 

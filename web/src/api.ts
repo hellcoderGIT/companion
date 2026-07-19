@@ -512,7 +512,7 @@ export interface DashboardData {
   enabled: boolean;
   model: string;
   runHour: number;
-  anthropicApiKeyConfigured: boolean;
+  claudeCliAvailable: boolean;
   runMeta: DashboardRunMeta | null;
   progress: DashboardRunProgress;
   sessions: DashboardSessionEntry[];

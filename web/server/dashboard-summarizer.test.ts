@@ -3,12 +3,22 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DashboardStore } from "./dashboard-store.js";
-import { _resetForTest, updateSettings } from "./settings-manager.js";
+import { _resetForTest } from "./settings-manager.js";
 import { clearClaudeSessionHistoryCacheForTests } from "./claude-session-history.js";
+
+// The summarizer runs prompts through the headless Claude CLI (same login as
+// normal sessions). Tests either inject a fake runner or toggle the mocked CLI
+// availability below — no network and no real CLI involved.
+const cliMock = { available: true };
+vi.mock("./claude-cli-runner.js", () => ({
+  isClaudeCliAvailable: () => cliMock.available,
+  runClaudePrompt: vi.fn().mockResolvedValue(null),
+}));
+
 import {
   _resetDashboardRunStateForTest,
   buildTranscriptExcerpt,
-  DashboardNotConfiguredError,
+  DashboardCliUnavailableError,
   parseSummaryResponse,
   runDashboardUpdate,
 } from "./dashboard-summarizer.js";
@@ -16,17 +26,10 @@ import {
 // Covers the three layers of the summarizer:
 // 1. buildTranscriptExcerpt — bounded, tail-biased excerpt building
 // 2. parseSummaryResponse — tolerant parsing of the model's JSON answer
-// 3. runDashboardUpdate — end-to-end over fake transcripts with a stubbed
-//    Anthropic API, including the incremental "only changed sessions" skip.
+// 3. runDashboardUpdate — end-to-end over fake transcripts with an injected
+//    prompt runner, including the incremental "only changed sessions" skip.
 
 const SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-
-function anthropicResponse(payload: object): Response {
-  return new Response(
-    JSON.stringify({ content: [{ type: "text", text: JSON.stringify(payload) }] }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
-  );
-}
 
 /** Writes a minimal Claude Code transcript that discovery + history parsing accept. */
 function writeTranscript(projectsRoot: string, sessionId: string, cwd: string): string {
@@ -120,45 +123,50 @@ describe("parseSummaryResponse", () => {
 describe("runDashboardUpdate", () => {
   let projectsRoot: string;
   let storeDir: string;
-  let settingsPath: string;
   let store: DashboardStore;
 
   beforeEach(() => {
     projectsRoot = mkdtempSync(join(tmpdir(), "dashboard-projects-"));
     storeDir = mkdtempSync(join(tmpdir(), "dashboard-store-"));
-    settingsPath = join(mkdtempSync(join(tmpdir(), "dashboard-settings-")), "settings.json");
     store = new DashboardStore(storeDir);
-    _resetForTest(settingsPath);
+    cliMock.available = true;
+    _resetForTest(join(mkdtempSync(join(tmpdir(), "dashboard-settings-")), "settings.json"));
     _resetDashboardRunStateForTest();
     clearClaudeSessionHistoryCacheForTests();
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     _resetForTest();
     rmSync(projectsRoot, { recursive: true, force: true });
     rmSync(storeDir, { recursive: true, force: true });
   });
 
-  it("throws when no Anthropic API key is configured", async () => {
+  it("throws when sessions need summarizing but the Claude CLI is missing", async () => {
+    writeTranscript(projectsRoot, SESSION_ID, "/root/projects/demo");
+    cliMock.available = false;
     await expect(
       runDashboardUpdate({ trigger: "manual", store, projectsRoot }),
-    ).rejects.toBeInstanceOf(DashboardNotConfiguredError);
+    ).rejects.toBeInstanceOf(DashboardCliUnavailableError);
   });
 
-  it("summarizes changed sessions and persists summary + run meta", async () => {
-    updateSettings({ anthropicApiKey: "test-key" });
+  it("succeeds without the CLI when there is nothing to summarize", async () => {
+    cliMock.available = false;
+    const meta = await runDashboardUpdate({ trigger: "manual", store, projectsRoot });
+    expect(meta.lastRunStatus).toBe("success");
+    expect(meta.sessionsProcessed).toBe(0);
+  });
+
+  it("summarizes changed sessions via the runner and persists summary + run meta", async () => {
     writeTranscript(projectsRoot, SESSION_ID, "/root/projects/demo");
 
-    const fetchMock = vi.fn().mockResolvedValue(anthropicResponse({
+    const runner = vi.fn().mockResolvedValue(JSON.stringify({
       summary: "Login bug fixed; regression test added.",
       status: "completed",
       openItems: [],
       archivable: true,
     }));
-    vi.stubGlobal("fetch", fetchMock);
 
-    const meta = await runDashboardUpdate({ trigger: "manual", store, projectsRoot });
+    const meta = await runDashboardUpdate({ trigger: "manual", store, projectsRoot, runner });
 
     expect(meta.lastRunStatus).toBe("success");
     expect(meta.sessionsProcessed).toBe(1);
@@ -171,38 +179,36 @@ describe("runDashboardUpdate", () => {
     expect(summary?.cwd).toBe("/root/projects/demo");
     expect(summary?.model).toBe("claude-haiku-4-5");
 
-    // The request body must target the configured dashboard model.
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.model).toBe("claude-haiku-4-5");
+    // The runner receives the transcript excerpt and the configured dashboard model.
+    const [prompt, model] = runner.mock.calls[0];
+    expect(prompt).toContain("USER: Please fix the login bug");
+    expect(model).toBe("claude-haiku-4-5");
   });
 
   it("skips sessions whose transcript is unchanged since the last run", async () => {
-    updateSettings({ anthropicApiKey: "test-key" });
     const file = writeTranscript(projectsRoot, SESSION_ID, "/root/projects/demo");
     // Pin the mtime so both runs observe the same lastActivityAt.
     utimesSync(file, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
 
-    const fetchMock = vi.fn().mockResolvedValue(anthropicResponse({
+    const runner = vi.fn().mockResolvedValue(JSON.stringify({
       summary: "s", status: "in_progress", openItems: [], archivable: false,
     }));
-    vi.stubGlobal("fetch", fetchMock);
 
-    await runDashboardUpdate({ trigger: "manual", store, projectsRoot });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await runDashboardUpdate({ trigger: "manual", store, projectsRoot, runner });
+    expect(runner).toHaveBeenCalledTimes(1);
 
-    const second = await runDashboardUpdate({ trigger: "manual", store, projectsRoot });
-    // No new activity → no additional API call, session counted as skipped.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const second = await runDashboardUpdate({ trigger: "manual", store, projectsRoot, runner });
+    // No new activity → no additional runner call, session counted as skipped.
+    expect(runner).toHaveBeenCalledTimes(1);
     expect(second.sessionsProcessed).toBe(0);
     expect(second.sessionsSkipped).toBe(1);
   });
 
-  it("records a failed run when the API errors", async () => {
-    updateSettings({ anthropicApiKey: "test-key" });
+  it("records a failed run when the runner yields nothing", async () => {
     writeTranscript(projectsRoot, SESSION_ID, "/root/projects/demo");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 500 })));
+    const runner = vi.fn().mockResolvedValue(null);
 
-    const meta = await runDashboardUpdate({ trigger: "scheduled", store, projectsRoot });
+    const meta = await runDashboardUpdate({ trigger: "scheduled", store, projectsRoot, runner });
     expect(meta.lastRunStatus).toBe("error");
     expect(meta.sessionsFailed).toBe(1);
     expect(store.loadSummary(SESSION_ID)).toBeNull();

@@ -1,4 +1,5 @@
 import { DEFAULT_DASHBOARD_MODEL, getSettings } from "./settings-manager.js";
+import { isClaudeCliAvailable, runClaudePrompt } from "./claude-cli-runner.js";
 import { discoverClaudeSessions, type DiscoveredClaudeSession } from "./claude-session-discovery.js";
 import { getClaudeSessionHistoryPage } from "./claude-session-history.js";
 import { DashboardStore, getDashboardStore } from "./dashboard-store.js";
@@ -11,15 +12,14 @@ import {
   type DashboardSessionSummary,
 } from "./dashboard-types.js";
 
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-
 // Bounded transcript excerpt so a huge session can't blow the token budget:
 // keep only the tail of the conversation, and truncate individual messages.
 const EXCERPT_MESSAGE_LIMIT = 40;
 const EXCERPT_MAX_MESSAGE_CHARS = 1_500;
 const EXCERPT_MAX_TOTAL_CHARS = 24_000;
 const DISCOVERY_LIMIT = 500;
-const PER_SESSION_TIMEOUT_MS = 60_000;
+// Generous: each summarization pays Claude CLI startup cost on top of the model call.
+const PER_SESSION_TIMEOUT_MS = 120_000;
 
 interface ExcerptMessage {
   role: "user" | "assistant";
@@ -95,7 +95,8 @@ export function parseSummaryResponse(raw: string): ParsedSessionSummary | null {
 function buildPrompt(session: DiscoveredClaudeSession, excerpt: string): string {
   return [
     "You are generating a project-dashboard entry for a Claude Code (coding agent) session transcript.",
-    "Analyze the excerpt and answer with ONLY a JSON object — no prose, no markdown fences — with exactly these fields:",
+    "Do not use any tools — analyze only the excerpt below and answer directly.",
+    "Answer with ONLY a JSON object — no prose, no markdown fences — with exactly these fields:",
     `{"summary": "...", "status": "...", "openItems": ["..."], "archivable": true|false}`,
     "",
     '- "summary": 2-3 sentences on what the session is about and where it stands right now.',
@@ -111,42 +112,15 @@ function buildPrompt(session: DiscoveredClaudeSession, excerpt: string): string 
   ].filter(Boolean).join("\n");
 }
 
-async function callAnthropic(
-  prompt: string,
-  apiKey: string,
-  model: string,
-): Promise<string | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PER_SESSION_TIMEOUT_MS);
-  try {
-    const res = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1024,
-        messages: [{ role: "user", content: prompt }],
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      console.warn(`[dashboard] Anthropic request failed: ${res.status} ${res.statusText}`);
-      return null;
-    }
-    const data = await res.json() as { content?: Array<{ type: string; text?: string }> };
-    const textBlock = data.content?.find((block) => block.type === "text");
-    return textBlock?.text ?? null;
-  } catch (err) {
-    console.warn("[dashboard] Anthropic request error:", err);
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+/**
+ * One prompt → one plain-text answer. The default runner goes through the
+ * headless Claude CLI (`claude --print`), so summarization authenticates with
+ * the same Claude Code login that normal sessions use — no API key required.
+ */
+export type SummarizerRunner = (prompt: string, model: string) => Promise<string | null>;
+
+const defaultRunner: SummarizerRunner = (prompt, model) =>
+  runClaudePrompt({ prompt, model, timeoutMs: PER_SESSION_TIMEOUT_MS });
 
 // ─── Run state (module singleton) ───────────────────────────────────────────
 
@@ -170,6 +144,8 @@ export interface RunDashboardUpdateOptions {
   trigger: DashboardRunTrigger;
   store?: DashboardStore;
   projectsRoot?: string;
+  /** Override the prompt runner (tests). Defaults to the headless Claude CLI. */
+  runner?: SummarizerRunner;
 }
 
 export class DashboardRunActiveError extends Error {
@@ -178,9 +154,9 @@ export class DashboardRunActiveError extends Error {
   }
 }
 
-export class DashboardNotConfiguredError extends Error {
+export class DashboardCliUnavailableError extends Error {
   constructor() {
-    super("Anthropic API key is not configured");
+    super("Claude Code CLI not found — the dashboard summarizer uses your Claude Code login");
   }
 }
 
@@ -195,9 +171,6 @@ export async function runDashboardUpdate(
   if (isDashboardRunActive()) throw new DashboardRunActiveError();
 
   const settings = getSettings();
-  const apiKey = settings.anthropicApiKey.trim();
-  if (!apiKey) throw new DashboardNotConfiguredError();
-
   const model = settings.dashboardModel?.trim() || DEFAULT_DASHBOARD_MODEL;
   const maxSessions = settings.dashboardMaxSessionsPerRun;
   const store = options.store || getDashboardStore();
@@ -216,6 +189,13 @@ export async function runDashboardUpdate(
   const queue = stale.slice(0, maxSessions);
   const skipped = discovered.length - queue.length;
 
+  // Only the default (CLI-backed) runner needs the binary; an injected runner
+  // (tests) doesn't, and an empty queue never invokes the runner at all.
+  if (queue.length > 0 && !options.runner && !isClaudeCliAvailable()) {
+    throw new DashboardCliUnavailableError();
+  }
+  const runner = options.runner || defaultRunner;
+
   progress = {
     state: "running",
     trigger: options.trigger,
@@ -229,7 +209,7 @@ export async function runDashboardUpdate(
   try {
     for (const session of queue) {
       progress = { ...progress, currentSession: sessionLabel(session) };
-      const ok = await summarizeOne(session, store, apiKey, model, options.projectsRoot);
+      const ok = await summarizeOne(session, store, runner, model, options.projectsRoot);
       if (!ok) failed++;
       progress = {
         ...progress,
@@ -261,7 +241,7 @@ export async function runDashboardUpdate(
 async function summarizeOne(
   session: DiscoveredClaudeSession,
   store: DashboardStore,
-  apiKey: string,
+  runner: SummarizerRunner,
   model: string,
   projectsRoot?: string,
 ): Promise<boolean> {
@@ -277,7 +257,7 @@ async function summarizeOne(
   );
   if (!excerpt) return false;
 
-  const raw = await callAnthropic(buildPrompt(session, excerpt), apiKey, model);
+  const raw = await runner(buildPrompt(session, excerpt), model);
   if (!raw) return false;
 
   const parsed = parseSummaryResponse(raw);

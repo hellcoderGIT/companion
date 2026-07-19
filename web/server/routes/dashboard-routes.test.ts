@@ -5,13 +5,14 @@ import { tmpdir } from "node:os";
 import { Hono } from "hono";
 import { registerDashboardRoutes } from "./dashboard-routes.js";
 import { DashboardStore } from "../dashboard-store.js";
-import { _resetForTest, updateSettings } from "../settings-manager.js";
+import { _resetForTest } from "../settings-manager.js";
 import { _resetDashboardRunStateForTest } from "../dashboard-summarizer.js";
 import type { DashboardRunMeta, DashboardSessionSummary } from "../dashboard-types.js";
 
 // Validates the dashboard REST surface: GET serves purely from the stored
 // nightly data (never live sessions), joins companion-managed sessions via
-// cliSessionId, and the manual run trigger enforces API-key configuration.
+// cliSessionId, and the manual run trigger requires the Claude Code CLI
+// (the summarizer authenticates via the CLI login, not an API key).
 
 const CLI_SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
@@ -33,6 +34,24 @@ function makeSummary(overrides: Partial<DashboardSessionSummary> = {}): Dashboar
   };
 }
 
+function buildApp(store: DashboardStore, cliAvailable: boolean): Hono {
+  const app = new Hono();
+  registerDashboardRoutes(app, {
+    store,
+    isCliAvailable: () => cliAvailable,
+    listCompanionSessions: () => [
+      {
+        sessionId: "companion-1",
+        cliSessionId: CLI_SESSION_ID,
+        name: "Fix login",
+        userName: "Moritz",
+        archived: false,
+      },
+    ],
+  });
+  return app;
+}
+
 describe("dashboard routes", () => {
   let storeDir: string;
   let store: DashboardStore;
@@ -43,20 +62,7 @@ describe("dashboard routes", () => {
     store = new DashboardStore(storeDir);
     _resetForTest(join(storeDir, "settings.json"));
     _resetDashboardRunStateForTest();
-
-    app = new Hono();
-    registerDashboardRoutes(app, {
-      store,
-      listCompanionSessions: () => [
-        {
-          sessionId: "companion-1",
-          cliSessionId: CLI_SESSION_ID,
-          name: "Fix login",
-          userName: "Moritz",
-          archived: false,
-        },
-      ],
-    });
+    app = buildApp(store, true);
   });
 
   afterEach(() => {
@@ -83,6 +89,7 @@ describe("dashboard routes", () => {
     const data = await res.json();
 
     expect(data.enabled).toBe(false); // opt-in defaults to off
+    expect(data.claudeCliAvailable).toBe(true);
     expect(data.runMeta).toEqual(meta);
     expect(data.progress.state).toBe("idle");
     expect(data.sessions).toHaveLength(1);
@@ -98,16 +105,17 @@ describe("dashboard routes", () => {
     expect(data.sessions[0].companionSessionId).toBeUndefined();
   });
 
-  it("POST /dashboard/run returns 400 when no Anthropic key is configured", async () => {
-    const res = await app.request("/dashboard/run", { method: "POST" });
+  it("POST /dashboard/run returns 400 when the Claude CLI is unavailable", async () => {
+    const noCliApp = buildApp(store, false);
+    const res = await noCliApp.request("/dashboard/run", { method: "POST" });
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toContain("API key");
+    expect(data.error).toContain("Claude Code CLI");
   });
 
-  it("POST /dashboard/run starts a background run when configured", async () => {
-    updateSettings({ anthropicApiKey: "test-key" });
-    // Point discovery at an empty dir so the background run finds no sessions.
+  it("POST /dashboard/run starts a background run when the CLI is available", async () => {
+    // Point discovery at an empty dir so the background run finds no sessions
+    // (and therefore never actually invokes the CLI).
     const emptyProjects = mkdtempSync(join(tmpdir(), "dashboard-empty-projects-"));
     const prevProjectsDir = process.env.CLAUDE_PROJECTS_DIR;
     process.env.CLAUDE_PROJECTS_DIR = emptyProjects;
