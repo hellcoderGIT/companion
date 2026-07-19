@@ -3,6 +3,7 @@ import { installClipboardWriteFallback } from "./clipboard.js";
 export type Route =
   | { page: "home" }
   | { page: "session"; sessionId: string }
+  | { page: "dashboard" }
   | { page: "settings" }
   | { page: "integrations" }
   | { page: "integration-linear" }
@@ -33,6 +34,7 @@ function ensureClipboardFallbackInstalled(): void {
 export function parseHash(hash: string): Route {
   ensureClipboardFallbackInstalled();
 
+  if (hash === "#/dashboard") return { page: "dashboard" };
   if (hash === "#/settings") return { page: "settings" };
   if (hash === "#/integrations") return { page: "integrations" };
   if (hash === "#/integrations/linear") return { page: "integration-linear" };

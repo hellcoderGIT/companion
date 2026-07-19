@@ -16,6 +16,7 @@ const CATEGORIES = [
   { id: "providers", label: "Providers" },
   { id: "anthropic", label: "Anthropic" },
   { id: "ai-validation", label: "AI Validation" },
+  { id: "dashboard", label: "Dashboard" },
   { id: "updates", label: "Updates" },
   { id: "telemetry", label: "Telemetry" },
   { id: "environments", label: "Environments" },
@@ -55,6 +56,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [aiValidationEnabled, setAiValidationEnabled] = useState(false);
   const [aiValidationAutoApprove, setAiValidationAutoApprove] = useState(true);
   const [aiValidationAutoDeny, setAiValidationAutoDeny] = useState(false);
+  const [dashboardEnabled, setDashboardEnabled] = useState(false);
+  const [dashboardModel, setDashboardModel] = useState("claude-haiku-4-5");
+  const [dashboardRunHour, setDashboardRunHour] = useState(3);
+  const [dashboardMaxSessionsPerRun, setDashboardMaxSessionsPerRun] = useState(30);
   const [publicUrl, setPublicUrl] = useState("");
   const [activeSection, setActiveSection] = useState<CategoryId>("general");
   const [apiKeyFocused, setApiKeyFocused] = useState(false);
@@ -138,6 +143,10 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (typeof s.aiValidationEnabled === "boolean") setAiValidationEnabled(s.aiValidationEnabled);
         if (typeof s.aiValidationAutoApprove === "boolean") setAiValidationAutoApprove(s.aiValidationAutoApprove);
         if (typeof s.aiValidationAutoDeny === "boolean") setAiValidationAutoDeny(s.aiValidationAutoDeny);
+        if (typeof s.dashboardEnabled === "boolean") setDashboardEnabled(s.dashboardEnabled);
+        if (typeof s.dashboardModel === "string" && s.dashboardModel) setDashboardModel(s.dashboardModel);
+        if (typeof s.dashboardRunHour === "number") setDashboardRunHour(s.dashboardRunHour);
+        if (typeof s.dashboardMaxSessionsPerRun === "number") setDashboardMaxSessionsPerRun(s.dashboardMaxSessionsPerRun);
         if (s.updateChannel === "stable" || s.updateChannel === "prerelease") setUpdateChannel(s.updateChannel);
         if (typeof s.dockerAutoUpdate === "boolean") setDockerAutoUpdate(s.dockerAutoUpdate);
         if (typeof s.proactiveKeepaliveEnabled === "boolean") setProactiveKeepaliveEnabled(s.proactiveKeepaliveEnabled);
@@ -197,6 +206,27 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       if (field === "aiValidationEnabled") setAiValidationEnabled(current);
       else if (field === "aiValidationAutoApprove") setAiValidationAutoApprove(current);
       else setAiValidationAutoDeny(current);
+    }
+  }
+
+  async function toggleDashboardEnabled() {
+    const current = dashboardEnabled;
+    setDashboardEnabled(!current);
+    try {
+      await api.updateSettings({ dashboardEnabled: !current });
+    } catch {
+      setDashboardEnabled(current);
+    }
+  }
+
+  async function saveDashboardSetting(
+    patch: { dashboardModel?: string; dashboardRunHour?: number; dashboardMaxSessionsPerRun?: number },
+    revert: () => void,
+  ) {
+    try {
+      await api.updateSettings(patch);
+    } catch {
+      revert();
     }
   }
 
@@ -918,6 +948,101 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     </button>
                   </>
                 )}
+              </div>
+            </section>
+
+            {/* Dashboard */}
+            <section id="dashboard" ref={setSectionRef("dashboard")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Project Dashboard</h2>
+              <div className="space-y-3">
+                <p className="text-xs text-cc-muted leading-relaxed">
+                  A nightly job summarizes every session with recent activity so the{" "}
+                  <a href="#/dashboard" className="underline hover:no-underline">dashboard</a>{" "}
+                  can show where each project stands. It runs through the Claude Code CLI
+                  with the same login your normal sessions use — no separate API key needed.
+                  This is opt-in because it spends tokens every night. You can always
+                  refresh manually with "Update now" on the dashboard, even when the
+                  nightly run is off.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={toggleDashboardEnabled}
+                  className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
+                >
+                  <span className="text-sm">Nightly dashboard updates</span>
+                  <span className={`text-xs font-medium ${dashboardEnabled ? "text-cc-success" : "text-cc-muted"}`}>
+                    {dashboardEnabled ? "On" : "Off"}
+                  </span>
+                </button>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" htmlFor="dashboard-model">
+                    Summarization model
+                  </label>
+                  <select
+                    id="dashboard-model"
+                    value={dashboardModel}
+                    onChange={(e) => {
+                      const prev = dashboardModel;
+                      setDashboardModel(e.target.value);
+                      saveDashboardSetting({ dashboardModel: e.target.value }, () => setDashboardModel(prev));
+                    }}
+                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                  >
+                    <option value="claude-haiku-4-5">Claude Haiku 4.5 — cheapest, recommended</option>
+                    <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                    <option value="claude-sonnet-5">Claude Sonnet 5</option>
+                  </select>
+                  <p className="mt-1.5 text-xs text-cc-muted">
+                    Summarize-and-classify doesn't need an expensive model — Haiku keeps the nightly cost low.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" htmlFor="dashboard-run-hour">
+                      Run at
+                    </label>
+                    <select
+                      id="dashboard-run-hour"
+                      value={dashboardRunHour}
+                      onChange={(e) => {
+                        const prev = dashboardRunHour;
+                        const next = Number(e.target.value);
+                        setDashboardRunHour(next);
+                        saveDashboardSetting({ dashboardRunHour: next }, () => setDashboardRunHour(prev));
+                      }}
+                      className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                    >
+                      {Array.from({ length: 24 }, (_, hour) => (
+                        <option key={hour} value={hour}>
+                          {String(hour).padStart(2, "0")}:00
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" htmlFor="dashboard-max-sessions">
+                      Max sessions per run
+                    </label>
+                    <select
+                      id="dashboard-max-sessions"
+                      value={dashboardMaxSessionsPerRun}
+                      onChange={(e) => {
+                        const prev = dashboardMaxSessionsPerRun;
+                        const next = Number(e.target.value);
+                        setDashboardMaxSessionsPerRun(next);
+                        saveDashboardSetting({ dashboardMaxSessionsPerRun: next }, () => setDashboardMaxSessionsPerRun(prev));
+                      }}
+                      className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
+                    >
+                      {[10, 20, 30, 50, 100, 200].map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
             </section>
 
