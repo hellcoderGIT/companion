@@ -9,6 +9,19 @@ import { COMPANION_HOME } from "./paths.js";
 
 export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 
+/**
+ * Nightly dashboard summarization runs over every active session, so it
+ * defaults to the cheapest capable model rather than the general default.
+ */
+export const DEFAULT_DASHBOARD_MODEL = "claude-haiku-4-5";
+export const DASHBOARD_MODEL_OPTIONS = [
+  "claude-haiku-4-5",
+  "claude-sonnet-4-6",
+  "claude-sonnet-5",
+] as const;
+export const DEFAULT_DASHBOARD_RUN_HOUR = 3;
+export const DEFAULT_DASHBOARD_MAX_SESSIONS_PER_RUN = 30;
+
 export type UpdateChannel = "stable" | "prerelease";
 
 /**
@@ -62,6 +75,14 @@ export interface CompanionSettings {
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
+  /** Opt-in for the nightly dashboard summarization job (burns tokens every night). */
+  dashboardEnabled: boolean;
+  /** Model used by the dashboard summarizer. Cheap-by-default (Haiku). */
+  dashboardModel: string;
+  /** Local hour (0-23) at which the nightly dashboard update runs. */
+  dashboardRunHour: number;
+  /** Cost safety valve: max sessions summarized per run. */
+  dashboardMaxSessionsPerRun: number;
   publicUrl: string;
   updateChannel: UpdateChannel;
   dockerAutoUpdate: boolean;
@@ -107,6 +128,10 @@ let settings: CompanionSettings = {
   aiValidationEnabled: false,
   aiValidationAutoApprove: true,
   aiValidationAutoDeny: false,
+  dashboardEnabled: false,
+  dashboardModel: DEFAULT_DASHBOARD_MODEL,
+  dashboardRunHour: DEFAULT_DASHBOARD_RUN_HOUR,
+  dashboardMaxSessionsPerRun: DEFAULT_DASHBOARD_MAX_SESSIONS_PER_RUN,
   publicUrl: "",
   updateChannel: "stable",
   dockerAutoUpdate: false,
@@ -143,6 +168,21 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     aiValidationEnabled: typeof raw?.aiValidationEnabled === "boolean" ? raw.aiValidationEnabled : false,
     aiValidationAutoApprove: typeof raw?.aiValidationAutoApprove === "boolean" ? raw.aiValidationAutoApprove : true,
     aiValidationAutoDeny: typeof raw?.aiValidationAutoDeny === "boolean" ? raw.aiValidationAutoDeny : false,
+    dashboardEnabled: typeof raw?.dashboardEnabled === "boolean" ? raw.dashboardEnabled : false,
+    dashboardModel:
+      typeof raw?.dashboardModel === "string" && raw.dashboardModel.trim()
+        ? raw.dashboardModel.trim()
+        : DEFAULT_DASHBOARD_MODEL,
+    dashboardRunHour:
+      typeof raw?.dashboardRunHour === "number" && Number.isInteger(raw.dashboardRunHour)
+        && raw.dashboardRunHour >= 0 && raw.dashboardRunHour <= 23
+        ? raw.dashboardRunHour
+        : DEFAULT_DASHBOARD_RUN_HOUR,
+    dashboardMaxSessionsPerRun:
+      typeof raw?.dashboardMaxSessionsPerRun === "number" && Number.isInteger(raw.dashboardMaxSessionsPerRun)
+        && raw.dashboardMaxSessionsPerRun >= 1 && raw.dashboardMaxSessionsPerRun <= 200
+        ? raw.dashboardMaxSessionsPerRun
+        : DEFAULT_DASHBOARD_MAX_SESSIONS_PER_RUN,
     publicUrl: typeof raw?.publicUrl === "string" ? raw.publicUrl.trim().replace(/\/+$/, "") : "",
     updateChannel: raw?.updateChannel === "prerelease" ? "prerelease" : "stable",
     dockerAutoUpdate: typeof raw?.dockerAutoUpdate === "boolean" ? raw.dockerAutoUpdate : false,
@@ -180,7 +220,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -204,6 +244,10 @@ export function updateSettings(
     aiValidationEnabled: patch.aiValidationEnabled ?? settings.aiValidationEnabled,
     aiValidationAutoApprove: patch.aiValidationAutoApprove ?? settings.aiValidationAutoApprove,
     aiValidationAutoDeny: patch.aiValidationAutoDeny ?? settings.aiValidationAutoDeny,
+    dashboardEnabled: patch.dashboardEnabled ?? settings.dashboardEnabled,
+    dashboardModel: patch.dashboardModel ?? settings.dashboardModel,
+    dashboardRunHour: patch.dashboardRunHour ?? settings.dashboardRunHour,
+    dashboardMaxSessionsPerRun: patch.dashboardMaxSessionsPerRun ?? settings.dashboardMaxSessionsPerRun,
     publicUrl: patch.publicUrl ?? settings.publicUrl,
     updateChannel: patch.updateChannel ?? settings.updateChannel,
     dockerAutoUpdate: patch.dockerAutoUpdate ?? settings.dockerAutoUpdate,

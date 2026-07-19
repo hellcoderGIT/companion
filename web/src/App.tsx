@@ -31,6 +31,7 @@ const SandboxManager = lazy(() => import("./components/SandboxManager.js").then(
 const CronManager = lazy(() => import("./components/CronManager.js").then((m) => ({ default: m.CronManager })));
 const AgentsPage = lazy(() => import("./components/AgentsPage.js").then((m) => ({ default: m.AgentsPage })));
 const RunsPage = lazy(() => import("./components/RunsPage.js").then((m) => ({ default: m.RunsPage })));
+const DashboardPage = lazy(() => import("./components/DashboardPage.js").then((m) => ({ default: m.DashboardPage })));
 
 
 function LazyFallback() {
@@ -74,6 +75,7 @@ export default function App() {
   const isScheduledPage = route.page === "scheduled";
   const isAgentsPage = route.page === "agents" || route.page === "agent-detail";
   const isRunsPage = route.page === "runs";
+  const isDashboardPage = route.page === "dashboard";
   const isSessionView = route.page === "session" || route.page === "home";
 
   useEffect(() => {
@@ -288,6 +290,12 @@ export default function App() {
           {isRunsPage && (
             <div className="absolute inset-0">
               <Suspense fallback={<LazyFallback />}><RunsPage /></Suspense>
+            </div>
+          )}
+
+          {isDashboardPage && (
+            <div className="absolute inset-0">
+              <Suspense fallback={<LazyFallback />}><DashboardPage /></Suspense>
             </div>
           )}
 

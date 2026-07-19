@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { DEFAULT_ANTHROPIC_MODEL, getSettings, updateSettings, type UpdateChannel, type CliBridgeMode } from "../settings-manager.js";
+import { DASHBOARD_MODEL_OPTIONS, DEFAULT_ANTHROPIC_MODEL, getSettings, updateSettings, type UpdateChannel, type CliBridgeMode } from "../settings-manager.js";
 import { linearCache } from "../linear-cache.js";
 import { listConnections } from "../linear-connections.js";
 import { hasContainerCodexAuth } from "../codex-container-auth.js";
@@ -26,6 +26,10 @@ export function registerSettingsRoutes(api: Hono): void {
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,
       aiValidationAutoDeny: settings.aiValidationAutoDeny,
+      dashboardEnabled: settings.dashboardEnabled,
+      dashboardModel: settings.dashboardModel,
+      dashboardRunHour: settings.dashboardRunHour,
+      dashboardMaxSessionsPerRun: settings.dashboardMaxSessionsPerRun,
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
@@ -71,6 +75,26 @@ export function registerSettingsRoutes(api: Hono): void {
     }
     if (body.aiValidationAutoDeny !== undefined && typeof body.aiValidationAutoDeny !== "boolean") {
       return c.json({ error: "aiValidationAutoDeny must be a boolean" }, 400);
+    }
+    if (body.dashboardEnabled !== undefined && typeof body.dashboardEnabled !== "boolean") {
+      return c.json({ error: "dashboardEnabled must be a boolean" }, 400);
+    }
+    if (body.dashboardModel !== undefined && !DASHBOARD_MODEL_OPTIONS.includes(body.dashboardModel)) {
+      return c.json({ error: `dashboardModel must be one of: ${DASHBOARD_MODEL_OPTIONS.join(", ")}` }, 400);
+    }
+    if (
+      body.dashboardRunHour !== undefined
+      && (typeof body.dashboardRunHour !== "number" || !Number.isInteger(body.dashboardRunHour)
+        || body.dashboardRunHour < 0 || body.dashboardRunHour > 23)
+    ) {
+      return c.json({ error: "dashboardRunHour must be an integer between 0 and 23" }, 400);
+    }
+    if (
+      body.dashboardMaxSessionsPerRun !== undefined
+      && (typeof body.dashboardMaxSessionsPerRun !== "number" || !Number.isInteger(body.dashboardMaxSessionsPerRun)
+        || body.dashboardMaxSessionsPerRun < 1 || body.dashboardMaxSessionsPerRun > 200)
+    ) {
+      return c.json({ error: "dashboardMaxSessionsPerRun must be an integer between 1 and 200" }, 400);
     }
     if (body.publicUrl !== undefined) {
       if (typeof body.publicUrl !== "string") {
@@ -122,6 +146,8 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.linearOAuthWebhookSecret !== undefined
       || body.aiValidationEnabled !== undefined || body.aiValidationAutoApprove !== undefined
       || body.aiValidationAutoDeny !== undefined
+      || body.dashboardEnabled !== undefined || body.dashboardModel !== undefined
+      || body.dashboardRunHour !== undefined || body.dashboardMaxSessionsPerRun !== undefined
       || body.publicUrl !== undefined
       || body.updateChannel !== undefined
       || body.dockerAutoUpdate !== undefined
@@ -208,6 +234,22 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.aiValidationAutoDeny === "boolean"
           ? body.aiValidationAutoDeny
           : undefined,
+      dashboardEnabled:
+        typeof body.dashboardEnabled === "boolean"
+          ? body.dashboardEnabled
+          : undefined,
+      dashboardModel:
+        typeof body.dashboardModel === "string"
+          ? body.dashboardModel
+          : undefined,
+      dashboardRunHour:
+        typeof body.dashboardRunHour === "number"
+          ? body.dashboardRunHour
+          : undefined,
+      dashboardMaxSessionsPerRun:
+        typeof body.dashboardMaxSessionsPerRun === "number"
+          ? body.dashboardMaxSessionsPerRun
+          : undefined,
       publicUrl:
         typeof body.publicUrl === "string"
           ? body.publicUrl.trim().replace(/\/+$/, "")
@@ -249,6 +291,10 @@ export function registerSettingsRoutes(api: Hono): void {
       aiValidationEnabled: settings.aiValidationEnabled,
       aiValidationAutoApprove: settings.aiValidationAutoApprove,
       aiValidationAutoDeny: settings.aiValidationAutoDeny,
+      dashboardEnabled: settings.dashboardEnabled,
+      dashboardModel: settings.dashboardModel,
+      dashboardRunHour: settings.dashboardRunHour,
+      dashboardMaxSessionsPerRun: settings.dashboardMaxSessionsPerRun,
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,

@@ -453,11 +453,69 @@ export interface AppSettings {
   aiValidationEnabled: boolean;
   aiValidationAutoApprove: boolean;
   aiValidationAutoDeny: boolean;
+  dashboardEnabled: boolean;
+  dashboardModel: string;
+  dashboardRunHour: number;
+  dashboardMaxSessionsPerRun: number;
   publicUrl: string;
   updateChannel: "stable" | "prerelease";
   dockerAutoUpdate: boolean;
   proactiveKeepaliveEnabled: boolean;
   cliBridgeMode: "loopback" | "jsonHandoff";
+}
+
+// ─── Project dashboard ──────────────────────────────────────────────────────
+
+export type DashboardSessionStatus = "completed" | "in_progress" | "awaiting_user" | "stalled";
+
+export interface DashboardSessionEntry {
+  sessionId: string;
+  cwd: string;
+  gitBranch?: string;
+  slug?: string;
+  summary: string;
+  status: DashboardSessionStatus;
+  openItems: string[];
+  archivable: boolean;
+  lastActivityAt: number;
+  summarizedAt: number;
+  model: string;
+  companionSessionId?: string;
+  companionArchived?: boolean;
+  displayName?: string;
+  userName?: string;
+}
+
+export interface DashboardRunMeta {
+  lastRunAt: number;
+  lastRunCompletedAt: number;
+  lastRunStatus: "success" | "partial" | "error";
+  lastRunError?: string;
+  trigger: "manual" | "scheduled";
+  model: string;
+  sessionsProcessed: number;
+  sessionsSkipped: number;
+  sessionsFailed: number;
+}
+
+export interface DashboardRunProgress {
+  state: "idle" | "running";
+  trigger?: "manual" | "scheduled";
+  total: number;
+  processed: number;
+  failed: number;
+  currentSession?: string;
+  startedAt?: number;
+}
+
+export interface DashboardData {
+  enabled: boolean;
+  model: string;
+  runHour: number;
+  anthropicApiKeyConfigured: boolean;
+  runMeta: DashboardRunMeta | null;
+  progress: DashboardRunProgress;
+  sessions: DashboardSessionEntry[];
 }
 
 export interface LinearOAuthConnectionSummary {
@@ -1017,6 +1075,10 @@ export const api = {
     linearOAuthClientId?: string;
     linearOAuthClientSecret?: string;
     linearOAuthWebhookSecret?: string;
+    dashboardEnabled?: boolean;
+    dashboardModel?: string;
+    dashboardRunHour?: number;
+    dashboardMaxSessionsPerRun?: number;
     publicUrl?: string;
     updateChannel?: "stable" | "prerelease";
     dockerAutoUpdate?: boolean;
@@ -1025,6 +1087,12 @@ export const api = {
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>
     post<{ valid: boolean; error?: string }>("/settings/anthropic/verify", { apiKey }),
+
+  // Project dashboard (reads the nightly summarization store)
+  getDashboard: () => get<DashboardData>("/dashboard"),
+  runDashboardUpdate: () => post<{ started: boolean }>("/dashboard/run"),
+  getDashboardRunStatus: () =>
+    get<{ progress: DashboardRunProgress; runMeta: DashboardRunMeta | null }>("/dashboard/run/status"),
 
   // Tailscale
   getTailscaleStatus: () => get<TailscaleStatus>("/tailscale/status"),

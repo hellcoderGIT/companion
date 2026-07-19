@@ -34,6 +34,7 @@ import { LinearAgentBridge } from "./linear-agent-bridge.js";
 import { NoVncProxy } from "./novnc-proxy.js";
 
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
+import { startDashboardScheduler } from "./dashboard-scheduler.js";
 import {
   startPeriodicCheck as startClaudeCompatPeriodicCheck,
 } from "./claude-compat-checker.js";
@@ -368,6 +369,9 @@ restoreTailscaleFunnel(port).catch((err) => {
 
 // ── Update checker ──────────────────────────────────────────────────────────
 startPeriodicCheck();
+
+// ── Nightly dashboard summarizer (opt-in via settings) ──────────────────────
+startDashboardScheduler();
 
 // ── Claude CLI compatibility checker — surfaces banner when CLI is 2.1.121+ ─
 startClaudeCompatPeriodicCheck();
