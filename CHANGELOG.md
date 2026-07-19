@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.108.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.107.0...companion-v0.108.0) (2026-07-19)
+
+
+### Features
+
+* **dashboard:** project dashboard with nightly AI session summaries ([#62](https://github.com/hellcoderGIT/companion/issues/62)) ([f983b4d](https://github.com/hellcoderGIT/companion/commit/f983b4dccd45419cd6711bee368531c17c0622b4))
+
 ## [0.107.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.106.0...companion-v0.107.0) (2026-07-08)
 
 
