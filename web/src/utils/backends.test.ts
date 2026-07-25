@@ -217,12 +217,18 @@ describe("static model/mode lists", () => {
     expect(CODEX_AGENT_MODES[0].value).toBe("bypassPermissions");
   });
 
-  // Opus 4.8 is the current Claude default (natural successor to 4.7).
-  // Fable 5 — the first publicly available Mythos-class model — is exposed
+  // Opus 5 — the Claude 5-family flagship — is the current default and must be
+  // first so getDefaultModel() picks it. Fable 5 (Mythos-class) is exposed
   // alongside it but is not the default since its safeguards route ~5% of
-  // sessions back to Opus 4.8; users should opt in deliberately.
-  it("lists claude-opus-4-8 as the first Claude model (default)", () => {
-    expect(CLAUDE_MODELS[0].value).toBe("claude-opus-4-8");
+  // sessions back to Opus; users should opt in deliberately.
+  it("lists claude-opus-5 as the first Claude model (default)", () => {
+    expect(CLAUDE_MODELS[0].value).toBe("claude-opus-5");
+  });
+
+  // Opus 4.8 remains selectable as the prior-generation flagship.
+  it("still includes claude-opus-4-8 in Claude models", () => {
+    const slugs = CLAUDE_MODELS.map((m) => m.value);
+    expect(slugs).toContain("claude-opus-4-8");
   });
 
   it("includes claude-fable-5 (Mythos-class) in Claude models", () => {

@@ -145,7 +145,9 @@ describe("settings-manager", () => {
     _resetForTest(settingsPath);
 
     const settings = getSettings();
-    expect(settings.anthropicModel).toBe(DEFAULT_ANTHROPIC_MODEL);
+    // The dot→hyphen fix is a typo correction, not a default reset: it must map
+    // to Sonnet 4.6 specifically, independent of the current default model.
+    expect(settings.anthropicModel).toBe("claude-sonnet-4-6");
     expect(settings.anthropicApiKey).toBe("sk-ant-existing");
   });
 

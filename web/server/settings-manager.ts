@@ -7,7 +7,7 @@ import {
 import { join, dirname } from "node:path";
 import { COMPANION_HOME } from "./paths.js";
 
-export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
 
 /**
  * Nightly dashboard summarization runs over every active session, so it
@@ -148,7 +148,7 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     anthropicApiKey: typeof raw?.anthropicApiKey === "string" ? raw.anthropicApiKey : "",
     anthropicModel:
       typeof raw?.anthropicModel === "string" && raw.anthropicModel.trim()
-        ? raw.anthropicModel === "claude-sonnet-4.6" ? DEFAULT_ANTHROPIC_MODEL : raw.anthropicModel
+        ? raw.anthropicModel === "claude-sonnet-4.6" ? "claude-sonnet-4-6" : raw.anthropicModel
         : DEFAULT_ANTHROPIC_MODEL,
     claudeCodeOAuthToken: typeof raw?.claudeCodeOAuthToken === "string" ? raw.claudeCodeOAuthToken : "",
     openaiApiKey: typeof raw?.openaiApiKey === "string" ? raw.openaiApiKey : "",
