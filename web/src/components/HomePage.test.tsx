@@ -391,8 +391,8 @@ describe("HomePage", () => {
     render(<HomePage />);
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
 
-    // The default model label for claude backend is "Opus 4.8".
-    const modelButton = screen.getByText("Opus 4.8");
+    // The default model label for claude backend is "Opus 5".
+    const modelButton = screen.getByText("Opus 5");
     expect(modelButton).toBeInTheDocument();
 
     // Open model dropdown
@@ -752,7 +752,7 @@ describe("HomePage", () => {
     await waitFor(() => {
       expect(createSessionStreamMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: "claude-opus-4-8",
+          model: "claude-opus-5",
           permissionMode: "bypassPermissions",
           cwd: "/repo",
           backend: "claude",
@@ -1150,8 +1150,8 @@ describe("HomePage", () => {
     render(<HomePage />);
     await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
 
-    // Open model dropdown (default is now Opus 4.8).
-    const modelButton = screen.getByText("Opus 4.8");
+    // Open model dropdown (default is now Opus 5).
+    const modelButton = screen.getByText("Opus 5");
     fireEvent.click(modelButton);
     expect(screen.getByText("Sonnet 5")).toBeInTheDocument();
 
