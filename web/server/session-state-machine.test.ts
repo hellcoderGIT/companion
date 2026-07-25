@@ -81,9 +81,15 @@ describe("SessionStateMachine", () => {
     it("initializing -> terminated", () =>
       expectValidTransition("initializing", "terminated"));
 
-    // ready -> streaming, compacting, reconnecting, terminated
+    // ready -> streaming, awaiting_permission, compacting, reconnecting, terminated
     it("ready -> streaming", () =>
       expectValidTransition("ready", "streaming"));
+    // Reattach replays a pending permission while the session is idle: the CLI
+    // emits system_init (phase -> ready) and the resumed process immediately
+    // re-requests the permission it was already blocked on. This edge must be
+    // legal or the request is dropped and the phase stays "ready".
+    it("ready -> awaiting_permission", () =>
+      expectValidTransition("ready", "awaiting_permission"));
     it("ready -> compacting", () =>
       expectValidTransition("ready", "compacting"));
     it("ready -> reconnecting", () =>
@@ -559,6 +565,46 @@ describe("SessionStateMachine", () => {
         expect(typeof event.timestamp).toBe("number");
         expect(event.timestamp).toBeGreaterThan(0);
       }
+    });
+
+    it("handles a permission replayed on reattach: reconnecting -> initializing -> ready -> awaiting_permission", () => {
+      // Regression: a session that drops while awaiting permission gets its
+      // pending request replayed by the resumed CLI. ws-bridge forces the phase
+      // to "ready" on system_init, so the replayed request arrives in "ready".
+      // If that edge is illegal the transition is blocked, which has two
+      // consequences beyond the dropped request:
+      //   1. No transition event fires, so no session_phase frame is broadcast
+      //      and the client keeps showing the session as idle while it is in
+      //      fact blocked on an approval dialog.
+      //   2. handleCLIClose derives interruptedMidTurn from the phase, so a
+      //      second drop is logged as a clean idle disconnect and the in-flight
+      //      turn is orphaned rather than flagged.
+      const reattached = new SessionStateMachine("reattach", "awaiting_permission");
+      const events: SessionTransitionEvent[] = [];
+      reattached.onTransition((e) => events.push(e));
+
+      // Socket drops while the approval dialog is still open.
+      expect(reattached.transition("reconnecting", "cli_ws_closed")).toBe(true);
+      // CLI reattaches and re-initializes.
+      expect(reattached.transition("initializing", "cli-ws-reconnected")).toBe(true);
+      expect(reattached.transition("ready", "system_init")).toBe(true);
+
+      // The resumed CLI immediately re-requests the still-pending permission.
+      expect(reattached.transition("awaiting_permission", "permission_requested")).toBe(true);
+      expect(reattached.phase).toBe("awaiting_permission");
+
+      // The transition must emit an event — this is what drives the
+      // session_phase broadcast that moves the client off "idle".
+      expect(events.map((e) => `${e.from}->${e.to}`)).toEqual([
+        "awaiting_permission->reconnecting",
+        "reconnecting->initializing",
+        "initializing->ready",
+        "ready->awaiting_permission",
+      ]);
+
+      // A subsequent drop is now correctly attributable to a mid-turn state.
+      expect(reattached.canRespondToPermission()).toBe(true);
+      expect(reattached.isIdle()).toBe(false);
     });
 
     it("handles early user message: starting -> streaming -> initializing -> ready", () => {
