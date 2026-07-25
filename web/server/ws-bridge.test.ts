@@ -1858,6 +1858,71 @@ describe("CLI message routing", () => {
     expect(permBroadcast.request.tool_name).toBe("Bash");
   });
 
+  // Regression: a permission request arriving while the session is idle must
+  // move the phase to awaiting_permission AND reach the browser as a
+  // session_phase frame.
+  //
+  // This is the reattach path: a session drops while a permission dialog is
+  // open, the CLI is resumed, it emits system.init (which forces phase ->
+  // ready), and the resumed process immediately re-requests the permission it
+  // was already blocked on. So the request lands in "ready", not "streaming".
+  //
+  // Before the ready -> awaiting_permission edge was added to VALID_TRANSITIONS
+  // the transition was blocked. The permission itself still rendered (it is
+  // stored and broadcast independently), but no transition event fired, so no
+  // session_phase frame was emitted and the client stayed on the "idle" status
+  // set by the preceding system.init — showing an idle session that was in fact
+  // blocked on an approval dialog.
+  it("control_request: broadcasts session_phase when a permission arrives in the ready phase", async () => {
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+
+    // system.init drives the session to "ready", as it does on every reattach.
+    await bridge.handleCLIMessage(cli, makeInitMsg());
+    const session = bridge.getSession("s1")!;
+    expect(session.stateMachine.phase).toBe("ready");
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    // Drop the connect-time frames so we only assert on what the permission
+    // request itself produces.
+    browser.send.mockClear();
+
+    // The resumed CLI replays its pending permission while still idle.
+    await bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_request",
+      request_id: "req-reattach",
+      request: {
+        subtype: "can_use_tool",
+        tool_name: "Edit",
+        input: { file_path: "/test.ts" },
+        tool_use_id: "tu-reattach",
+      },
+    }));
+
+    // The transition is legal, so the phase actually advances.
+    expect(session.stateMachine.phase).toBe("awaiting_permission");
+
+    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+
+    // The frame that unsticks the client status. src/ws.ts maps
+    // awaiting_permission -> "running"; without this frame the session renders
+    // as idle.
+    expect(calls).toContainEqual(
+      expect.objectContaining({
+        type: "session_phase",
+        phase: "awaiting_permission",
+        previousPhase: "ready",
+      }),
+    );
+
+    // The dialog still renders — this part was never broken, and asserting it
+    // here guards against a fix that trades one for the other.
+    const permBroadcast = calls.find((c: any) => c.type === "permission_request");
+    expect(permBroadcast).toBeDefined();
+    expect(permBroadcast.request.request_id).toBe("req-reattach");
+  });
+
   it("tool_progress: broadcasts", async () => {
     const msg = JSON.stringify({
       type: "tool_progress",

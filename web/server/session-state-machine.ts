@@ -55,6 +55,12 @@ export const VALID_TRANSITIONS: ReadonlyMap<
     "ready",
     new Set<SessionPhase>([
       "streaming",
+      // A permission request can arrive while the session is idle: on reattach
+      // the CLI emits system_init (forcing phase -> ready), then the resumed
+      // process immediately re-requests its still-pending permission. Without
+      // this edge the transition is blocked and the phase stays "ready", so the
+      // session reads as idle while it is in fact awaiting approval.
+      "awaiting_permission",
       "compacting",
       "reconnecting",
       "terminated",
