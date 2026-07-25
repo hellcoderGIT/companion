@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.109.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.109.0...companion-v0.109.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **session:** allow ready -&gt; awaiting_permission transition ([#66](https://github.com/hellcoderGIT/companion/issues/66)) ([5b6c26e](https://github.com/hellcoderGIT/companion/commit/5b6c26e39c2a064a9760b50425167abcc2d005d4))
+
 ## [0.109.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.108.0...companion-v0.109.0) (2026-07-25)
 
 
