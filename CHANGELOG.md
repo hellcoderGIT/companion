@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.110.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.110.0...companion-v0.110.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **session:** gate stdout-close grace on live descendants, not last message ([#71](https://github.com/hellcoderGIT/companion/issues/71)) ([ff8e630](https://github.com/hellcoderGIT/companion/commit/ff8e6309150ab219785d5998db88e2b4439131bf))
+
 ## [0.110.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.109.1...companion-v0.110.0) (2026-07-26)
 
 
