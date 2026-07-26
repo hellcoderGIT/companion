@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.110.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.109.1...companion-v0.110.0) (2026-07-26)
+
+
+### Features
+
+* **diagnostics:** capture kernel state before killing wedged CLI processes ([#68](https://github.com/hellcoderGIT/companion/issues/68)) ([1f3e1b7](https://github.com/hellcoderGIT/companion/commit/1f3e1b7d81e0827fef700829bfecfd5571ab0aeb))
+
 ## [0.109.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.109.0...companion-v0.109.1) (2026-07-25)
 
 
