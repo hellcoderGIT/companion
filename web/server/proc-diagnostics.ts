@@ -26,8 +26,103 @@ export interface ProcSnapshot {
   wchan?: string;
   /** Open file descriptor count for this process. */
   fdCount?: number;
+  /**
+   * Live descendants at capture time. This is the field that separates the two
+   * reasons a process sits in `ep_poll` with stdout closed: a genuine wedge is
+   * idle with NO children, whereas a CLI still reaping MCP stdio servers has
+   * children mid-exit. Without it, both look identical.
+   */
+  descendants?: ProcDescendant[];
   /** Why the snapshot is incomplete, when it is. */
   error?: string;
+}
+
+/** A live descendant process, as seen from /proc. */
+export interface ProcDescendant {
+  pid: number;
+  /** Command name from /proc/<pid>/comm, e.g. "npm exec", "node", "chrome". */
+  comm?: string;
+  /** Scheduler state letter, e.g. "S", "R", "Z". "Z" means mid-reap. */
+  state?: string;
+}
+
+/** Read the direct children of a pid via /proc/<pid>/task/<tid>/children. */
+function readChildren(pid: number): number[] {
+  const kids: number[] = [];
+  try {
+    for (const tid of readdirSync(`/proc/${pid}/task`)) {
+      try {
+        const raw = readFileSync(`/proc/${pid}/task/${tid}/children`, "utf8").trim();
+        if (!raw) continue;
+        for (const part of raw.split(/\s+/)) {
+          const child = Number(part);
+          if (Number.isInteger(child) && child > 0) kids.push(child);
+        }
+      } catch {
+        // Thread exited between readdir and read.
+      }
+    }
+  } catch {
+    // Process gone, or kernel built without CONFIG_PROC_CHILDREN.
+  }
+  return kids;
+}
+
+/**
+ * Walk the descendant tree of a pid, breadth-first.
+ *
+ * Bounded by `maxNodes` because this runs on the kill path — a runaway tree
+ * must not stall recovery. MCP stdio servers are the expected population here
+ * (2-3 per CLI, sometimes with their own children, e.g. headless chromium).
+ */
+export function getDescendants(
+  pid: number | undefined,
+  maxNodes = 32,
+): ProcDescendant[] {
+  if (pid === undefined || !isProcAvailable()) return [];
+
+  const found: ProcDescendant[] = [];
+  const seen = new Set<number>([pid]);
+  let frontier = readChildren(pid);
+
+  while (frontier.length > 0 && found.length < maxNodes) {
+    const next: number[] = [];
+    for (const child of frontier) {
+      if (seen.has(child) || found.length >= maxNodes) continue;
+      seen.add(child);
+
+      const entry: ProcDescendant = { pid: child };
+      try {
+        entry.comm = readFileSync(`/proc/${child}/comm`, "utf8").trim();
+      } catch {
+        // Already reaped — still worth reporting the pid.
+      }
+      try {
+        const status = readFileSync(`/proc/${child}/status`, "utf8");
+        const line = status.split("\n").find((l) => l.startsWith("State:"));
+        if (line) entry.state = line.split(":")[1]?.trim().split(" ")[0];
+      } catch {
+        // Same.
+      }
+      found.push(entry);
+      next.push(...readChildren(child));
+    }
+    frontier = next;
+  }
+
+  return found;
+}
+
+/**
+ * Whether a process still has live descendants.
+ *
+ * Used to decide how long to wait for a CLI to shut down: one that is still
+ * reaping MCP subprocesses deserves the generous grace, regardless of whether
+ * the last message it sent happened to be a `result`.
+ */
+export function hasLiveDescendants(pid: number | undefined): boolean {
+  if (pid === undefined || !isProcAvailable()) return false;
+  return readChildren(pid).length > 0;
 }
 
 /** True when /proc-based introspection is available (Linux only). */
@@ -76,6 +171,12 @@ export function captureProcState(pid: number | undefined): ProcSnapshot {
     readAnything = true;
   } catch {
     // Reading another process's fd dir can fail on permissions; not fatal.
+  }
+
+  const descendants = getDescendants(pid);
+  if (descendants.length > 0) {
+    snapshot.descendants = descendants;
+    readAnything = true;
   }
 
   if (!readAnything) snapshot.error = "process_gone_or_unreadable";

@@ -46,7 +46,7 @@ import type {
 import type { SocketData } from "./ws-bridge-types.js";
 import type { PendingControlRequest } from "./ws-bridge-types.js";
 import type { RecorderManager } from "./recorder.js";
-import { captureProcState } from "./proc-diagnostics.js";
+import { captureProcState, hasLiveDescendants } from "./proc-diagnostics.js";
 import { parseNDJSON, isDuplicateCLIMessage } from "./ws-bridge-cli-ingest.js";
 import type { CLIDedupState } from "./ws-bridge-cli-ingest.js";
 import { reportProtocolDrift } from "./protocol-monitor.js";
@@ -74,6 +74,15 @@ const STDOUT_CLOSE_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_GRACE_MS
  * deadlock) cannot hang the reader and block recovery indefinitely.
  */
 const STDOUT_CLOSE_RESULT_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_RESULT_GRACE_MS) || 10000;
+
+/**
+ * How long to wait after SIGTERM before escalating to SIGKILL.
+ *
+ * A CLI that ignores SIGTERM because it is itself blocked reaping children used
+ * to be left behind by the old flat kill, so `handleAutoRelaunch`'s PID-liveness
+ * guard could still see it alive. Escalating guarantees the pid is gone.
+ */
+const SIGKILL_ESCALATION_MS = Number(process.env.COMPANION_SIGKILL_ESCALATION_MS) || 2000;
 
 // --- Claude Code Adapter ------------------------------------------------------
 
@@ -322,7 +331,23 @@ export class ClaudeAdapter implements IBackendAdapter {
       //      is STILL alive afterwards, so a true wedge can't block recovery.
       const proc = this.stdioProc;
       if (proc && proc.exitCode === null && !proc.killed) {
-        if (this.lastInboundWasResult) {
+        // Which grace applies is decided by whether teardown is actually in
+        // progress, NOT by whether the last message happened to be a `result`.
+        //
+        // Every CLI spawns 2-3 MCP stdio servers, and npm-exec-wrapped servers
+        // plus headless chromium do not reap inside the short grace. The old
+        // `lastInboundWasResult` discriminator was a proxy for "clean shutdown"
+        // that has nothing to do with teardown cost, so a healthy CLI landed on
+        // the short grace two ways: any non-result/keep_alive/system message
+        // trailing the turn, or a fresh adapter (the flag initialises false).
+        // It was then SIGTERMed mid-teardown, exiting 143 and taking the user's
+        // turn with it.
+        //
+        // Live descendants are the direct signal: a genuine wedge is idle with
+        // no children, whereas a CLI still reaping MCP servers has children
+        // mid-exit.
+        const teardownInProgress = hasLiveDescendants(proc.pid);
+        if (this.lastInboundWasResult || teardownInProgress) {
           // Clean end-of-turn shutdown: let the process flush teardown (MCP
           // servers, etc.) and exit code-0 instead of SIGTERM-ing a code-0 exit.
           // Use a generous grace so we don't clobber a slow-but-clean exit, but
@@ -340,13 +365,10 @@ export class ClaudeAdapter implements IBackendAdapter {
               sessionId: this.sessionId,
               pid: proc.pid,
               graceMs: STDOUT_CLOSE_RESULT_GRACE_MS,
+              graceReason: this.lastInboundWasResult ? "result" : "descendants_alive",
               proc: captureProcState(proc.pid),
             });
-            try {
-              proc.kill();
-            } catch {
-              // Process may have exited between the check and the kill.
-            }
+            await this.killWithEscalation(proc);
           }
         } else {
           const exitedOnOwn = await Promise.race([
@@ -354,25 +376,55 @@ export class ClaudeAdapter implements IBackendAdapter {
             new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_GRACE_MS)),
           ]);
           if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
-            // Same rationale as the after-result branch above: snapshot kernel
-            // state before the kill destroys it. This is the dominant wedge
-            // variant (23 of 29 observed), so it is the one most likely to
-            // carry the answer.
+            // Reaching here now means a genuine wedge: stdout closed, no live
+            // descendants to reap, and still not exited. Snapshot kernel state
+            // before the kill destroys it.
             log.warn("claude-adapter", "stdout closed mid-stream and process did not exit within grace; killing wedged process", {
               sessionId: this.sessionId,
               pid: proc.pid,
               graceMs: STDOUT_CLOSE_GRACE_MS,
+              graceReason: "no_descendants",
               proc: captureProcState(proc.pid),
             });
-            try {
-              proc.kill();
-            } catch {
-              // Process may have exited between the check and the kill.
-            }
+            await this.killWithEscalation(proc);
           }
         }
       }
       this.notifyStdioDisconnect();
+    }
+  }
+
+  /**
+   * SIGTERM a process, then SIGKILL it if it has not exited.
+   *
+   * A flat SIGTERM is not enough for the case this path exists to handle: a CLI
+   * blocked reaping its own children may never act on the signal, staying alive
+   * and satisfying `handleAutoRelaunch`'s PID-liveness guard, which blocks
+   * recovery indefinitely — the exact failure the kill was meant to prevent.
+   * Never throws; the process may exit between any two steps here.
+   */
+  private async killWithEscalation(proc: Subprocess): Promise<void> {
+    try {
+      proc.kill();
+    } catch {
+      return; // Already gone.
+    }
+
+    const exited = await Promise.race([
+      proc.exited.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), SIGKILL_ESCALATION_MS)),
+    ]);
+    if (exited || proc.exitCode !== null) return;
+
+    log.warn("claude-adapter", "process ignored SIGTERM; escalating to SIGKILL", {
+      sessionId: this.sessionId,
+      pid: proc.pid,
+      afterMs: SIGKILL_ESCALATION_MS,
+    });
+    try {
+      proc.kill("SIGKILL");
+    } catch {
+      // Exited between the check and the escalation.
     }
   }
 
