@@ -125,6 +125,38 @@ export function hasLiveDescendants(pid: number | undefined): boolean {
   return readChildren(pid).length > 0;
 }
 
+/**
+ * Count live descendants without reading per-process detail.
+ *
+ * Cheaper than getDescendants() because it skips the comm/status reads, so it
+ * is safe to call on a poll loop. Used to tell *progress* (the count is
+ * dropping, teardown is working) from a *stall* (the count is stuck, nothing is
+ * happening) — which is what decides whether waiting longer is worthwhile.
+ */
+export function countDescendants(
+  pid: number | undefined,
+  maxNodes = 256,
+): number {
+  if (pid === undefined || !isProcAvailable()) return 0;
+
+  let count = 0;
+  const seen = new Set<number>([pid]);
+  let frontier = readChildren(pid);
+
+  while (frontier.length > 0 && count < maxNodes) {
+    const next: number[] = [];
+    for (const child of frontier) {
+      if (seen.has(child) || count >= maxNodes) continue;
+      seen.add(child);
+      count++;
+      next.push(...readChildren(child));
+    }
+    frontier = next;
+  }
+
+  return count;
+}
+
 /** True when /proc-based introspection is available (Linux only). */
 export function isProcAvailable(): boolean {
   return process.platform === "linux";

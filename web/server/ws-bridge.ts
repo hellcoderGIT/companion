@@ -1216,6 +1216,18 @@ export class WsBridge {
           sessionId: session.id,
           phase: session.stateMachine.phase,
         });
+        // A terminated session has no process to drain that queue, so the
+        // message would sit there until some unrelated event (proactive
+        // keepalive) happened to relaunch — the user sees a dead session that
+        // silently swallows input. Typing into a terminated session is an
+        // explicit request to resume it, so ask for the relaunch here:
+        // terminated -> starting is legal, and the queue flushes on attach.
+        if (session.stateMachine.phase === "terminated") {
+          log.info("ws-bridge", "User message in terminated session; requesting relaunch", {
+            sessionId: session.id,
+          });
+          companionBus.emit("session:relaunch-needed", { sessionId: session.id });
+        }
       }
       this.persistSession(session);
       this.broadcastToBrowsers(session, userMessage);

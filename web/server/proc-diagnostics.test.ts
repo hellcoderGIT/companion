@@ -5,6 +5,7 @@ import {
   isProcAvailable,
   getDescendants,
   hasLiveDescendants,
+  countDescendants,
 } from "./proc-diagnostics.js";
 
 /**
@@ -127,6 +128,48 @@ describe("getDescendants / hasLiveDescendants", () => {
     // maxNodes is a safety bound: this runs immediately before a kill that
     // unblocks a stuck session, so it must terminate regardless of tree size.
     expect(getDescendants(1, 2).length).toBeLessThanOrEqual(2);
+  });
+
+  /**
+   * countDescendants drives the adaptive teardown wait in claude-adapter: a
+   * falling count means teardown is progressing and the process must NOT be
+   * killed, however long it takes. A count that stops falling is what ends the
+   * wait. So the critical property is that the count actually tracks reality.
+   */
+  it("countDescendants returns 0 for undefined pid and non-Linux", () => {
+    expect(countDescendants(undefined)).toBe(0);
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    expect(countDescendants(1)).toBe(0);
+  });
+
+  it.runIf(isLinux)("countDescendants drops as children exit", async () => {
+    // This is the exact signal the adaptive wait keys on. If the count did not
+    // fall as children are reaped, a healthy teardown would look like a stall
+    // and get killed — the bug this replaces.
+    const a = spawn("sleep", ["30"], { stdio: "ignore" });
+    const b = spawn("sleep", ["30"], { stdio: "ignore" });
+    await new Promise((r) => setTimeout(r, 150));
+
+    const withBoth = countDescendants(process.pid);
+    expect(withBoth).toBeGreaterThanOrEqual(2);
+
+    a.kill("SIGKILL");
+    await new Promise((r) => a.on("exit", r));
+    await new Promise((r) => setTimeout(r, 150));
+
+    const withOne = countDescendants(process.pid);
+    expect(withOne).toBeLessThan(withBoth);
+
+    b.kill("SIGKILL");
+    await new Promise((r) => b.on("exit", r));
+    await new Promise((r) => setTimeout(r, 150));
+
+    expect(countDescendants(process.pid)).toBeLessThan(withOne);
+  });
+
+  it.runIf(isLinux)("countDescendants is bounded by maxNodes", () => {
+    // Bounds the poll-loop cost: this runs every 500ms during teardown.
+    expect(countDescendants(1, 3)).toBeLessThanOrEqual(3);
   });
 
   it.runIf(isLinux)("includes descendants in the captured snapshot", async () => {

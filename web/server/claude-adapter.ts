@@ -46,7 +46,7 @@ import type {
 import type { SocketData } from "./ws-bridge-types.js";
 import type { PendingControlRequest } from "./ws-bridge-types.js";
 import type { RecorderManager } from "./recorder.js";
-import { captureProcState, hasLiveDescendants } from "./proc-diagnostics.js";
+import { captureProcState, hasLiveDescendants, countDescendants } from "./proc-diagnostics.js";
 import { parseNDJSON, isDuplicateCLIMessage } from "./ws-bridge-cli-ingest.js";
 import type { CLIDedupState } from "./ws-bridge-cli-ingest.js";
 import { reportProtocolDrift } from "./protocol-monitor.js";
@@ -57,14 +57,19 @@ import { reportProtocolDrift } from "./protocol-monitor.js";
 const CLI_DEDUP_WINDOW = 2000;
 
 /**
- * Grace period after stdout closes before we kill a still-alive CLI process.
- * The CLI's stdout often EOFs a beat *before* the process exits cleanly (e.g.
- * right after emitting a `result`). Killing immediately turns that code-0 exit
- * into a SIGTERM (143) and forces a needless relaunch. We wait this long for the
- * process to exit on its own; only a process that is still alive afterwards is
- * treated as genuinely wedged and killed. Overridable for tests/tuning.
+ * How long a process with no remaining descendants may sit without exiting
+ * before we treat it as wedged and kill it.
+ *
+ * This was a flat 2s. Measured over 22 kills that timer never once caught a
+ * genuinely hung process — all 22 were healthy (21 sleeping, 1 running),
+ * typically S/ep_poll with 12 threads: CLIs that had finished reaping and had
+ * simply not exited yet. Each kill destroyed the user's in-flight turn.
+ *
+ * Raised to 10s to match the descendants path. A real wedge is still caught,
+ * just 8s later — a trade that costs recovery latency in the rare case and
+ * saves a user's answer in the common one.
  */
-const STDOUT_CLOSE_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_GRACE_MS) || 2000;
+const STDOUT_CLOSE_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_GRACE_MS) || 10_000;
 
 /**
  * Longer grace used when stdout EOFs right after a terminal `result` (a clean
@@ -83,6 +88,21 @@ const STDOUT_CLOSE_RESULT_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_R
  * guard could still see it alive. Escalating guarantees the pid is gone.
  */
 const SIGKILL_ESCALATION_MS = Number(process.env.COMPANION_SIGKILL_ESCALATION_MS) || 2000;
+
+/**
+ * Absolute ceiling on waiting for MCP teardown, however well it is progressing.
+ *
+ * The flat 10s grace was not enough: 8 of 12 observed kills were processes
+ * correctly identified as still reaping children, waited the full 10s for, and
+ * killed anyway while perfectly healthy (S sleeping, 311-351MB). `npm exec`
+ * -wrapped MCP servers plus headless chromium routinely exceed 10s, especially
+ * with ~70 CLIs contending for I/O.
+ */
+const TEARDOWN_MAX_MS = Number(process.env.COMPANION_TEARDOWN_MAX_MS) || 120_000;
+
+/** How often to re-check the descendant count while waiting for teardown. */
+const TEARDOWN_POLL_MS = Number(process.env.COMPANION_TEARDOWN_POLL_MS) || 500;
+
 
 // --- Claude Code Adapter ------------------------------------------------------
 
@@ -348,15 +368,15 @@ export class ClaudeAdapter implements IBackendAdapter {
         // mid-exit.
         const teardownInProgress = hasLiveDescendants(proc.pid);
         if (this.lastInboundWasResult || teardownInProgress) {
-          // Clean end-of-turn shutdown: let the process flush teardown (MCP
-          // servers, etc.) and exit code-0 instead of SIGTERM-ing a code-0 exit.
-          // Use a generous grace so we don't clobber a slow-but-clean exit, but
-          // keep it bounded — a process that wedges *after* a result must still
-          // be killed so recovery isn't blocked indefinitely.
-          const exitedOnOwn = await Promise.race([
-            proc.exited.then(() => true),
-            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_RESULT_GRACE_MS)),
-          ]);
+          // Wait for teardown ADAPTIVELY rather than on a flat timer. A fixed
+          // 10s grace still killed 8 of 12 healthy processes: it cannot know
+          // how long `npm exec`-wrapped MCP servers plus headless chromium will
+          // take, especially with many CLIs contending for I/O.
+          //
+          // Instead, keep waiting as long as the descendant count is dropping —
+          // teardown is demonstrably working, so killing would be wrong at any
+          // deadline. Give up only when progress stalls, or at a hard ceiling.
+          const exitedOnOwn = await this.awaitTeardown(proc, STDOUT_CLOSE_RESULT_GRACE_MS);
           if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
             // Capture kernel state BEFORE the kill: once we SIGTERM, the
             // evidence is gone. A wedged CLI writes nothing to stderr, so this
@@ -364,17 +384,25 @@ export class ClaudeAdapter implements IBackendAdapter {
             log.warn("claude-adapter", "stdout closed after result but process did not exit within grace; killing wedged process", {
               sessionId: this.sessionId,
               pid: proc.pid,
-              graceMs: STDOUT_CLOSE_RESULT_GRACE_MS,
               graceReason: this.lastInboundWasResult ? "result" : "descendants_alive",
+              teardownOutcome: this.lastTeardownOutcome,
               proc: captureProcState(proc.pid),
             });
             await this.killWithEscalation(proc);
           }
         } else {
-          const exitedOnOwn = await Promise.race([
-            proc.exited.then(() => true),
-            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_GRACE_MS)),
-          ]);
+          // No descendants left to reap. This used to take a flat 2s timer, but
+          // measured over 22 kills that timer never once caught a genuinely
+          // hung process: every single one was healthy (21 sleeping, 1 running,
+          // 0 hung), typically S/ep_poll with 12 threads — a CLI that had
+          // finished reaping and simply had not exited yet.
+          //
+          // A CLI in that state is indistinguishable from a real wedge by any
+          // signal available here, so the tie is broken on cost instead:
+          // killing a healthy process destroys the user's in-flight turn, while
+          // waiting longer on a truly wedged one only delays recovery. So wait
+          // the same way, bounded by the stall window rather than a 2s guess.
+          const exitedOnOwn = await this.awaitTeardown(proc, STDOUT_CLOSE_GRACE_MS);
           if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
             // Reaching here now means a genuine wedge: stdout closed, no live
             // descendants to reap, and still not exited. Snapshot kernel state
@@ -391,6 +419,60 @@ export class ClaudeAdapter implements IBackendAdapter {
         }
       }
       this.notifyStdioDisconnect();
+    }
+  }
+
+  /** Why the last teardown wait ended, for the kill warning. */
+  private lastTeardownOutcome: string | undefined;
+
+  /**
+   * Wait for a process to exit while its descendants are still being reaped.
+   *
+   * Returns true if it exited on its own. The wait is adaptive: as long as the
+   * descendant count keeps dropping, teardown is demonstrably working and we
+   * keep waiting regardless of elapsed time. We give up only when the count
+   * sits unchanged for TEARDOWN_STALL_MS (nothing is happening) or the hard
+   * TEARDOWN_MAX_MS ceiling is hit.
+   *
+   * This replaces a flat 10s grace that killed 8 of 12 healthy processes: a
+   * fixed deadline cannot know how long `npm exec`-wrapped MCP servers plus
+   * headless chromium need, particularly under contention.
+   */
+  private async awaitTeardown(proc: Subprocess, stallMs: number): Promise<boolean> {
+    const started = Date.now();
+    let lastCount = countDescendants(proc.pid);
+    let lastProgressAt = started;
+    this.lastTeardownOutcome = undefined;
+
+    while (true) {
+      const exited = await Promise.race([
+        proc.exited.then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), TEARDOWN_POLL_MS)),
+      ]);
+      if (exited || proc.exitCode !== null) {
+        this.lastTeardownOutcome = `exited_after_${Date.now() - started}ms`;
+        return true;
+      }
+
+      const now = Date.now();
+      const count = countDescendants(proc.pid);
+      if (count < lastCount) {
+        // Progress: children are being reaped. Reset the stall window — a slow
+        // but advancing teardown must never be killed.
+        lastCount = count;
+        lastProgressAt = now;
+      }
+
+      if (now - lastProgressAt >= stallMs) {
+        this.lastTeardownOutcome =
+          `stalled_at_${count}_descendants_after_${now - started}ms`;
+        return false;
+      }
+      if (now - started >= TEARDOWN_MAX_MS) {
+        this.lastTeardownOutcome =
+          `ceiling_${TEARDOWN_MAX_MS}ms_with_${count}_descendants`;
+        return false;
+      }
     }
   }
 

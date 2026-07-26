@@ -1574,8 +1574,17 @@ describe("stdio transport disconnect propagation", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(proc.kill).not.toHaveBeenCalled();
 
-      // Past the grace window with no self-exit → treated as wedged and killed.
+      // The old flat 2s grace used to kill here. It no longer does: measured
+      // over 22 production kills that timer never caught a genuinely hung
+      // process — all 22 were healthy CLIs that had finished reaping and simply
+      // had not exited yet, and each kill destroyed the user's in-flight turn.
+      // The window is now 10s (COMPANION_STDOUT_CLOSE_GRACE_MS).
       await vi.advanceTimersByTimeAsync(2100);
+      expect(proc.kill).not.toHaveBeenCalled();
+
+      // Past the stall window with no self-exit → treated as wedged and killed,
+      // so the relaunch path's PID-liveness guard is still cleared.
+      await vi.advanceTimersByTimeAsync(9000);
       expect(proc.kill).toHaveBeenCalledTimes(1);
       expect(adapter.isConnected()).toBe(false);
       expect(disconnectCb).toHaveBeenCalledTimes(1);
