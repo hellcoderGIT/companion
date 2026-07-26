@@ -57,14 +57,19 @@ import { reportProtocolDrift } from "./protocol-monitor.js";
 const CLI_DEDUP_WINDOW = 2000;
 
 /**
- * Grace period after stdout closes before we kill a still-alive CLI process.
- * The CLI's stdout often EOFs a beat *before* the process exits cleanly (e.g.
- * right after emitting a `result`). Killing immediately turns that code-0 exit
- * into a SIGTERM (143) and forces a needless relaunch. We wait this long for the
- * process to exit on its own; only a process that is still alive afterwards is
- * treated as genuinely wedged and killed. Overridable for tests/tuning.
+ * How long a process with no remaining descendants may sit without exiting
+ * before we treat it as wedged and kill it.
+ *
+ * This was a flat 2s. Measured over 22 kills that timer never once caught a
+ * genuinely hung process — all 22 were healthy (21 sleeping, 1 running),
+ * typically S/ep_poll with 12 threads: CLIs that had finished reaping and had
+ * simply not exited yet. Each kill destroyed the user's in-flight turn.
+ *
+ * Raised to 10s to match the descendants path. A real wedge is still caught,
+ * just 8s later — a trade that costs recovery latency in the rare case and
+ * saves a user's answer in the common one.
  */
-const STDOUT_CLOSE_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_GRACE_MS) || 2000;
+const STDOUT_CLOSE_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_GRACE_MS) || 10_000;
 
 /**
  * Longer grace used when stdout EOFs right after a terminal `result` (a clean
@@ -98,14 +103,6 @@ const TEARDOWN_MAX_MS = Number(process.env.COMPANION_TEARDOWN_MAX_MS) || 120_000
 /** How often to re-check the descendant count while waiting for teardown. */
 const TEARDOWN_POLL_MS = Number(process.env.COMPANION_TEARDOWN_POLL_MS) || 500;
 
-/**
- * How long the descendant count may sit unchanged before we stop waiting.
- *
- * This is what makes the wait adaptive rather than flat: teardown that is still
- * making progress keeps its grace no matter how slow, while a genuinely stuck
- * process is caught after this stall window instead of after the full ceiling.
- */
-const TEARDOWN_STALL_MS = Number(process.env.COMPANION_TEARDOWN_STALL_MS) || 10_000;
 
 // --- Claude Code Adapter ------------------------------------------------------
 
@@ -379,7 +376,7 @@ export class ClaudeAdapter implements IBackendAdapter {
           // Instead, keep waiting as long as the descendant count is dropping —
           // teardown is demonstrably working, so killing would be wrong at any
           // deadline. Give up only when progress stalls, or at a hard ceiling.
-          const exitedOnOwn = await this.awaitTeardown(proc);
+          const exitedOnOwn = await this.awaitTeardown(proc, STDOUT_CLOSE_RESULT_GRACE_MS);
           if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
             // Capture kernel state BEFORE the kill: once we SIGTERM, the
             // evidence is gone. A wedged CLI writes nothing to stderr, so this
@@ -394,10 +391,18 @@ export class ClaudeAdapter implements IBackendAdapter {
             await this.killWithEscalation(proc);
           }
         } else {
-          const exitedOnOwn = await Promise.race([
-            proc.exited.then(() => true),
-            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_GRACE_MS)),
-          ]);
+          // No descendants left to reap. This used to take a flat 2s timer, but
+          // measured over 22 kills that timer never once caught a genuinely
+          // hung process: every single one was healthy (21 sleeping, 1 running,
+          // 0 hung), typically S/ep_poll with 12 threads — a CLI that had
+          // finished reaping and simply had not exited yet.
+          //
+          // A CLI in that state is indistinguishable from a real wedge by any
+          // signal available here, so the tie is broken on cost instead:
+          // killing a healthy process destroys the user's in-flight turn, while
+          // waiting longer on a truly wedged one only delays recovery. So wait
+          // the same way, bounded by the stall window rather than a 2s guess.
+          const exitedOnOwn = await this.awaitTeardown(proc, STDOUT_CLOSE_GRACE_MS);
           if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
             // Reaching here now means a genuine wedge: stdout closed, no live
             // descendants to reap, and still not exited. Snapshot kernel state
@@ -433,7 +438,7 @@ export class ClaudeAdapter implements IBackendAdapter {
    * fixed deadline cannot know how long `npm exec`-wrapped MCP servers plus
    * headless chromium need, particularly under contention.
    */
-  private async awaitTeardown(proc: Subprocess): Promise<boolean> {
+  private async awaitTeardown(proc: Subprocess, stallMs: number): Promise<boolean> {
     const started = Date.now();
     let lastCount = countDescendants(proc.pid);
     let lastProgressAt = started;
@@ -458,7 +463,7 @@ export class ClaudeAdapter implements IBackendAdapter {
         lastProgressAt = now;
       }
 
-      if (now - lastProgressAt >= TEARDOWN_STALL_MS) {
+      if (now - lastProgressAt >= stallMs) {
         this.lastTeardownOutcome =
           `stalled_at_${count}_descendants_after_${now - started}ms`;
         return false;
