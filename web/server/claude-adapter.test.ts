@@ -23,6 +23,16 @@ vi.mock("node:crypto", () => ({
 }));
 
 // Mock settings-manager to prevent real file system reads
+// countDescendants is stubbed so the wedge tests can drive the "process has
+// live descendants" branch deterministically, without spawning real children.
+// Default 0 (childless) preserves the existing tests' behaviour; individual
+// tests override it.
+const mockCountDescendants = vi.hoisted(() => vi.fn(() => 0));
+vi.mock("./proc-diagnostics.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./proc-diagnostics.js")>()),
+  countDescendants: mockCountDescendants,
+}));
+
 vi.mock("./settings-manager.js", () => ({
   getSettings: () => ({
     aiValidationEnabled: false,
@@ -1589,6 +1599,44 @@ describe("stdio transport disconnect propagation", () => {
       expect(adapter.isConnected()).toBe(false);
       expect(disconnectCb).toHaveBeenCalledTimes(1);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does NOT kill a process that is supervising live descendants", async () => {
+    // The dominant real-world case, from a captured kill:
+    //   graceReason=result state="R (running)" threads=28
+    //   descendants=[bash, gh, tail]
+    // Those are the agent's own tool subprocesses — a background command still
+    // running after the turn's `result`. The CLI closed stdout normally at
+    // end-of-turn and stayed alive to supervise that work.
+    //
+    // Its descendant count holds STEADY (nothing is being reaped), so any
+    // drop-based test reads it as stalled and kills a process that is actively
+    // working. It must survive well past the stall window.
+    vi.useFakeTimers();
+    mockCountDescendants.mockReturnValue(3); // bash + gh + tail
+    try {
+      const { proc, endStdout } = createMockProc();
+      adapter.attachStdio(proc);
+
+      endStdout();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proc.kill).not.toHaveBeenCalled();
+
+      // Far beyond the 10s stall window that would fire for a childless
+      // process. Still busy, so still not killed.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(proc.kill).not.toHaveBeenCalled();
+
+      // Once the background work finishes and the children are gone, the stall
+      // window starts accumulating and a genuinely idle process is killed —
+      // recovery is deferred, not abandoned.
+      mockCountDescendants.mockReturnValue(0);
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(proc.kill).toHaveBeenCalledTimes(1);
+    } finally {
+      mockCountDescendants.mockReturnValue(0);
       vi.useRealTimers();
     }
   });
