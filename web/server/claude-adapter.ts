@@ -46,6 +46,7 @@ import type {
 import type { SocketData } from "./ws-bridge-types.js";
 import type { PendingControlRequest } from "./ws-bridge-types.js";
 import type { RecorderManager } from "./recorder.js";
+import { captureProcState } from "./proc-diagnostics.js";
 import { parseNDJSON, isDuplicateCLIMessage } from "./ws-bridge-cli-ingest.js";
 import type { CLIDedupState } from "./ws-bridge-cli-ingest.js";
 import { reportProtocolDrift } from "./protocol-monitor.js";
@@ -332,10 +333,14 @@ export class ClaudeAdapter implements IBackendAdapter {
             new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_RESULT_GRACE_MS)),
           ]);
           if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
+            // Capture kernel state BEFORE the kill: once we SIGTERM, the
+            // evidence is gone. A wedged CLI writes nothing to stderr, so this
+            // is the only signal about why it is still alive.
             log.warn("claude-adapter", "stdout closed after result but process did not exit within grace; killing wedged process", {
               sessionId: this.sessionId,
               pid: proc.pid,
               graceMs: STDOUT_CLOSE_RESULT_GRACE_MS,
+              proc: captureProcState(proc.pid),
             });
             try {
               proc.kill();
@@ -349,10 +354,15 @@ export class ClaudeAdapter implements IBackendAdapter {
             new Promise<boolean>((resolve) => setTimeout(() => resolve(false), STDOUT_CLOSE_GRACE_MS)),
           ]);
           if (!exitedOnOwn && proc.exitCode === null && !proc.killed) {
+            // Same rationale as the after-result branch above: snapshot kernel
+            // state before the kill destroys it. This is the dominant wedge
+            // variant (23 of 29 observed), so it is the one most likely to
+            // carry the answer.
             log.warn("claude-adapter", "stdout closed mid-stream and process did not exit within grace; killing wedged process", {
               sessionId: this.sessionId,
               pid: proc.pid,
               graceMs: STDOUT_CLOSE_GRACE_MS,
+              proc: captureProcState(proc.pid),
             });
             try {
               proc.kill();
