@@ -1923,6 +1923,46 @@ describe("CLI message routing", () => {
     expect(permBroadcast.request.request_id).toBe("req-reattach");
   });
 
+  /**
+   * Regression: typing into a session whose CLI has already been killed used to
+   * queue the message with no process to drain it. The transition
+   * terminated -> streaming is (correctly) illegal, so the turn never started;
+   * the message only moved when some unrelated event happened to relaunch the
+   * session. From the user's side the session looked alive but silently
+   * swallowed input, then replayed the turn later from the top.
+   *
+   * Typing into a terminated session is an explicit request to resume it, so it
+   * must request the relaunch itself. terminated -> starting is legal, and the
+   * adapter queue flushes on attach.
+   */
+  it("user_message in a terminated session requests a relaunch", async () => {
+    const relaunchCb = vi.fn();
+    companionBus.on("session:relaunch-needed", ({ sessionId }) => relaunchCb(sessionId));
+
+    const cli = makeCliSocket("s1");
+    bridge.handleCLIOpen(cli, "s1");
+    await bridge.handleCLIMessage(cli, makeInitMsg());
+    const session = bridge.getSession("s1")!;
+
+    // Drive the session to terminated, as a wedge kill would.
+    session.stateMachine.transition("terminated", "test_kill");
+    expect(session.stateMachine.phase).toBe("terminated");
+
+    const browser = makeBrowserSocket("s1");
+    bridge.handleBrowserOpen(browser, "s1");
+    relaunchCb.mockClear();
+
+    await bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "still working?",
+    }));
+
+    expect(relaunchCb).toHaveBeenCalledWith("s1");
+    // The message must still be preserved for replay, not dropped in favour of
+    // the relaunch.
+    expect(session.inFlightUserTurn).toBeTruthy();
+  });
+
   it("tool_progress: broadcasts", async () => {
     const msg = JSON.stringify({
       type: "tool_progress",
