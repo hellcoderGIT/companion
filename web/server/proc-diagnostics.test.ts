@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { captureProcState, isProcAvailable } from "./proc-diagnostics.js";
+import { spawn } from "node:child_process";
+import {
+  captureProcState,
+  isProcAvailable,
+  getDescendants,
+  hasLiveDescendants,
+} from "./proc-diagnostics.js";
 
 /**
  * These tests cover the diagnostic that runs on the wedge-kill recovery path in
@@ -68,5 +74,70 @@ describe("captureProcState", () => {
     const snapshot = captureProcState(process.pid);
     expect(() => JSON.stringify(snapshot)).not.toThrow();
     expect(JSON.stringify(snapshot)).toContain("state");
+  });
+});
+
+/**
+ * Descendant detection is what replaced `lastInboundWasResult` as the grace
+ * discriminator in claude-adapter. Its correctness decides whether a CLI that
+ * is mid-teardown gets the generous grace or gets SIGTERMed at 2s — the latter
+ * being the bug that killed users' turns.
+ */
+describe("getDescendants / hasLiveDescendants", () => {
+  it("returns empty for undefined pid without throwing", () => {
+    expect(getDescendants(undefined)).toEqual([]);
+    expect(hasLiveDescendants(undefined)).toBe(false);
+  });
+
+  it("returns empty on platforms without /proc", () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    expect(getDescendants(1)).toEqual([]);
+    expect(hasLiveDescendants(1)).toBe(false);
+  });
+
+  it("returns empty for a pid that does not exist", () => {
+    expect(getDescendants(2_147_483_646)).toEqual([]);
+    expect(hasLiveDescendants(2_147_483_646)).toBe(false);
+  });
+
+  it.runIf(isLinux)("detects a live child and reports it gone after exit", async () => {
+    // Mirrors the real shape: a parent holding a child that has not yet reaped.
+    // `sleep` stands in for an MCP stdio server still shutting down.
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    await new Promise((r) => setTimeout(r, 150)); // let the fork land in /proc
+
+    expect(hasLiveDescendants(process.pid)).toBe(true);
+    const descendants = getDescendants(process.pid);
+    const found = descendants.find((d) => d.pid === child.pid);
+    expect(found).toBeDefined();
+    expect(found?.comm).toBe("sleep");
+    // A running-but-idle child reports S (sleeping), not Z (reaped).
+    expect(found?.state).toBe("S");
+
+    // After the child exits and is reaped, it must no longer count — otherwise
+    // a genuinely wedged process would be granted the long grace forever.
+    child.kill("SIGKILL");
+    await new Promise((r) => child.on("exit", r));
+    await new Promise((r) => setTimeout(r, 150));
+
+    expect(getDescendants(process.pid).some((d) => d.pid === child.pid)).toBe(false);
+  });
+
+  it.runIf(isLinux)("bounds the walk so a large tree cannot stall the kill path", () => {
+    // maxNodes is a safety bound: this runs immediately before a kill that
+    // unblocks a stuck session, so it must terminate regardless of tree size.
+    expect(getDescendants(1, 2).length).toBeLessThanOrEqual(2);
+  });
+
+  it.runIf(isLinux)("includes descendants in the captured snapshot", async () => {
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    await new Promise((r) => setTimeout(r, 150));
+
+    const snapshot = captureProcState(process.pid);
+    expect(snapshot.descendants?.some((d) => d.pid === child.pid)).toBe(true);
+    expect(() => JSON.stringify(snapshot)).not.toThrow();
+
+    child.kill("SIGKILL");
+    await new Promise((r) => child.on("exit", r));
   });
 });
