@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.110.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.110.2...companion-v0.110.3) (2026-07-26)
+
+
+### Bug Fixes
+
+* **session:** never kill a CLI on a timer while it supervises live descendants ([#75](https://github.com/hellcoderGIT/companion/issues/75)) ([d2a8f74](https://github.com/hellcoderGIT/companion/commit/d2a8f74e23d39439a27c17517907b07bbb7de27b))
+
 ## [0.110.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.110.1...companion-v0.110.2) (2026-07-26)
 
 
