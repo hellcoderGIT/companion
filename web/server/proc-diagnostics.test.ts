@@ -167,6 +167,30 @@ describe("getDescendants / hasLiveDescendants", () => {
     expect(countDescendants(process.pid)).toBeLessThan(withOne);
   });
 
+  it.runIf(isLinux)("countDescendants stays steady while a child keeps running", async () => {
+    // The case that broke the drop-based test. A background tool call (bash ->
+    // gh -> tail in the captured kill) holds a *steady* descendant count for as
+    // long as it runs — it never falls, because nothing is being reaped. Any
+    // logic keyed on a falling count reads this as a stall and kills a process
+    // that is actively working. awaitTeardown therefore treats count > 0 as
+    // busy, so this steady-state must be observable as non-zero over time.
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    await new Promise((r) => setTimeout(r, 150));
+
+    const first = countDescendants(process.pid);
+    expect(first).toBeGreaterThan(0);
+
+    await new Promise((r) => setTimeout(r, 400));
+    const second = countDescendants(process.pid);
+    // Still alive, still counted, and not decreasing — the signal that a
+    // drop-based test would misread.
+    expect(second).toBeGreaterThan(0);
+    expect(second).toBeGreaterThanOrEqual(first);
+
+    child.kill("SIGKILL");
+    await new Promise((r) => child.on("exit", r));
+  });
+
   it.runIf(isLinux)("countDescendants is bounded by maxNodes", () => {
     // Bounds the poll-loop cost: this runs every 500ms during teardown.
     expect(countDescendants(1, 3)).toBeLessThanOrEqual(3);

@@ -90,15 +90,16 @@ const STDOUT_CLOSE_RESULT_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_R
 const SIGKILL_ESCALATION_MS = Number(process.env.COMPANION_SIGKILL_ESCALATION_MS) || 2000;
 
 /**
- * Absolute ceiling on waiting for MCP teardown, however well it is progressing.
+ * Absolute backstop on waiting for a process with live descendants, so a stuck
+ * child cannot block recovery forever.
  *
- * The flat 10s grace was not enough: 8 of 12 observed kills were processes
- * correctly identified as still reaping children, waited the full 10s for, and
- * killed anyway while perfectly healthy (S sleeping, 311-351MB). `npm exec`
- * -wrapped MCP servers plus headless chromium routinely exceed 10s, especially
- * with ~70 CLIs contending for I/O.
+ * Set above the CLI's own maximum background-command duration (10 minutes): the
+ * descendants being waited on are frequently the agent's own tool subprocesses,
+ * and a ceiling below that would kill a legitimately running command — the very
+ * failure this path exists to avoid. Only a process still childless-and-idle,
+ * or one that blows this ceiling, is treated as wedged.
  */
-const TEARDOWN_MAX_MS = Number(process.env.COMPANION_TEARDOWN_MAX_MS) || 120_000;
+const TEARDOWN_MAX_MS = Number(process.env.COMPANION_TEARDOWN_MAX_MS) || 660_000;
 
 /** How often to re-check the descendant count while waiting for teardown. */
 const TEARDOWN_POLL_MS = Number(process.env.COMPANION_TEARDOWN_POLL_MS) || 500;
@@ -426,21 +427,32 @@ export class ClaudeAdapter implements IBackendAdapter {
   private lastTeardownOutcome: string | undefined;
 
   /**
-   * Wait for a process to exit while its descendants are still being reaped.
+   * Wait for a process to exit after its stdout transport has died.
    *
-   * Returns true if it exited on its own. The wait is adaptive: as long as the
-   * descendant count keeps dropping, teardown is demonstrably working and we
-   * keep waiting regardless of elapsed time. We give up only when the count
-   * sits unchanged for TEARDOWN_STALL_MS (nothing is happening) or the hard
-   * TEARDOWN_MAX_MS ceiling is hit.
+   * Returns true if it exited on its own.
    *
-   * This replaces a flat 10s grace that killed 8 of 12 healthy processes: a
-   * fixed deadline cannot know how long `npm exec`-wrapped MCP servers plus
-   * headless chromium need, particularly under contention.
+   * The rule is: **a process with live descendants is never killed on a timer.**
+   *
+   * An earlier version only reset the stall window when the descendant count
+   * *dropped*, on the assumption that descendants are MCP servers mid-teardown.
+   * Captured evidence disproved that. A representative kill:
+   *
+   *   graceReason=result state="R (running)" wchan=0 threads=28
+   *   descendants=[{comm:"bash"},{comm:"gh"},{comm:"tail"}]
+   *
+   * Those are the agent's own tool subprocesses — a background command still
+   * running after the turn's `result`. The CLI had closed stdout normally at
+   * end-of-turn and stayed alive to supervise that work. Its descendant count
+   * holds steady for as long as the command runs, so a drop-based test reads it
+   * as stalled and kills a process that is actively working (R, on CPU).
+   *
+   * So any live descendant counts as "busy", not just a falling count. The
+   * stall window only accumulates once the process is childless AND idle, which
+   * is the one state that genuinely looks like a wedge. TEARDOWN_MAX_MS remains
+   * as a backstop so recovery cannot be blocked forever.
    */
   private async awaitTeardown(proc: Subprocess, stallMs: number): Promise<boolean> {
     const started = Date.now();
-    let lastCount = countDescendants(proc.pid);
     let lastProgressAt = started;
     this.lastTeardownOutcome = undefined;
 
@@ -456,10 +468,10 @@ export class ClaudeAdapter implements IBackendAdapter {
 
       const now = Date.now();
       const count = countDescendants(proc.pid);
-      if (count < lastCount) {
-        // Progress: children are being reaped. Reset the stall window — a slow
-        // but advancing teardown must never be killed.
-        lastCount = count;
+      if (count > 0) {
+        // Live descendants: the process is supervising work — a background tool
+        // call, or MCP servers still shutting down. Either way it is doing
+        // something, so the stall window must not accumulate.
         lastProgressAt = now;
       }
 
