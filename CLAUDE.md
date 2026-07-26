@@ -5,7 +5,9 @@ This file provides guidance to Claude Code & Codex when working with code in thi
 ## What This Is
 
 The Companion — a web UI for Claude Code & Codex. 
-It reverse-engineers the undocumented `--sdk-url` WebSocket protocol in the Claude Code CLI to provide a browser-based interface for running multiple Claude Code sessions with streaming, tool call visibility, and permission control.
+It drives the Claude Code CLI over its `stream-json` stdio protocol to provide a browser-based interface for running multiple sessions with streaming, tool call visibility, and permission control.
+
+> **Transport note.** The project originally reverse-engineered the undocumented `--sdk-url` WebSocket protocol, where the CLI dialled back into the server. That path is **legacy**: CLI 2.1.121 added a host allowlist that rejects non-Anthropic `--sdk-url` targets, and 2.1.170 added a worker-registration handshake. The supported transport is now stdio, where the server owns the child process and bridges its pipes. See `claude-adapter.ts` (`transportKind`) for the authoritative answer — not this file. The legacy WebSocket path still exists behind the binary patcher (`claude-patcher.ts`, `claude-versions.ts`, `cli-ingress-server.ts`).
 
 ## Development Commands
 
@@ -58,22 +60,29 @@ All UI components used in the message/chat flow **must** be represented in the P
 ### Data Flow
 
 ```
-Browser (React) ←→ WebSocket ←→ Hono Server (Bun) ←→ WebSocket (NDJSON) ←→ Claude Code CLI
-     :5174              /ws/browser/:id        :3456        /ws/cli/:id         (--sdk-url)
+Browser (React) ←→ WebSocket ←→ Hono Server (Bun) ←→ stdin/stdout (stream-json) ←→ Claude Code CLI
+     :5174           /ws/browser/:id          :3456          ClaudeAdapter              (child process)
 ```
 
 1. Browser sends a "create session" REST call to the server
-2. Server spawns `claude --sdk-url ws://localhost:3456/ws/cli/SESSION_ID` as a subprocess
-3. CLI connects back to the server over WebSocket using NDJSON protocol
-4. Server bridges messages between CLI WebSocket and browser WebSocket
-5. Tool calls arrive as `control_request` (subtype `can_use_tool`) — browser renders approval UI, server relays `control_response` back
+2. Server spawns the CLI as a subprocess and keeps its stdin/stdout pipes:
+   `claude --print --input-format stream-json --output-format stream-json --include-partial-messages --verbose --permission-prompt-tool stdio`
+   (plus `--model`, `--effort`, `--permission-mode`, `--resume` as applicable)
+3. `ClaudeAdapter.attachStdio()` bridges NDJSON frames over those pipes — the CLI never dials back in
+4. Server relays between the adapter and the browser WebSocket
+5. Tool calls arrive as `control_request` (subtype `can_use_tool`) — browser renders approval UI, server relays `control_response` back. `--permission-prompt-tool stdio` is what routes them over the same pipes, enabled by the adapter's one-time `initialize` handshake
+
+Codex uses a different backend: `codex app-server` speaking JSON-RPC, either over a WebSocket (`--listen`) or over stdio.
 
 ### All code lives under `web/`
 
 - **`web/server/`** — Hono + Bun backend (runs on port 3456)
   - `index.ts` — Server bootstrap, Bun.serve with dual WebSocket upgrade (CLI vs browser)
-  - `ws-bridge.ts` — Core message router. Maintains per-session state (CLI socket, browser sockets, message history, pending permissions). Parses NDJSON from CLI, translates to typed JSON for browsers.
-  - `cli-launcher.ts` — Spawns/kills/relaunches Claude Code CLI processes. Handles `--resume` for session recovery. Persists session state across server restarts.
+  - `ws-bridge.ts` — Core message router. Maintains per-session state (backend adapter, browser sockets, message history, pending permissions). Translates CLI messages to typed JSON for browsers.
+  - `claude-adapter.ts` — **The Claude Code backend.** Owns the stdio `stream-json` transport (`attachStdio`), the `initialize` handshake, and wedge detection/recovery. `transportKind` (`"stdio"` | `"websocket"`) is the authoritative statement of which transport a session uses.
+  - `cli-launcher.ts` — Spawns/kills/relaunches CLI processes and builds their argv. Handles `--resume` for session recovery. Persists session state across server restarts.
+  - `claude-patcher.ts` / `claude-versions.ts` / `cli-ingress-server.ts` — Legacy `--sdk-url` support: version gating (`KNOWN_GOOD_MAX` 2.1.120 accepts arbitrary targets, `KNOWN_BAD_MIN` 2.1.121 rejects them) and byte-patching the binary's host allowlist.
+  - `proc-diagnostics.ts` — Best-effort `/proc` snapshot (state, wchan, threads, RSS, fd count) captured before killing a wedged process, since wedged CLIs emit nothing on stderr.
   - `session-store.ts` — JSON file persistence to `~/.companion/sessions/` (overridable via `COMPANION_SESSION_DIR`/`COMPANION_SESSIONS_DIR`, or relocate the whole companion home via `COMPANION_HOME`). Debounced writes.
   - `session-types.ts` — All TypeScript types for CLI messages (NDJSON), browser messages, session state, permissions.
   - `routes.ts` — REST API: session CRUD, filesystem browsing, environment management.
@@ -89,11 +98,13 @@ Browser (React) ←→ WebSocket ←→ Hono Server (Bun) ←→ WebSocket (NDJS
 
 - **`web/bin/cli.ts`** — CLI entry point (`bunx the-companion`). Sets `__COMPANION_PACKAGE_ROOT` and imports the server.
 
-### WebSocket Protocol
+### CLI Protocol
 
-The CLI uses NDJSON (newline-delimited JSON). Key message types from CLI: `system` (init/status), `assistant`, `result`, `stream_event`, `control_request`, `tool_progress`, `tool_use_summary`, `keep_alive`. Messages to CLI: `user`, `control_response`, `control_request` (for interrupt/set_model/set_permission_mode).
+The CLI speaks NDJSON (newline-delimited JSON) in both transports — over stdin/stdout in the supported stdio transport, and over a WebSocket in the legacy `--sdk-url` one. The message shapes are the same; only the pipe differs.
 
-Full protocol documentation is in `WEBSOCKET_PROTOCOL_REVERSED.md`.
+Key message types from CLI: `system` (init/status), `assistant`, `result`, `stream_event`, `control_request`, `tool_progress`, `tool_use_summary`, `keep_alive`. Messages to CLI: `user`, `control_response`, `control_request` (for interrupt/set_model/set_permission_mode).
+
+Full protocol documentation is in `WEBSOCKET_PROTOCOL_REVERSED.md` (named for the original WebSocket transport; the message catalogue still applies).
 
 ### Session Lifecycle
 
