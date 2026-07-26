@@ -2317,6 +2317,24 @@ export function Playground() {
                 <span>No activity for 16m 12s &mdash; the agent may be stuck</span>
               </div>
             </Card>
+            <Card label="Generation stats bar — background (turn ended, process still running)">
+              <div className="flex items-center gap-2 text-[11px] text-cc-muted font-mono-code pl-10 stats-glow py-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-cc-primary animate-[typing-breathe_1.5s_ease-in-out_infinite]" />
+                <span className="text-cc-fg/70">Background process running</span>
+                <span className="text-cc-muted/30">|</span>
+                <span className="tabular-nums">4m 02s</span>
+                <span className="text-cc-muted/30">|</span>
+                <span className="truncate max-w-[24ch]">Wait for CI</span>
+              </div>
+            </Card>
+            <Card label="Generation stats bar — background, multiple processes">
+              <div className="flex items-center gap-2 text-[11px] text-cc-muted font-mono-code pl-10 stats-glow py-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-cc-primary animate-[typing-breathe_1.5s_ease-in-out_infinite]" />
+                <span className="text-cc-fg/70">3 background processes running</span>
+                <span className="text-cc-muted/30">|</span>
+                <span className="tabular-nums">12m 40s</span>
+              </div>
+            </Card>
           </div>
         </Section>
 

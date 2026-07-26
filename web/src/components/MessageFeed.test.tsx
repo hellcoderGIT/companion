@@ -6,7 +6,7 @@ beforeAll(() => {
 });
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ChatMessage } from "../types.js";
+import type { ChatMessage, ProcessItem } from "../types.js";
 
 const { getClaudeSessionHistoryMock } = vi.hoisted(() => ({
   getClaudeSessionHistoryMock: vi.fn(),
@@ -46,6 +46,7 @@ vi.mock("../store.js", () => ({
       chatTabReentryTickBySession:
         mockStoreValues.chatTabReentryTickBySession ?? new Map(),
       sdkSessions: mockStoreValues.sdkSessions ?? [],
+      sessionProcesses: mockStoreValues.sessionProcesses ?? new Map(),
     };
     return selector(state);
   },
@@ -110,7 +111,29 @@ function setStoreLastActivity(sessionId: string, ts: number | undefined) {
   mockStoreValues.lastActivityAt = map;
 }
 
+/** Seed background processes (Bash run_in_background) for a session. */
+function setStoreProcesses(
+  sessionId: string,
+  processes: Array<Partial<ProcessItem> & { status: ProcessItem["status"] }>,
+) {
+  const map = new Map();
+  map.set(
+    sessionId,
+    processes.map((p, i) => ({
+      taskId: `task-${i}`,
+      toolUseId: `tu-${i}`,
+      command: "sleep 600",
+      description: "Long running job",
+      outputFile: `/tmp/out-${i}.log`,
+      startedAt: Date.now() - 60_000,
+      ...p,
+    })),
+  );
+  mockStoreValues.sessionProcesses = map;
+}
+
 function resetStore() {
+  mockStoreValues.sessionProcesses = new Map();
   mockStoreValues.messages = new Map();
   mockStoreValues.streaming = new Map();
   mockStoreValues.streamingStartedAt = new Map();
@@ -362,6 +385,106 @@ describe("MessageFeed - activity tiers", () => {
     const bar = screen.getByTestId("activity-indicator");
     expect(bar.getAttribute("data-activity-tier")).toBe("stalled");
     expect(screen.getByText(/the agent may be stuck/)).toBeTruthy();
+  });
+
+  // Background processes (Bash run_in_background) outlive the turn that started
+  // them: the tool call returns immediately, the turn ends, and sessionStatus
+  // drops to idle while the work continues. Before this, the indicator was gated
+  // purely on sessionStatus === "running", so the feed showed NOTHING while real
+  // work was in flight — the most common reason a session reads as "stuck".
+  it("shows the 'background' tier when the turn has ended but a process is still running", () => {
+    const sid = "test-tier-background-idle";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "idle"); // turn finished
+    setStoreProcesses(sid, [{ status: "running", description: "Wait for CI" }]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("background");
+    expect(screen.getByText("Background process running")).toBeTruthy();
+    expect(screen.getByText("Wait for CI")).toBeTruthy();
+  });
+
+  it("pluralises the background tier for multiple running processes", () => {
+    const sid = "test-tier-background-many";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "idle");
+    setStoreProcesses(sid, [
+      { status: "running" },
+      { status: "running" },
+      { status: "completed" }, // must not be counted
+    ]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    expect(screen.getByText("2 background processes running")).toBeTruthy();
+  });
+
+  // The important correctness case: claiming "may be stuck" while a process is
+  // demonstrably running is worse than saying nothing at all, because it tells
+  // the user the agent is broken when it is working.
+  it("never claims 'may be stuck' while a background process is running", () => {
+    const sid = "test-tier-background-not-stalled";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 20 * 60_000);
+    // Silence well past the 15min stalled threshold…
+    setStoreLastActivity(sid, Date.now() - 16 * 60_000);
+    // …but a process is alive, which proves the agent is not stuck.
+    setStoreProcesses(sid, [{ status: "running" }]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("background");
+    expect(screen.queryByText(/the agent may be stuck/)).toBeNull();
+  });
+
+  it("still reports 'stalled' when silent with no running processes", () => {
+    // Guard against the fix over-reaching: with nothing actually running, the
+    // stall warning must survive — it is the signal for a genuine hang.
+    const sid = "test-tier-stalled-no-procs";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 20 * 60_000);
+    setStoreLastActivity(sid, Date.now() - 16 * 60_000);
+    setStoreProcesses(sid, [{ status: "completed" }, { status: "failed" }]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("stalled");
+    expect(screen.getByText(/the agent may be stuck/)).toBeTruthy();
+  });
+
+  it("hides the indicator entirely when idle with no running processes", () => {
+    // The pre-existing behaviour for a genuinely idle session must not change.
+    const sid = "test-tier-idle-clean";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "idle");
+    setStoreProcesses(sid, [{ status: "completed" }]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    expect(screen.queryByTestId("activity-indicator")).toBeNull();
+  });
+
+  it("keeps showing 'Generating' while streaming, even with background work", () => {
+    // Live streaming is the more informative signal, so recent activity must
+    // still win over the background tier.
+    const sid = "test-tier-streaming-wins";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 5000);
+    setStoreLastActivity(sid, Date.now() - 1000); // active
+    setStoreProcesses(sid, [{ status: "running" }]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("active");
+    expect(screen.getByText("Generating")).toBeTruthy();
   });
 
   it("stays 'quiet' (not stalled) at ~10min of silence — long tool calls are normal", () => {

@@ -365,11 +365,48 @@ describe("SettingsPage", () => {
       updateChannel: "stable",
       publicUrl: "",
       proactiveKeepaliveEnabled: false,
+      wedgeKillEnabled: true,
     });
     render(<SettingsPage />);
     await screen.findByText("Anthropic key configured");
 
     const toggle = screen.getByRole("switch", { name: /Proactive keepalive relaunch/i });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  // The wedge-kill switch exists so the kill path can be disabled and tested
+  // empirically: every process it has killed so far turned out to be healthy,
+  // so it is plausible the wedge it guards against no longer occurs on current
+  // CLI versions. Defaults to on, preserving existing behaviour.
+  it("toggles wedge-kill and persists it via updateSettings", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Kill wedged CLI processes/i });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ wedgeKillEnabled: false });
+    });
+  });
+
+  it("reflects wedgeKillEnabled=false loaded from the server", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      updateChannel: "stable",
+      publicUrl: "",
+      proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: false,
+    });
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Kill wedged CLI processes/i });
     expect(toggle).toHaveAttribute("aria-checked", "false");
   });
 
@@ -1172,6 +1209,25 @@ describe("SettingsPage", () => {
     expect(webhooksSection).toBeInTheDocument();
 
     const results = await axe(webhooksSection!);
+    expect(results).toHaveNoViolations();
+  });
+
+  // Axe scan covering the General section, which now hosts the wedge-kill
+  // switch alongside the keepalive one — both are role="switch" with
+  // aria-checked, so this guards their labelling and roles.
+  it("passes axe accessibility checks for the General section", async () => {
+    const { axe } = await import("vitest-axe");
+
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const generalSection = document.getElementById("general");
+    expect(generalSection).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: /Kill wedged CLI processes/i }),
+    ).toBeInTheDocument();
+
+    const results = await axe(generalSection!);
     expect(results).toHaveNoViolations();
   });
 

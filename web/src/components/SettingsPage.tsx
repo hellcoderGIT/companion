@@ -47,6 +47,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [updateChannel, setUpdateChannel] = useState<"stable" | "prerelease">("stable");
   const [dockerAutoUpdate, setDockerAutoUpdate] = useState(false);
   const [proactiveKeepaliveEnabled, setProactiveKeepaliveEnabled] = useState(true);
+  const [wedgeKillEnabled, setWedgeKillEnabled] = useState(true);
   const [cliBridgeMode, setCliBridgeMode] = useState<"loopback" | "jsonHandoff">("loopback");
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingApp, setUpdatingApp] = useState(false);
@@ -150,6 +151,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (s.updateChannel === "stable" || s.updateChannel === "prerelease") setUpdateChannel(s.updateChannel);
         if (typeof s.dockerAutoUpdate === "boolean") setDockerAutoUpdate(s.dockerAutoUpdate);
         if (typeof s.proactiveKeepaliveEnabled === "boolean") setProactiveKeepaliveEnabled(s.proactiveKeepaliveEnabled);
+        if (typeof s.wedgeKillEnabled === "boolean") setWedgeKillEnabled(s.wedgeKillEnabled);
         if (s.cliBridgeMode === "loopback" || s.cliBridgeMode === "jsonHandoff") setCliBridgeMode(s.cliBridgeMode);
         if (typeof s.publicUrl === "string") {
           setPublicUrl(s.publicUrl);
@@ -429,6 +431,36 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     When on (default), a CLI process that exits unexpectedly with no browser attached is
                     automatically relaunched to keep long-running sessions (agents, cron) alive. Turn off to
                     experiment with letting dead sessions stay dead.
+                  </p>
+                </div>
+
+                <div className="pt-3 border-t border-cc-border">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={wedgeKillEnabled}
+                    aria-label="Kill wedged CLI processes"
+                    onClick={async () => {
+                      const next = !wedgeKillEnabled;
+                      const prev = wedgeKillEnabled;
+                      setWedgeKillEnabled(next);
+                      try {
+                        await api.updateSettings({ wedgeKillEnabled: next });
+                      } catch {
+                        setWedgeKillEnabled(prev);
+                      }
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg text-sm bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+                  >
+                    <span>Kill wedged CLI processes</span>
+                    <span className="text-xs text-cc-muted">{wedgeKillEnabled ? "On" : "Off"}</span>
+                  </button>
+                  <p className="mt-1 text-xs text-cc-muted px-1">
+                    When on (default), a CLI whose output stream closes but which does not exit is treated as
+                    wedged and killed so the session can recover. This was built for older CLI behaviour, and
+                    every process sampled since has turned out to be healthy — usually one supervising a
+                    background command. Turn off to test whether the wedge still happens at all: sessions
+                    still relaunch, but processes are left to exit on their own instead of being terminated.
                   </p>
                 </div>
               </div>

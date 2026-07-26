@@ -1158,6 +1158,7 @@ describe("GET /api/sessions/:id/archive-info", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
     const res = await app.request("/api/sessions/s1/archive-info", { method: "GET" });
@@ -1533,6 +1534,7 @@ describe("GET /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 123,
     });
 
@@ -1566,6 +1568,7 @@ describe("GET /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
     });
   });
 
@@ -1599,6 +1602,7 @@ describe("GET /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 123,
     });
 
@@ -1632,6 +1636,7 @@ describe("GET /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
     });
   });
 
@@ -1666,6 +1671,7 @@ describe("GET /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 100,
     });
 
@@ -1708,6 +1714,7 @@ describe("PUT /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 456,
     });
 
@@ -1763,6 +1770,7 @@ describe("PUT /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
     });
   });
 
@@ -1796,6 +1804,7 @@ describe("PUT /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 789,
     });
 
@@ -1846,6 +1855,7 @@ describe("PUT /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 999,
     });
 
@@ -1947,6 +1957,7 @@ describe("PUT /api/settings", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 500,
     });
 
@@ -2203,6 +2214,7 @@ describe("GET /api/linear/issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2243,6 +2255,7 @@ describe("GET /api/linear/issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -2336,6 +2349,7 @@ describe("GET /api/linear/issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -2436,6 +2450,7 @@ describe("GET /api/linear/issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -2501,6 +2516,7 @@ describe("GET /api/linear/connection", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2541,6 +2557,7 @@ describe("GET /api/linear/connection", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -2603,6 +2620,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -2647,6 +2665,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -2690,6 +2709,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2735,6 +2755,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -2814,6 +2835,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -2872,6 +2894,7 @@ describe("GET /api/linear/projects", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2912,6 +2935,7 @@ describe("GET /api/linear/projects", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -2982,6 +3006,7 @@ describe("GET /api/linear/project-issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -3022,6 +3047,7 @@ describe("GET /api/linear/project-issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -3107,6 +3133,7 @@ describe("GET /api/linear/project-issues", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 

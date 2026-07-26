@@ -42,6 +42,7 @@ beforeEach(() => {
     updateChannel: "stable",
     dockerAutoUpdate: false,
     proactiveKeepaliveEnabled: true,
+    wedgeKillEnabled: true,
     updatedAt: 0,
   });
 });
@@ -90,6 +91,7 @@ describe("generateSessionTitle", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
 
@@ -145,6 +147,7 @@ describe("generateSessionTitle", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({
@@ -229,6 +232,7 @@ describe("generateSessionTitle", () => {
       updateChannel: "stable",
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
       updatedAt: 0,
     });
     mockFetch.mockResolvedValueOnce({
