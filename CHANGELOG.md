@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.110.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.110.1...companion-v0.110.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* **session:** wait adaptively for MCP teardown instead of a flat timeout ([#73](https://github.com/hellcoderGIT/companion/issues/73)) ([5409d71](https://github.com/hellcoderGIT/companion/commit/5409d71748e29ea88c87bd69162c157fac04d58d))
+
 ## [0.110.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.110.0...companion-v0.110.1) (2026-07-26)
 
 
