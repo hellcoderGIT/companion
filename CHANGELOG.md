@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.111.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.110.3...companion-v0.111.0) (2026-07-27)
+
+
+### Features
+
+* **ui:** show background process activity; add wedge-kill toggle ([#77](https://github.com/hellcoderGIT/companion/issues/77)) ([00afc76](https://github.com/hellcoderGIT/companion/commit/00afc768f697e7fc3da0af16bc34073349c7398f))
+
 ## [0.110.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.110.2...companion-v0.110.3) (2026-07-26)
 
 
