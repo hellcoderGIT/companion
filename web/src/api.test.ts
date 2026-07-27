@@ -2136,3 +2136,53 @@ describe("exportSession", () => {
     await expect(api.exportSession("s1", "html")).rejects.toThrow(/Export failed \(500\)/);
   });
 });
+
+// Thin REST wrappers that had no direct coverage. They are one-liners, but an
+// untested wrapper is exactly where a wrong verb or a typo'd path hides — the
+// call still compiles and only fails at runtime against the real server.
+describe("dashboard, tailscale and linear-connection wrappers", () => {
+  it.each([
+    ["getDashboard", () => api.getDashboard(), "/api/dashboard", "GET"],
+    ["runDashboardUpdate", () => api.runDashboardUpdate(), "/api/dashboard/run", "POST"],
+    ["getDashboardRunStatus", () => api.getDashboardRunStatus(), "/api/dashboard/run/status", "GET"],
+    ["getTailscaleStatus", () => api.getTailscaleStatus(), "/api/tailscale/status", "GET"],
+    ["startTailscaleFunnel", () => api.startTailscaleFunnel(), "/api/tailscale/funnel/start", "POST"],
+    ["stopTailscaleFunnel", () => api.stopTailscaleFunnel(), "/api/tailscale/funnel/stop", "POST"],
+    ["listLinearConnections", () => api.listLinearConnections(), "/api/linear/connections", "GET"],
+  ])("%s hits the right path and verb", async (_name, call, expectedUrl, expectedMethod) => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    await call();
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe(expectedUrl);
+    expect(opts?.method ?? "GET").toBe(expectedMethod);
+  });
+
+  // IDs go into the path, so they must be encoded or an id containing "/" or
+  // "#" would silently address the wrong resource.
+  it("URL-encodes connection ids in the path", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+    await api.deleteLinearConnection("a/b#c");
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/linear/connections/a%2Fb%23c");
+
+    mockFetch.mockResolvedValueOnce(mockResponse({ connection: {} }));
+    await api.updateLinearConnection("x y", { name: "n" });
+    expect(mockFetch.mock.calls[1][0]).toBe("/api/linear/connections/x%20y");
+
+    mockFetch.mockResolvedValueOnce(mockResponse({ verified: true }));
+    await api.verifyLinearConnection("a b");
+    expect(mockFetch.mock.calls[2][0]).toBe("/api/linear/connections/a%20b/verify");
+  });
+
+  it("sends the body when creating a linear connection", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ connection: {}, verified: true }));
+
+    await api.createLinearConnection({ name: "Work", apiKey: "lin_api_x" });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/connections");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ name: "Work", apiKey: "lin_api_x" });
+  });
+});

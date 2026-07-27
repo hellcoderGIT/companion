@@ -92,6 +92,18 @@ export interface CompanionSettings {
    * cron) alive. Disable to experiment with letting dead sessions stay dead.
    */
   proactiveKeepaliveEnabled: boolean;
+  /**
+   * When true (default), a CLI whose stdout closes but which does not exit is
+   * treated as wedged and killed so recovery can proceed.
+   *
+   * This machinery was built for older CLI behaviour. Every kill sampled since
+   * the /proc instrumentation landed has been a *healthy* process — typically
+   * one supervising a background tool call — so it is plausible the wedge it
+   * guards against no longer occurs. Disable to test that: the transport is
+   * still torn down and the session still relaunches, but the process is left
+   * to exit on its own instead of being SIGTERMed.
+   */
+  wedgeKillEnabled: boolean;
   /** See CliBridgeMode. Defaults to "loopback". Optional in fixtures; normalize() applies the default. */
   cliBridgeMode?: CliBridgeMode;
   /** See ClaudeBridgeMode. Defaults to "none". Persists across companion restarts. */
@@ -136,6 +148,7 @@ let settings: CompanionSettings = {
   updateChannel: "stable",
   dockerAutoUpdate: false,
   proactiveKeepaliveEnabled: true,
+  wedgeKillEnabled: true,
   cliBridgeMode: "loopback",
   claudeBridgeMode: "none",
   claudeBridgeIngressUrl: "",
@@ -187,6 +200,7 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     updateChannel: raw?.updateChannel === "prerelease" ? "prerelease" : "stable",
     dockerAutoUpdate: typeof raw?.dockerAutoUpdate === "boolean" ? raw.dockerAutoUpdate : false,
     proactiveKeepaliveEnabled: typeof raw?.proactiveKeepaliveEnabled === "boolean" ? raw.proactiveKeepaliveEnabled : true,
+    wedgeKillEnabled: typeof raw?.wedgeKillEnabled === "boolean" ? raw.wedgeKillEnabled : true,
     cliBridgeMode: raw?.cliBridgeMode === "jsonHandoff" ? "jsonHandoff" : "loopback",
     claudeBridgeMode: raw?.claudeBridgeMode === "patched" ? "patched" : "none",
     claudeBridgeIngressUrl: typeof raw?.claudeBridgeIngressUrl === "string" ? raw.claudeBridgeIngressUrl : "",
@@ -220,7 +234,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "wedgeKillEnabled" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -252,6 +266,7 @@ export function updateSettings(
     updateChannel: patch.updateChannel ?? settings.updateChannel,
     dockerAutoUpdate: patch.dockerAutoUpdate ?? settings.dockerAutoUpdate,
     proactiveKeepaliveEnabled: patch.proactiveKeepaliveEnabled ?? settings.proactiveKeepaliveEnabled,
+    wedgeKillEnabled: patch.wedgeKillEnabled ?? settings.wedgeKillEnabled,
     cliBridgeMode: patch.cliBridgeMode ?? settings.cliBridgeMode,
     claudeBridgeMode: patch.claudeBridgeMode ?? settings.claudeBridgeMode,
     claudeBridgeIngressUrl: patch.claudeBridgeIngressUrl ?? settings.claudeBridgeIngressUrl,

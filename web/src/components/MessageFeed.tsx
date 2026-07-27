@@ -604,6 +604,7 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
   );
   const sessionStatus = useStore((s) => s.sessionStatus.get(sessionId));
   const lastActivityAt = useStore((s) => s.lastActivityAt.get(sessionId));
+  const sessionProcesses = useStore((s) => s.sessionProcesses.get(sessionId));
   const toolProgress = useStore((s) => s.toolProgress.get(sessionId));
   const toolActivity = useStore((s) => s.toolActivity.get(sessionId));
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -626,6 +627,27 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
   const hasStreamingAssistant = useMemo(
     () => messages.some((m) => m.role === "assistant" && m.isStreaming),
     [messages],
+  );
+  // Background processes (`Bash` with run_in_background) outlive the turn that
+  // started them: the tool call returns immediately, the turn ends with a
+  // `result`, and sessionStatus drops to idle while the work carries on. Without
+  // consulting them the feed shows nothing at all — a session doing real work
+  // looks dead, which is the most common reason a session gets reported as
+  // "stuck". Derived here (above the elapsed-tick effect) because that effect
+  // must keep ticking while background work is live.
+  const runningProcesses = useMemo(
+    () => (sessionProcesses ?? []).filter((p) => p.status === "running"),
+    [sessionProcesses],
+  );
+  const hasBackgroundWork = runningProcesses.length > 0;
+  // Elapsed for background-only activity is measured from the longest-running
+  // process, not from the turn — the turn has already ended.
+  const backgroundStartedAt = useMemo(
+    () =>
+      runningProcesses.length > 0
+        ? Math.min(...runningProcesses.map((p) => p.startedAt))
+        : null,
+    [runningProcesses],
   );
   const resumeSourceSessionId = useMemo(() => {
     if (sdkSession?.backendType === "codex") return "";
@@ -766,9 +788,12 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
     ],
   );
 
-  // Tick elapsed time every second while generating
+  // Tick elapsed time every second while generating, or while background work
+  // is live. The tick is what re-renders the indicator, so without the
+  // background clause a background-only session would render its elapsed time
+  // once and then freeze — looking as stalled as showing nothing.
   useEffect(() => {
-    if (!streamingStartedAt && sessionStatus !== "running") {
+    if (!streamingStartedAt && sessionStatus !== "running" && !hasBackgroundWork) {
       setElapsed(0);
       return;
     }
@@ -776,7 +801,7 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
     setElapsed(Date.now() - start);
     const interval = setInterval(() => setElapsed(Date.now() - start), 1000);
     return () => clearInterval(interval);
-  }, [streamingStartedAt, sessionStatus]);
+  }, [streamingStartedAt, sessionStatus, hasBackgroundWork]);
 
   function handleScroll() {
     const el = containerRef.current;
@@ -932,12 +957,18 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
     sessionStatus === "running" && lastActivityAt != null
       ? Math.max(0, Date.now() - lastActivityAt)
       : 0;
-  const activityTier: "active" | "quiet" | "stalled" =
-    sinceActivity >= ACTIVITY_STALLED_MS
-      ? "stalled"
-      : sinceActivity >= ACTIVITY_QUIET_MS
-        ? "quiet"
-        : "active";
+
+  const activityTier: "active" | "quiet" | "stalled" | "background" =
+    // Live background work is proof the agent is not stuck, so it outranks the
+    // silence-based tiers. Claiming "may be stuck" while a process is demonstrably
+    // running is worse than saying nothing.
+    hasBackgroundWork && (sessionStatus !== "running" || sinceActivity >= ACTIVITY_QUIET_MS)
+      ? "background"
+      : sinceActivity >= ACTIVITY_STALLED_MS
+        ? "stalled"
+        : sinceActivity >= ACTIVITY_QUIET_MS
+          ? "quiet"
+          : "active";
 
   return (
     <div className="flex-1 min-h-0 relative overflow-hidden">
@@ -1040,8 +1071,11 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
           )}
 
           {/* Generation stats bar — tiered by activity so the user can always
-              tell whether the agent is streaming, working silently, or stalled. */}
-          {sessionStatus === "running" && elapsed >= 0 && (
+              tell whether the agent is streaming, working silently, running
+              background work, or genuinely stalled. Shown while the turn is
+              running OR while background processes are alive, so a session is
+              never silently idle-looking while work is in flight. */}
+          {(sessionStatus === "running" || hasBackgroundWork) && elapsed >= 0 && (
             <div
               data-testid="activity-indicator"
               data-activity-tier={activityTier}
@@ -1056,7 +1090,31 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
                     : "bg-cc-primary animate-[typing-breathe_1.5s_ease-in-out_infinite]"
                 }`}
               />
-              {activityTier === "stalled" ? (
+              {activityTier === "background" ? (
+                <>
+                  <span className="text-cc-fg/70">
+                    {runningProcesses.length === 1
+                      ? "Background process running"
+                      : `${runningProcesses.length} background processes running`}
+                  </span>
+                  {backgroundStartedAt != null && (
+                    <>
+                      <span className="text-cc-muted/30">|</span>
+                      <span className="tabular-nums">
+                        {formatElapsed(Math.max(0, Date.now() - backgroundStartedAt))}
+                      </span>
+                    </>
+                  )}
+                  {runningProcesses[0]?.description && (
+                    <>
+                      <span className="text-cc-muted/30">|</span>
+                      <span className="truncate max-w-[24ch]">
+                        {runningProcesses[0].description}
+                      </span>
+                    </>
+                  )}
+                </>
+              ) : activityTier === "stalled" ? (
                 <span>
                   No activity for {formatElapsed(sinceActivity)} — the agent may be stuck
                 </span>

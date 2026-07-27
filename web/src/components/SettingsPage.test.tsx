@@ -365,12 +365,145 @@ describe("SettingsPage", () => {
       updateChannel: "stable",
       publicUrl: "",
       proactiveKeepaliveEnabled: false,
+      wedgeKillEnabled: true,
     });
     render(<SettingsPage />);
     await screen.findByText("Anthropic key configured");
 
     const toggle = screen.getByRole("switch", { name: /Proactive keepalive relaunch/i });
     expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  // The wedge-kill switch exists so the kill path can be disabled and tested
+  // empirically: every process it has killed so far turned out to be healthy,
+  // so it is plausible the wedge it guards against no longer occurs on current
+  // CLI versions. Defaults to on, preserving existing behaviour.
+  it("toggles wedge-kill and persists it via updateSettings", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Kill wedged CLI processes/i });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ wedgeKillEnabled: false });
+    });
+  });
+
+  it("reflects wedgeKillEnabled=false loaded from the server", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      updateChannel: "stable",
+      publicUrl: "",
+      proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: false,
+    });
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Kill wedged CLI processes/i });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  // These toggles update optimistically, so a failed save must roll the switch
+  // back. Without the rollback the UI would claim a setting is off while the
+  // server still has it on — worse than the save failing visibly.
+  it("rolls the wedge-kill switch back when the save fails", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Kill wedged CLI processes/i });
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("network down"));
+
+    fireEvent.click(toggle);
+    // Optimistically flips off…
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    // …then reverts once the save rejects.
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+  });
+
+  it("rolls the keepalive switch back when the save fails", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Proactive keepalive relaunch/i });
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("network down"));
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+  });
+
+  // AI-validation and dashboard controls share the same optimistic-update
+  // shape as the switches above: apply locally, persist, revert on failure.
+  // Their revert paths were previously untested.
+  it("toggles nightly dashboard updates and reverts on save failure", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("button", { name: /Nightly dashboard updates/i });
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ dashboardEnabled: true });
+    });
+    // Scoped to this button — several controls render an "On"/"Off" span.
+    await waitFor(() => expect(toggle.textContent).toContain("On"));
+
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("nope"));
+    fireEvent.click(toggle);
+    // The optimistic flip to Off is undone, so the UI does not claim a value
+    // the server rejected.
+    await waitFor(() => expect(toggle.textContent).toContain("On"));
+  });
+
+  it("persists the dashboard model and reverts it on save failure", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const select = screen.getByLabelText(/Summarization model/i) as HTMLSelectElement;
+    const original = select.value;
+
+    fireEvent.change(select, { target: { value: "claude-sonnet-4-6" } });
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ dashboardModel: "claude-sonnet-4-6" });
+    });
+
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("nope"));
+    fireEvent.change(select, { target: { value: "claude-haiku-4-5" } });
+    await waitFor(() => expect(select.value).toBe("claude-sonnet-4-6"));
+    expect(original).toBeTruthy();
+  });
+
+  it("toggles AI validation and reverts on save failure", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      updateChannel: "stable",
+      publicUrl: "",
+      proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
+      aiValidationEnabled: false,
+    });
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("button", { name: /AI Validation Mode/i });
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("nope"));
+    fireEvent.click(toggle);
+
+    // The optimistic flip is undone, so the UI never claims a setting the
+    // server did not accept.
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ aiValidationEnabled: true });
+    });
   });
 
   it("toggles telemetry preference from settings", async () => {
@@ -1172,6 +1305,25 @@ describe("SettingsPage", () => {
     expect(webhooksSection).toBeInTheDocument();
 
     const results = await axe(webhooksSection!);
+    expect(results).toHaveNoViolations();
+  });
+
+  // Axe scan covering the General section, which now hosts the wedge-kill
+  // switch alongside the keepalive one — both are role="switch" with
+  // aria-checked, so this guards their labelling and roles.
+  it("passes axe accessibility checks for the General section", async () => {
+    const { axe } = await import("vitest-axe");
+
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const generalSection = document.getElementById("general");
+    expect(generalSection).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: /Kill wedged CLI processes/i }),
+    ).toBeInTheDocument();
+
+    const results = await axe(generalSection!);
     expect(results).toHaveNoViolations();
   });
 

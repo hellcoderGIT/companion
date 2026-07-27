@@ -50,6 +50,7 @@ vi.mock("./settings-manager.js", () => ({
     openaiApiKey: "",
     onboardingCompleted: false,
     proactiveKeepaliveEnabled: true,
+    wedgeKillEnabled: true,
   })),
 }));
 
@@ -247,6 +248,7 @@ describe("SessionOrchestrator", () => {
       openaiApiKey: "",
       onboardingCompleted: false,
       proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
     } as any);
     vi.mocked(containerManager.createContainer).mockReturnValue({
       containerId: "cid-1",
@@ -1831,6 +1833,7 @@ describe("SessionOrchestrator", () => {
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         ...settingsManager.getSettings(),
         proactiveKeepaliveEnabled: false,
+        wedgeKillEnabled: true,
       });
       deps.launcher.getSession.mockReturnValue({
         archived: false,

@@ -34,6 +34,7 @@ export function registerSettingsRoutes(api: Hono): void {
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
       proactiveKeepaliveEnabled: settings.proactiveKeepaliveEnabled,
+      wedgeKillEnabled: settings.wedgeKillEnabled,
       cliBridgeMode: settings.cliBridgeMode,
     });
   });
@@ -132,6 +133,9 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.proactiveKeepaliveEnabled !== undefined && typeof body.proactiveKeepaliveEnabled !== "boolean") {
       return c.json({ error: "proactiveKeepaliveEnabled must be a boolean" }, 400);
     }
+    if (body.wedgeKillEnabled !== undefined && typeof body.wedgeKillEnabled !== "boolean") {
+      return c.json({ error: "wedgeKillEnabled must be a boolean" }, 400);
+    }
     if (body.cliBridgeMode !== undefined && body.cliBridgeMode !== "loopback" && body.cliBridgeMode !== "jsonHandoff") {
       return c.json({ error: "cliBridgeMode must be 'loopback' or 'jsonHandoff'" }, 400);
     }
@@ -152,6 +156,7 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.updateChannel !== undefined
       || body.dockerAutoUpdate !== undefined
       || body.proactiveKeepaliveEnabled !== undefined
+      || body.wedgeKillEnabled !== undefined
       || body.cliBridgeMode !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
@@ -266,6 +271,10 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.proactiveKeepaliveEnabled === "boolean"
           ? body.proactiveKeepaliveEnabled
           : undefined,
+      wedgeKillEnabled:
+        typeof body.wedgeKillEnabled === "boolean"
+          ? body.wedgeKillEnabled
+          : undefined,
       cliBridgeMode:
         body.cliBridgeMode === "loopback" || body.cliBridgeMode === "jsonHandoff"
           ? (body.cliBridgeMode as CliBridgeMode)
@@ -299,6 +308,7 @@ export function registerSettingsRoutes(api: Hono): void {
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
       proactiveKeepaliveEnabled: settings.proactiveKeepaliveEnabled,
+      wedgeKillEnabled: settings.wedgeKillEnabled,
       cliBridgeMode: settings.cliBridgeMode,
     });
   });

@@ -461,6 +461,8 @@ export interface AppSettings {
   updateChannel: "stable" | "prerelease";
   dockerAutoUpdate: boolean;
   proactiveKeepaliveEnabled: boolean;
+  /** When false, a CLI whose stdout closes but does not exit is left alone instead of killed. */
+  wedgeKillEnabled: boolean;
   cliBridgeMode: "loopback" | "jsonHandoff";
 }
 
@@ -1083,6 +1085,7 @@ export const api = {
     updateChannel?: "stable" | "prerelease";
     dockerAutoUpdate?: boolean;
     proactiveKeepaliveEnabled?: boolean;
+    wedgeKillEnabled?: boolean;
     cliBridgeMode?: "loopback" | "jsonHandoff";
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>

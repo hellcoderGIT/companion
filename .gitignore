@@ -15,3 +15,7 @@ docs/mocks/
 docs/repo-only/
 scripts/test-codex-*.ts
 web/dev-dist/
+
+# Coverage output
+web/coverage/
+.companion-uploads/

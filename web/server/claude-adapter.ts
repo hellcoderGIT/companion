@@ -47,6 +47,7 @@ import type { SocketData } from "./ws-bridge-types.js";
 import type { PendingControlRequest } from "./ws-bridge-types.js";
 import type { RecorderManager } from "./recorder.js";
 import { captureProcState, hasLiveDescendants, countDescendants } from "./proc-diagnostics.js";
+import { getSettings } from "./settings-manager.js";
 import { parseNDJSON, isDuplicateCLIMessage } from "./ws-bridge-cli-ingest.js";
 import type { CLIDedupState } from "./ws-bridge-cli-ingest.js";
 import { reportProtocolDrift } from "./protocol-monitor.js";
@@ -351,7 +352,20 @@ export class ClaudeAdapter implements IBackendAdapter {
       //   2. Otherwise (mid-stream EOF) give it a short grace; kill only if it
       //      is STILL alive afterwards, so a true wedge can't block recovery.
       const proc = this.stdioProc;
-      if (proc && proc.exitCode === null && !proc.killed) {
+      // Escape hatch: the whole kill path exists for a wedge that may no longer
+      // occur on current CLI versions — every kill sampled since the /proc
+      // instrumentation landed has been a healthy process. Disabling this leaves
+      // the process to exit on its own; the transport is still torn down and the
+      // session still relaunches, so the only thing lost is forced recovery from
+      // a wedge that may be hypothetical.
+      const wedgeKillEnabled = getSettings().wedgeKillEnabled !== false;
+      if (proc && proc.exitCode === null && !proc.killed && !wedgeKillEnabled) {
+        log.info("claude-adapter", "stdout closed but wedge-kill is disabled; leaving process alone", {
+          sessionId: this.sessionId,
+          pid: proc.pid,
+          proc: captureProcState(proc.pid),
+        });
+      } else if (proc && proc.exitCode === null && !proc.killed) {
         // Which grace applies is decided by whether teardown is actually in
         // progress, NOT by whether the last message happened to be a `result`.
         //
