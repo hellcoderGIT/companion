@@ -1925,6 +1925,55 @@ describe("PUT /api/settings", () => {
     expect(json).toEqual({ error: "updateChannel must be 'stable' or 'prerelease'" });
   });
 
+  // Type validation for every settings field. Each branch returns 400 before
+  // touching updateSettings, so a malformed client cannot write a bad value
+  // into settings.json (which is read at startup and would persist the damage).
+  it.each([
+    ["anthropicApiKey", 123, "anthropicApiKey must be a string"],
+    ["anthropicModel", 123, "anthropicModel must be a string"],
+    ["wedgeKillEnabled", "yes", "wedgeKillEnabled must be a boolean"],
+    ["proactiveKeepaliveEnabled", "yes", "proactiveKeepaliveEnabled must be a boolean"],
+    ["cliBridgeMode", "nonsense", "cliBridgeMode must be 'loopback' or 'jsonHandoff'"],
+  ])("rejects a non-conforming %s with 400", async (field, value, expectedError) => {
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe(expectedError);
+    // The rejection must happen before any write is attempted.
+    expect(settingsManager.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty body with 400", async () => {
+    // Guards the hasAnyField check: an empty PUT would otherwise write a
+    // no-op settings object and bump updatedAt for no reason.
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("At least one settings field is required");
+  });
+
+  it("rejects a malformed JSON body with 400", async () => {
+    // c.req.json() is guarded by .catch(() => ({})), so invalid JSON must fall
+    // through to the same "no fields" rejection rather than throwing a 500.
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: "{not json",
+    });
+
+    expect(res.status).toBe(400);
+  });
+
   // Verifies that PUT /api/settings accepts a publicUrl string and passes
   // it (trimmed, trailing-slash-stripped) to updateSettings
   it("accepts and saves publicUrl string", async () => {
