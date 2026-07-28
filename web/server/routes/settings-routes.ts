@@ -34,6 +34,7 @@ export function registerSettingsRoutes(api: Hono): void {
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
       proactiveKeepaliveEnabled: settings.proactiveKeepaliveEnabled,
+      keepaliveDetachedSessions: settings.keepaliveDetachedSessions,
       wedgeKillEnabled: settings.wedgeKillEnabled,
       silenceProbeEnabled: settings.silenceProbeEnabled,
       cliBridgeMode: settings.cliBridgeMode,
@@ -134,6 +135,9 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.proactiveKeepaliveEnabled !== undefined && typeof body.proactiveKeepaliveEnabled !== "boolean") {
       return c.json({ error: "proactiveKeepaliveEnabled must be a boolean" }, 400);
     }
+    if (body.keepaliveDetachedSessions !== undefined && typeof body.keepaliveDetachedSessions !== "boolean") {
+      return c.json({ error: "keepaliveDetachedSessions must be a boolean" }, 400);
+    }
     if (body.wedgeKillEnabled !== undefined && typeof body.wedgeKillEnabled !== "boolean") {
       return c.json({ error: "wedgeKillEnabled must be a boolean" }, 400);
     }
@@ -160,6 +164,7 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.updateChannel !== undefined
       || body.dockerAutoUpdate !== undefined
       || body.proactiveKeepaliveEnabled !== undefined
+      || body.keepaliveDetachedSessions !== undefined
       || body.wedgeKillEnabled !== undefined
       || body.silenceProbeEnabled !== undefined
       || body.cliBridgeMode !== undefined;
@@ -276,6 +281,10 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.proactiveKeepaliveEnabled === "boolean"
           ? body.proactiveKeepaliveEnabled
           : undefined,
+      keepaliveDetachedSessions:
+        typeof body.keepaliveDetachedSessions === "boolean"
+          ? body.keepaliveDetachedSessions
+          : undefined,
       wedgeKillEnabled:
         typeof body.wedgeKillEnabled === "boolean"
           ? body.wedgeKillEnabled
@@ -317,6 +326,7 @@ export function registerSettingsRoutes(api: Hono): void {
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
       proactiveKeepaliveEnabled: settings.proactiveKeepaliveEnabled,
+      keepaliveDetachedSessions: settings.keepaliveDetachedSessions,
       wedgeKillEnabled: settings.wedgeKillEnabled,
       silenceProbeEnabled: settings.silenceProbeEnabled,
       cliBridgeMode: settings.cliBridgeMode,
