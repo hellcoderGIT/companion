@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.111.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.111.2...companion-v0.111.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* **session:** stop killing healthy sessions — browser-aware keepalive + tool-call probe grace ([#5](https://github.com/hellcoderGIT/companion/issues/5)) ([#84](https://github.com/hellcoderGIT/companion/issues/84)) ([a017f59](https://github.com/hellcoderGIT/companion/commit/a017f59c8b4a814059c5e2ee1fd2d23ac7ac8a53))
+
 ## [0.111.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.111.1...companion-v0.111.2) (2026-07-28)
 
 
