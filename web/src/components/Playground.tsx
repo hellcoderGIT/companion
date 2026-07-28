@@ -2317,6 +2317,28 @@ export function Playground() {
                 <span>No activity for 16m 12s &mdash; the agent may be stuck</span>
               </div>
             </Card>
+            <Card label="Plan rate limit — warning (95% of the 5h window)">
+              <div className="px-4 py-2.5 space-y-1 max-w-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-cc-muted uppercase tracking-wider">5h Limit</span>
+                  <span className="text-[11px] text-cc-muted tabular-nums">95% <span className="ml-1">(2h14m)</span></span>
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-cc-hover overflow-hidden">
+                  <div className="h-full rounded-full bg-cc-error" style={{ width: "95%" }} />
+                </div>
+              </div>
+            </Card>
+            <Card label="Plan rate limit — rejected (no utilization is sent)">
+              <div className="px-4 py-2.5 space-y-2 max-w-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-cc-muted uppercase tracking-wider">Plan Limit</span>
+                  <span className="text-[11px] text-cc-error tabular-nums">rate limited · resets 47m</span>
+                </div>
+                <p className="text-[11px] text-cc-error">
+                  The API is refusing requests for this plan window — resets in 47m.
+                </p>
+              </div>
+            </Card>
             <Card label="Generation stats bar — quiet, naming the running tool">
               <div className="flex items-center gap-2 text-[11px] text-cc-muted font-mono-code pl-10 stats-glow py-1">
                 <span className="inline-block w-2 h-2 rounded-full bg-cc-primary animate-[typing-breathe_1.5s_ease-in-out_infinite]" />

@@ -1203,6 +1203,13 @@ function handleParsedMessage(
       break;
     }
 
+    case "rate_limit": {
+      // Plan-window usage from the API. Previously discarded server-side, so
+      // the UI could not tell a throttled account from a healthy one.
+      store.setRateLimit(sessionId, data.info);
+      break;
+    }
+
     case "message_history": {
       const chatMessages: ChatMessage[] = [];
       const toolActivityById = new Map<string, ToolActivityEntry>();

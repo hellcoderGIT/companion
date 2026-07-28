@@ -30,6 +30,7 @@ import type {
   CLIControlResponseMessage,
   CLIAuthStatusMessage,
   CLIControlCancelRequestMessage,
+  CLIRateLimitEventMessage,
   CLIStreamlinedTextMessage,
   CLIStreamlinedToolUseSummaryMessage,
   CLIPromptSuggestionMessage,
@@ -1394,10 +1395,28 @@ export class ClaudeAdapter implements IBackendAdapter {
         // to avoid rendering raw tool_result JSON in the chat UI.
         break;
 
-      case "rate_limit_event":
-        // Rate-limit status from Claude API (allowed/throttled). Silently
-        // consumed — no user-facing action needed.
+      case "rate_limit_event": {
+        // Previously discarded. It is the only signal we get about plan-window
+        // usage, and recorded traffic shows it does fire in anger (14 warning
+        // and 3 rejected events across 200 samples) — while the UI said nothing
+        // and the logs kept no record.
+        const info = (msg as CLIRateLimitEventMessage).rate_limit_info ?? {};
+        // Only non-`allowed` states are logged: `allowed` arrives constantly and
+        // would drown the log, whereas a warning or rejection is exactly what a
+        // later investigation needs to find.
+        if (info.status && info.status !== "allowed") {
+          log.warn("claude-adapter", "API rate limit", {
+            sessionId: this.sessionId,
+            status: info.status,
+            utilization: info.utilization,
+            rateLimitType: info.rateLimitType,
+            resetsAt: info.resetsAt,
+            isUsingOverage: info.isUsingOverage,
+          });
+        }
+        this.browserMessageCb?.({ type: "rate_limit", info });
         break;
+      }
 
       case "control_cancel_request":
         this.handleControlCancelRequest(msg as CLIControlCancelRequestMessage);

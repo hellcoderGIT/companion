@@ -74,6 +74,7 @@ interface MockStoreState {
     context_used_percent?: number;
   }>;
   sdkSessions: { sessionId: string; backendType?: string; cwd?: string; gitBranch?: string }[];
+  rateLimit: Map<string, { status?: string; utilization?: number; resetsAt?: number; rateLimitType?: string }>;
   taskPanelOpen: boolean;
   setTaskPanelOpen: ReturnType<typeof vi.fn>;
   taskPanelConfig: TaskPanelConfig;
@@ -98,6 +99,7 @@ function resetStore(overrides: Partial<MockStoreState> = {}) {
     sessionTasks: new Map(),
     sessions: new Map([["s1", { backend_type: "codex" }]]),
     sdkSessions: [],
+    rateLimit: new Map(),
     taskPanelOpen: true,
     setTaskPanelOpen: vi.fn(),
     taskPanelConfig: getDefaultConfig(),
@@ -1597,5 +1599,99 @@ describe("ServerMemorySection", () => {
     resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
     render(<TaskPanel sessionId="s1" />);
     expect(screen.queryByText("Memory")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Claude plan-window rate limit.
+ *
+ * The CLI emits `rate_limit_event` constantly and companion used to discard it,
+ * so a throttled account was indistinguishable from a healthy one. Recorded
+ * traffic contained 14 `allowed_warning` and 3 `rejected` events that the UI
+ * never surfaced.
+ */
+describe("TaskPanel - Claude rate limit", () => {
+  function claudeSession() {
+    mockState.sessions = new Map([["s1", { backend_type: "claude" }]]);
+  }
+
+  it("renders nothing while the API reports allowed", () => {
+    // `allowed` arrives continuously and carries no utilization — showing a bar
+    // for it would be permanent noise with no number behind it.
+    claudeSession();
+    mockState.rateLimit = new Map([["s1", { status: "allowed", rateLimitType: "five_hour" }]]);
+
+    render(<TaskPanel sessionId="s1" />);
+
+    expect(screen.queryByTestId("claude-rate-limit")).toBeNull();
+  });
+
+  it("renders nothing when no rate-limit event has arrived", () => {
+    claudeSession();
+    mockState.rateLimit = new Map();
+
+    render(<TaskPanel sessionId="s1" />);
+
+    expect(screen.queryByTestId("claude-rate-limit")).toBeNull();
+  });
+
+  it("shows a meter with utilization and reset countdown on a warning", () => {
+    // Shape taken verbatim from a recorded allowed_warning event.
+    claudeSession();
+    mockState.rateLimit = new Map([["s1", {
+      status: "allowed_warning",
+      utilization: 0.95,
+      rateLimitType: "five_hour",
+      resetsAt: Math.floor(Date.now() / 1000) + 2 * 3600,
+    }]]);
+
+    render(<TaskPanel sessionId="s1" />);
+
+    expect(screen.getByTestId("claude-rate-limit")).toBeInTheDocument();
+    expect(screen.getByText("5h Limit")).toBeInTheDocument();
+    // 0.95 utilization must render as 95%, not 0.95%.
+    expect(screen.getByText(/95%/)).toBeInTheDocument();
+    const meter = screen.getByRole("meter", { name: /5h Limit/i });
+    expect(meter).toHaveAttribute("aria-valuenow", "95");
+  });
+
+  it("states the limit plainly when rejected, since no utilization is sent", () => {
+    // Rejected events carry no utilization — a bar would have nothing behind it.
+    claudeSession();
+    mockState.rateLimit = new Map([["s1", {
+      status: "rejected",
+      rateLimitType: "five_hour",
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+    }]]);
+
+    render(<TaskPanel sessionId="s1" />);
+
+    expect(screen.getByText("rate limited", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText(/refusing requests/i)).toBeInTheDocument();
+    expect(screen.queryByRole("meter", { name: /Limit/i })).toBeNull();
+  });
+
+  it("does not render for Codex sessions, which have their own meters", () => {
+    mockState.sessions = new Map([["s1", { backend_type: "codex" }]]);
+    mockState.rateLimit = new Map([["s1", { status: "rejected" }]]);
+
+    render(<TaskPanel sessionId="s1" />);
+
+    expect(screen.queryByTestId("claude-rate-limit")).toBeNull();
+  });
+
+  it("passes axe accessibility checks with the rate-limit meter shown", async () => {
+    const { axe } = await import("vitest-axe");
+    claudeSession();
+    mockState.rateLimit = new Map([["s1", {
+      status: "allowed_warning",
+      utilization: 0.95,
+      rateLimitType: "five_hour",
+      resetsAt: Math.floor(Date.now() / 1000) + 1800,
+    }]]);
+
+    const { container } = render(<TaskPanel sessionId="s1" />);
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });
