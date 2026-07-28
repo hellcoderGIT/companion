@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.112.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.111.3...companion-v0.112.0) (2026-07-28)
+
+
+### Features
+
+* **ui:** name the running tool instead of only reporting silence ([#87](https://github.com/hellcoderGIT/companion/issues/87)) ([3ecf283](https://github.com/hellcoderGIT/companion/commit/3ecf283d7a2b6557c670cfec220f5deb28239ff5))
+
 ## [0.111.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.111.2...companion-v0.111.3) (2026-07-28)
 
 
