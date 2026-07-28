@@ -366,6 +366,7 @@ describe("SettingsPage", () => {
       publicUrl: "",
       proactiveKeepaliveEnabled: false,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
     });
     render(<SettingsPage />);
     await screen.findByText("Anthropic key configured");
@@ -402,6 +403,7 @@ describe("SettingsPage", () => {
       publicUrl: "",
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: false,
+      silenceProbeEnabled: true,
     });
     render(<SettingsPage />);
     await screen.findByText("Anthropic key configured");
@@ -490,6 +492,7 @@ describe("SettingsPage", () => {
       publicUrl: "",
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       aiValidationEnabled: false,
     });
     render(<SettingsPage />);
@@ -504,6 +507,31 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(mockApi.updateSettings).toHaveBeenCalledWith({ aiValidationEnabled: true });
     });
+  });
+
+  it("toggles the silence probe and persists it via updateSettings", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Probe silent CLI processes/i });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ silenceProbeEnabled: false });
+    });
+  });
+
+  it("rolls the silence-probe switch back when the save fails", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Probe silent CLI processes/i });
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("network down"));
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
   });
 
   it("toggles telemetry preference from settings", async () => {

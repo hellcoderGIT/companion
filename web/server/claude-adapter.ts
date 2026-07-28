@@ -102,6 +102,33 @@ const SIGKILL_ESCALATION_MS = Number(process.env.COMPANION_SIGKILL_ESCALATION_MS
  */
 const TEARDOWN_MAX_MS = Number(process.env.COMPANION_TEARDOWN_MAX_MS) || 660_000;
 
+/**
+ * Silence-probe thresholds.
+ *
+ * A separate failure mode from the wedge: the CLI's stdout stays **open** and
+ * the process stays healthy (S/ep_poll, low CPU), but it stops emitting
+ * entirely — observed mid-`thinking_delta`, with its upstream HTTPS sockets
+ * ESTABLISHED and idle (Recv-Q/Send-Q 0) and no client-side timeout ever
+ * firing. Because stdout never closes, none of the stdout-EOF machinery runs:
+ * no warning, no kill, no relaunch. The session hangs forever and the UI shows
+ * "Still working…" indefinitely.
+ *
+ * A stalled CLI also stops answering control requests, while a healthy one
+ * replies promptly. So after SILENCE_PROBE_AFTER_MS of total silence we send a
+ * cheap control_request; if nothing at all comes back within
+ * SILENCE_PROBE_TIMEOUT_MS we treat the transport as dead and hand off to the
+ * existing relaunch path, which replays the in-flight turn rather than losing
+ * it.
+ *
+ * Thresholds are deliberately generous (~3 minutes end to end). Every previous
+ * timer in this file has turned out to be too aggressive and killed healthy
+ * processes, and the cost of being wrong here is the same: a needless restart.
+ * Any inbound frame — including `keep_alive` — counts as proof of life.
+ */
+const SILENCE_PROBE_AFTER_MS = Number(process.env.COMPANION_SILENCE_PROBE_AFTER_MS) || 120_000;
+const SILENCE_PROBE_TIMEOUT_MS = Number(process.env.COMPANION_SILENCE_PROBE_TIMEOUT_MS) || 60_000;
+const SILENCE_CHECK_INTERVAL_MS = Number(process.env.COMPANION_SILENCE_CHECK_INTERVAL_MS) || 15_000;
+
 /** How often to re-check the descendant count while waiting for teardown. */
 const TEARDOWN_POLL_MS = Number(process.env.COMPANION_TEARDOWN_POLL_MS) || 500;
 
@@ -141,6 +168,11 @@ export class ClaudeAdapter implements IBackendAdapter {
    *  (`keep_alive`, `system` status/keepalive) does not reset it; any
    *  substantive turn activity does. */
   private lastInboundWasResult = false;
+  /** Timestamp of the last inbound frame of any kind, for the silence probe. */
+  private lastInboundAt = Date.now();
+  /** When the outstanding silence probe was sent, or null if none is in flight. */
+  private probeSentAt: number | null = null;
+  private silenceTimer: ReturnType<typeof setInterval> | null = null;
 
   // Callbacks registered by the bridge via on*() methods
   private browserMessageCb: ((msg: BrowserIncomingMessage) => void) | null = null;
@@ -273,6 +305,10 @@ export class ClaudeAdapter implements IBackendAdapter {
     const stdout = proc.stdout as ReadableStream<Uint8Array>;
     void this.readStdioStdout(stdout);
 
+    // Watch for the CLI going silent while stdout stays open — invisible to the
+    // stdout-EOF path, which only runs when the stream actually closes.
+    this.startSilenceProbe();
+
     // Flush anything queued before the transport attached (applies the lazy
     // `initialize` handshake before the first real message).
     if (this.pendingMessages.length > 0) {
@@ -308,6 +344,7 @@ export class ClaudeAdapter implements IBackendAdapter {
   private notifyStdioDisconnect(): void {
     this.stdioConnected = false;
     this.stdioWriter = null;
+    this.stopSilenceProbe();
     if (this.disconnectFired) return;
     this.disconnectFired = true;
     this.disconnectCb?.();
@@ -439,6 +476,68 @@ export class ClaudeAdapter implements IBackendAdapter {
 
   /** Why the last teardown wait ended, for the kill warning. */
   private lastTeardownOutcome: string | undefined;
+
+  /**
+   * Start the silence probe for the stdio transport.
+   *
+   * Detects a CLI that has gone silent with its stdout still **open** — the one
+   * failure mode none of the stdout-EOF machinery can see, because nothing ever
+   * closes. Left alone the session hangs indefinitely with no error surfaced.
+   */
+  private startSilenceProbe(): void {
+    this.stopSilenceProbe();
+    this.lastInboundAt = Date.now();
+    this.probeSentAt = null;
+    this.silenceTimer = setInterval(() => this.checkSilence(), SILENCE_CHECK_INTERVAL_MS);
+    // Never hold the process open for a diagnostic timer.
+    (this.silenceTimer as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private stopSilenceProbe(): void {
+    if (this.silenceTimer) {
+      clearInterval(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+    this.probeSentAt = null;
+  }
+
+  private checkSilence(): void {
+    if (this.transportKind !== "stdio" || !this.stdioConnected) return;
+    if (getSettings().silenceProbeEnabled === false) return;
+
+    const now = Date.now();
+
+    // An unanswered probe is the actual failure signal: a healthy CLI replies
+    // to control requests promptly even while working.
+    if (this.probeSentAt !== null) {
+      if (now - this.probeSentAt >= SILENCE_PROBE_TIMEOUT_MS) {
+        log.warn("claude-adapter", "CLI silent with stdout open and probe unanswered; treating transport as dead", {
+          sessionId: this.sessionId,
+          pid: this.stdioProc?.pid,
+          silentForMs: now - this.lastInboundAt,
+          probeUnansweredForMs: now - this.probeSentAt,
+          proc: captureProcState(this.stdioProc?.pid),
+        });
+        this.stopSilenceProbe();
+        // Hand off to the existing recovery path, which relaunches and replays
+        // the in-flight turn rather than losing it.
+        this.notifyStdioDisconnect();
+      }
+      return;
+    }
+
+    if (now - this.lastInboundAt >= SILENCE_PROBE_AFTER_MS) {
+      this.probeSentAt = now;
+      log.info("claude-adapter", "CLI silent; sending liveness probe", {
+        sessionId: this.sessionId,
+        pid: this.stdioProc?.pid,
+        silentForMs: now - this.lastInboundAt,
+      });
+      // mcp_status is cheap and side-effect free. We do not care about the
+      // payload — any inbound frame clears probeSentAt in routeCLIMessage.
+      this.sendControlRequest({ subtype: "mcp_status" });
+    }
+  }
 
   /**
    * Wait for a process to exit after its stdout transport has died.
@@ -955,6 +1054,13 @@ export class ClaudeAdapter implements IBackendAdapter {
   // -- CLI message routing (NDJSON -> BrowserIncomingMessage) -----------------
 
   private routeCLIMessage(msg: CLIMessage): void {
+    // Any frame at all — keep_alive included — proves the transport is alive
+    // and clears any outstanding silence probe. This is deliberately broader
+    // than the activity tracking below: `keep_alive` is not *work*, but it is
+    // proof the CLI is still answering, which is all the probe asks.
+    this.lastInboundAt = Date.now();
+    this.probeSentAt = null;
+
     // Track activity for idle detection (skip keepalives -- they don't indicate real work)
     if (msg.type !== "keep_alive") {
       this.onActivityUpdate?.();

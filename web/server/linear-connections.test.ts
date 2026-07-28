@@ -69,6 +69,7 @@ beforeEach(() => {
     dockerAutoUpdate: false,
     proactiveKeepaliveEnabled: true,
     wedgeKillEnabled: true,
+    silenceProbeEnabled: true,
     updatedAt: 0,
   });
 });
@@ -206,6 +207,7 @@ describe("linear-connections", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
     // Need to reset so migration runs with updated mock
@@ -253,6 +255,7 @@ describe("linear-connections", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
     _resetForTest(join(tempDir, "linear-connections-migrate.json"));
@@ -319,6 +322,7 @@ describe("linear-connections", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 

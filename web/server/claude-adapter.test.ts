@@ -33,13 +33,18 @@ vi.mock("./proc-diagnostics.js", async (importOriginal) => ({
   countDescendants: mockCountDescendants,
 }));
 
+// Settings are stubbed so the wedge-kill and silence-probe switches can be
+// driven per test. Both default to enabled, matching production.
+const mockSettings = vi.hoisted(() => ({
+  aiValidationEnabled: false,
+  aiValidationAutoApprove: false,
+  aiValidationAutoDeny: false,
+  anthropicApiKey: "",
+  wedgeKillEnabled: true,
+  silenceProbeEnabled: true,
+}));
 vi.mock("./settings-manager.js", () => ({
-  getSettings: () => ({
-    aiValidationEnabled: false,
-    aiValidationAutoApprove: false,
-    aiValidationAutoDeny: false,
-    anthropicApiKey: "",
-  }),
+  getSettings: () => mockSettings,
   DEFAULT_ANTHROPIC_MODEL: "claude-sonnet-4-6",
 }));
 
@@ -1763,5 +1768,105 @@ describe("stdio transport disconnect propagation", () => {
 
     expect(proc.kill).not.toHaveBeenCalled();
     expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Silence probe — a failure mode none of the stdout-EOF machinery can see.
+ *
+ * Reported from production: the CLI stops emitting mid-`thinking_delta` while
+ * its stdout stays OPEN and the process stays healthy (S/ep_poll, 12s CPU over
+ * 13min), with upstream HTTPS sockets ESTABLISHED and idle. Because nothing
+ * ever closes the stream, no wedge warning, kill, relaunch or error fires, and
+ * the session hangs indefinitely showing "Still working…".
+ *
+ * A stalled CLI also stops answering control requests, which is the signal the
+ * probe keys on.
+ */
+describe("stdio silence probe", () => {
+  let adapter: ClaudeAdapter;
+  let disconnectCb: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    adapter = new ClaudeAdapter("silence-session");
+    disconnectCb = vi.fn();
+    adapter.onDisconnect(disconnectCb as unknown as () => void);
+    mockSettings.silenceProbeEnabled = true;
+  });
+
+  afterEach(() => {
+    mockSettings.silenceProbeEnabled = true;
+    vi.useRealTimers();
+  });
+
+  it("declares the transport dead when a silent CLI never answers the probe", async () => {
+    vi.useFakeTimers();
+    const { proc } = createMockProc();
+    adapter.attachStdio(proc);
+    expect(adapter.isConnected()).toBe(true);
+
+    // Silence short of the probe threshold: nothing happens yet.
+    await vi.advanceTimersByTimeAsync(110_000);
+    expect(disconnectCb).not.toHaveBeenCalled();
+
+    // Past the threshold the probe is sent, but the CLI never replies.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(disconnectCb).not.toHaveBeenCalled();
+
+    // Past the probe timeout the transport is treated as dead, handing off to
+    // the relaunch path that replays the in-flight turn.
+    await vi.advanceTimersByTimeAsync(65_000);
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+    expect(adapter.isConnected()).toBe(false);
+  });
+
+  it("does NOT fire while the CLI keeps emitting", async () => {
+    // The critical false-positive guard. A working session must never be torn
+    // down — every previous timer in this file was too aggressive and killed
+    // healthy processes.
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    for (let i = 0; i < 10; i++) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      pushStdout(
+        JSON.stringify({ type: "keep_alive", uuid: `ka-${i}`, session_id: "s" }) + "\n",
+      );
+    }
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // 10+ minutes elapsed, but the stream kept proving life.
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+  });
+
+  it("treats a late reply as proof of life and cancels the pending probe", async () => {
+    // The CLI answers *after* the probe goes out but before the timeout. That
+    // is a slow CLI, not a dead one, and must not be torn down.
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    await vi.advanceTimersByTimeAsync(130_000); // probe sent
+    pushStdout(
+      JSON.stringify({ type: "keep_alive", uuid: "late", session_id: "s" }) + "\n",
+    );
+    await vi.advanceTimersByTimeAsync(65_000); // past what would have been the timeout
+
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+  });
+
+  it("does nothing when the silence probe is disabled", async () => {
+    vi.useFakeTimers();
+    mockSettings.silenceProbeEnabled = false;
+    const { proc } = createMockProc();
+    adapter.attachStdio(proc);
+
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
   });
 });

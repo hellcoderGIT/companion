@@ -35,6 +35,7 @@ export function registerSettingsRoutes(api: Hono): void {
       dockerAutoUpdate: settings.dockerAutoUpdate,
       proactiveKeepaliveEnabled: settings.proactiveKeepaliveEnabled,
       wedgeKillEnabled: settings.wedgeKillEnabled,
+      silenceProbeEnabled: settings.silenceProbeEnabled,
       cliBridgeMode: settings.cliBridgeMode,
     });
   });
@@ -136,6 +137,9 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.wedgeKillEnabled !== undefined && typeof body.wedgeKillEnabled !== "boolean") {
       return c.json({ error: "wedgeKillEnabled must be a boolean" }, 400);
     }
+    if (body.silenceProbeEnabled !== undefined && typeof body.silenceProbeEnabled !== "boolean") {
+      return c.json({ error: "silenceProbeEnabled must be a boolean" }, 400);
+    }
     if (body.cliBridgeMode !== undefined && body.cliBridgeMode !== "loopback" && body.cliBridgeMode !== "jsonHandoff") {
       return c.json({ error: "cliBridgeMode must be 'loopback' or 'jsonHandoff'" }, 400);
     }
@@ -157,6 +161,7 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.dockerAutoUpdate !== undefined
       || body.proactiveKeepaliveEnabled !== undefined
       || body.wedgeKillEnabled !== undefined
+      || body.silenceProbeEnabled !== undefined
       || body.cliBridgeMode !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
@@ -275,6 +280,10 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.wedgeKillEnabled === "boolean"
           ? body.wedgeKillEnabled
           : undefined,
+      silenceProbeEnabled:
+        typeof body.silenceProbeEnabled === "boolean"
+          ? body.silenceProbeEnabled
+          : undefined,
       cliBridgeMode:
         body.cliBridgeMode === "loopback" || body.cliBridgeMode === "jsonHandoff"
           ? (body.cliBridgeMode as CliBridgeMode)
@@ -309,6 +318,7 @@ export function registerSettingsRoutes(api: Hono): void {
       dockerAutoUpdate: settings.dockerAutoUpdate,
       proactiveKeepaliveEnabled: settings.proactiveKeepaliveEnabled,
       wedgeKillEnabled: settings.wedgeKillEnabled,
+      silenceProbeEnabled: settings.silenceProbeEnabled,
       cliBridgeMode: settings.cliBridgeMode,
     });
   });

@@ -463,6 +463,8 @@ export interface AppSettings {
   proactiveKeepaliveEnabled: boolean;
   /** When false, a CLI whose stdout closes but does not exit is left alone instead of killed. */
   wedgeKillEnabled: boolean;
+  /** When false, a CLI that goes silent with stdout still open is left alone. */
+  silenceProbeEnabled: boolean;
   cliBridgeMode: "loopback" | "jsonHandoff";
 }
 
@@ -1086,6 +1088,7 @@ export const api = {
     dockerAutoUpdate?: boolean;
     proactiveKeepaliveEnabled?: boolean;
     wedgeKillEnabled?: boolean;
+    silenceProbeEnabled?: boolean;
     cliBridgeMode?: "loopback" | "jsonHandoff";
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>

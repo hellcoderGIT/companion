@@ -51,6 +51,7 @@ vi.mock("./settings-manager.js", () => ({
     onboardingCompleted: false,
     proactiveKeepaliveEnabled: true,
     wedgeKillEnabled: true,
+    silenceProbeEnabled: true,
   })),
 }));
 
@@ -249,6 +250,7 @@ describe("SessionOrchestrator", () => {
       onboardingCompleted: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
     } as any);
     vi.mocked(containerManager.createContainer).mockReturnValue({
       containerId: "cid-1",
@@ -1834,6 +1836,7 @@ describe("SessionOrchestrator", () => {
         ...settingsManager.getSettings(),
         proactiveKeepaliveEnabled: false,
         wedgeKillEnabled: true,
+        silenceProbeEnabled: true,
       });
       deps.launcher.getSession.mockReturnValue({
         archived: false,
