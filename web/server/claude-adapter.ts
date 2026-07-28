@@ -159,6 +159,18 @@ const SILENCE_CHECK_INTERVAL_MS = Number(process.env.COMPANION_SILENCE_CHECK_INT
  */
 const TURN_STALL_AFTER_MS = Number(process.env.COMPANION_TURN_STALL_AFTER_MS) || 300_000;
 
+/**
+ * How long a CLI with an outstanding tool call is allowed to stay silent before
+ * the liveness probe is permitted to escalate anyway.
+ *
+ * The CLI does not answer control requests while a synchronous tool runs, so
+ * during a long `Bash` call the probe goes unanswered for reasons that have
+ * nothing to do with health. Set above the CLI's own maximum background-command
+ * duration (10 minutes), on the same reasoning as TEARDOWN_MAX_MS: only a tool
+ * that blows this ceiling is treated as a genuine hang.
+ */
+const TOOL_CALL_PROBE_GRACE_MS = Number(process.env.COMPANION_TOOL_CALL_PROBE_GRACE_MS) || 660_000;
+
 /** How often to re-check the descendant count while waiting for teardown. */
 const TEARDOWN_POLL_MS = Number(process.env.COMPANION_TEARDOWN_POLL_MS) || 500;
 
@@ -626,6 +638,22 @@ export class ClaudeAdapter implements IBackendAdapter {
     // An unanswered probe is the actual failure signal: a healthy CLI replies
     // to control requests promptly even while working.
     if (this.probeSentAt !== null) {
+      // A long tool call is silence with a cause. The CLI does not service
+      // control requests while a synchronous tool runs, so an unanswered probe
+      // proves nothing here — and killing on it destroys a healthy session
+      // mid-work. Observed in production: a session running its test suite (a
+      // single ~200s Bash call) was declared dead at 182s of silence and
+      // relaunched, losing the turn.
+      //
+      // Bounded by TOOL_CALL_PROBE_GRACE_MS so a tool that never returns cannot
+      // suppress recovery forever; the ceiling sits above the CLI's own maximum
+      // background-command duration, matching TEARDOWN_MAX_MS's reasoning.
+      if (
+        this.pendingToolUses.size > 0 &&
+        now - this.lastInboundAt < TOOL_CALL_PROBE_GRACE_MS
+      ) {
+        return;
+      }
       if (now - this.probeSentAt >= SILENCE_PROBE_TIMEOUT_MS) {
         log.warn("claude-adapter", "CLI silent with stdout open and probe unanswered; treating transport as dead", {
           sessionId: this.sessionId,

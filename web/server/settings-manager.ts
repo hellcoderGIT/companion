@@ -93,6 +93,16 @@ export interface CompanionSettings {
    */
   proactiveKeepaliveEnabled: boolean;
   /**
+   * Also keep *detached* sessions (no browser attached) auto-relaunching.
+   *
+   * Off by default: relaunching a session nobody has open buys latency nobody
+   * is waiting for, while re-initialising its MCP servers each time. On a busy
+   * multi-session host that dominates CPU. Detached sessions still revive on
+   * demand the moment a message is sent to them. Agent/cron sessions are exempt
+   * from this gate and always keep alive.
+   */
+  keepaliveDetachedSessions: boolean;
+  /**
    * When true (default), a CLI whose stdout closes but which does not exit is
    * treated as wedged and killed so recovery can proceed.
    *
@@ -158,6 +168,7 @@ let settings: CompanionSettings = {
   updateChannel: "stable",
   dockerAutoUpdate: false,
   proactiveKeepaliveEnabled: true,
+  keepaliveDetachedSessions: false,
   wedgeKillEnabled: true,
   silenceProbeEnabled: true,
   cliBridgeMode: "loopback",
@@ -211,6 +222,7 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     updateChannel: raw?.updateChannel === "prerelease" ? "prerelease" : "stable",
     dockerAutoUpdate: typeof raw?.dockerAutoUpdate === "boolean" ? raw.dockerAutoUpdate : false,
     proactiveKeepaliveEnabled: typeof raw?.proactiveKeepaliveEnabled === "boolean" ? raw.proactiveKeepaliveEnabled : true,
+    keepaliveDetachedSessions: typeof raw?.keepaliveDetachedSessions === "boolean" ? raw.keepaliveDetachedSessions : false,
     wedgeKillEnabled: typeof raw?.wedgeKillEnabled === "boolean" ? raw.wedgeKillEnabled : true,
     silenceProbeEnabled: typeof raw?.silenceProbeEnabled === "boolean" ? raw.silenceProbeEnabled : true,
     cliBridgeMode: raw?.cliBridgeMode === "jsonHandoff" ? "jsonHandoff" : "loopback",
@@ -246,7 +258,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "wedgeKillEnabled" | "silenceProbeEnabled" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "keepaliveDetachedSessions" | "wedgeKillEnabled" | "silenceProbeEnabled" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -278,6 +290,7 @@ export function updateSettings(
     updateChannel: patch.updateChannel ?? settings.updateChannel,
     dockerAutoUpdate: patch.dockerAutoUpdate ?? settings.dockerAutoUpdate,
     proactiveKeepaliveEnabled: patch.proactiveKeepaliveEnabled ?? settings.proactiveKeepaliveEnabled,
+    keepaliveDetachedSessions: patch.keepaliveDetachedSessions ?? settings.keepaliveDetachedSessions,
     wedgeKillEnabled: patch.wedgeKillEnabled ?? settings.wedgeKillEnabled,
     silenceProbeEnabled: patch.silenceProbeEnabled ?? settings.silenceProbeEnabled,
     cliBridgeMode: patch.cliBridgeMode ?? settings.cliBridgeMode,
