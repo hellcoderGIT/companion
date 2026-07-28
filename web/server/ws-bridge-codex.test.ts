@@ -141,6 +141,7 @@ describe("attachCodexAdapterHandlers", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
   });
@@ -1133,6 +1134,7 @@ describe("attachCodexAdapterHandlers", () => {
         dockerAutoUpdate: false,
         proactiveKeepaliveEnabled: true,
         wedgeKillEnabled: true,
+        silenceProbeEnabled: true,
         updatedAt: 0,
       });
     }
@@ -1315,6 +1317,7 @@ describe("attachCodexAdapterHandlers", () => {
         dockerAutoUpdate: false,
         proactiveKeepaliveEnabled: true,
         wedgeKillEnabled: true,
+        silenceProbeEnabled: true,
         updatedAt: 0,
       });
 
@@ -1367,6 +1370,7 @@ describe("attachCodexAdapterHandlers", () => {
         dockerAutoUpdate: false,
         proactiveKeepaliveEnabled: true,
         wedgeKillEnabled: true,
+        silenceProbeEnabled: true,
         updatedAt: 0,
       });
 
@@ -1484,6 +1488,7 @@ describe("attachCodexAdapterHandlers", () => {
         dockerAutoUpdate: false,
         proactiveKeepaliveEnabled: true,
         wedgeKillEnabled: true,
+        silenceProbeEnabled: true,
         updatedAt: 0,
       });
 
@@ -1620,6 +1625,7 @@ describe("attachCodexAdapterHandlers", () => {
         dockerAutoUpdate: false,
         proactiveKeepaliveEnabled: true,
         wedgeKillEnabled: true,
+        silenceProbeEnabled: true,
         updatedAt: 0,
       });
 

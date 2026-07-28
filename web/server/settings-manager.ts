@@ -104,6 +104,16 @@ export interface CompanionSettings {
    * to exit on its own instead of being SIGTERMed.
    */
   wedgeKillEnabled: boolean;
+  /**
+   * When true (default), a CLI that goes silent while its stdout stays OPEN is
+   * probed with a control request and, if it does not answer, treated as
+   * disconnected so the session relaunches and replays its in-flight turn.
+   *
+   * This covers the case no stdout-EOF logic can see: the stream never closes,
+   * the process stays healthy, and the session would otherwise hang forever
+   * with no error surfaced. Disable to leave silent sessions alone.
+   */
+  silenceProbeEnabled: boolean;
   /** See CliBridgeMode. Defaults to "loopback". Optional in fixtures; normalize() applies the default. */
   cliBridgeMode?: CliBridgeMode;
   /** See ClaudeBridgeMode. Defaults to "none". Persists across companion restarts. */
@@ -149,6 +159,7 @@ let settings: CompanionSettings = {
   dockerAutoUpdate: false,
   proactiveKeepaliveEnabled: true,
   wedgeKillEnabled: true,
+  silenceProbeEnabled: true,
   cliBridgeMode: "loopback",
   claudeBridgeMode: "none",
   claudeBridgeIngressUrl: "",
@@ -201,6 +212,7 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     dockerAutoUpdate: typeof raw?.dockerAutoUpdate === "boolean" ? raw.dockerAutoUpdate : false,
     proactiveKeepaliveEnabled: typeof raw?.proactiveKeepaliveEnabled === "boolean" ? raw.proactiveKeepaliveEnabled : true,
     wedgeKillEnabled: typeof raw?.wedgeKillEnabled === "boolean" ? raw.wedgeKillEnabled : true,
+    silenceProbeEnabled: typeof raw?.silenceProbeEnabled === "boolean" ? raw.silenceProbeEnabled : true,
     cliBridgeMode: raw?.cliBridgeMode === "jsonHandoff" ? "jsonHandoff" : "loopback",
     claudeBridgeMode: raw?.claudeBridgeMode === "patched" ? "patched" : "none",
     claudeBridgeIngressUrl: typeof raw?.claudeBridgeIngressUrl === "string" ? raw.claudeBridgeIngressUrl : "",
@@ -234,7 +246,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "wedgeKillEnabled" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "wedgeKillEnabled" | "silenceProbeEnabled" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -267,6 +279,7 @@ export function updateSettings(
     dockerAutoUpdate: patch.dockerAutoUpdate ?? settings.dockerAutoUpdate,
     proactiveKeepaliveEnabled: patch.proactiveKeepaliveEnabled ?? settings.proactiveKeepaliveEnabled,
     wedgeKillEnabled: patch.wedgeKillEnabled ?? settings.wedgeKillEnabled,
+    silenceProbeEnabled: patch.silenceProbeEnabled ?? settings.silenceProbeEnabled,
     cliBridgeMode: patch.cliBridgeMode ?? settings.cliBridgeMode,
     claudeBridgeMode: patch.claudeBridgeMode ?? settings.claudeBridgeMode,
     claudeBridgeIngressUrl: patch.claudeBridgeIngressUrl ?? settings.claudeBridgeIngressUrl,

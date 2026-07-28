@@ -1159,6 +1159,7 @@ describe("GET /api/sessions/:id/archive-info", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
     const res = await app.request("/api/sessions/s1/archive-info", { method: "GET" });
@@ -1535,6 +1536,7 @@ describe("GET /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 123,
     });
 
@@ -1569,6 +1571,7 @@ describe("GET /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
     });
   });
 
@@ -1603,6 +1606,7 @@ describe("GET /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 123,
     });
 
@@ -1637,6 +1641,7 @@ describe("GET /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
     });
   });
 
@@ -1672,6 +1677,7 @@ describe("GET /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 100,
     });
 
@@ -1715,6 +1721,7 @@ describe("PUT /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 456,
     });
 
@@ -1771,6 +1778,7 @@ describe("PUT /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
     });
   });
 
@@ -1805,6 +1813,7 @@ describe("PUT /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 789,
     });
 
@@ -1856,6 +1865,7 @@ describe("PUT /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 999,
     });
 
@@ -2007,6 +2017,7 @@ describe("PUT /api/settings", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 500,
     });
 
@@ -2264,6 +2275,7 @@ describe("GET /api/linear/issues", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2305,6 +2317,7 @@ describe("GET /api/linear/issues", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -2399,6 +2412,7 @@ describe("GET /api/linear/issues", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -2500,6 +2514,7 @@ describe("GET /api/linear/issues", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -2566,6 +2581,7 @@ describe("GET /api/linear/connection", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2607,6 +2623,7 @@ describe("GET /api/linear/connection", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -2670,6 +2687,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -2715,6 +2733,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -2759,6 +2778,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2805,6 +2825,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -2885,6 +2906,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -2944,6 +2966,7 @@ describe("GET /api/linear/projects", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2985,6 +3008,7 @@ describe("GET /api/linear/projects", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -3056,6 +3080,7 @@ describe("GET /api/linear/project-issues", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -3097,6 +3122,7 @@ describe("GET /api/linear/project-issues", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
@@ -3183,6 +3209,7 @@ describe("GET /api/linear/project-issues", () => {
       dockerAutoUpdate: false,
       proactiveKeepaliveEnabled: true,
       wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
       updatedAt: 0,
     });
 
