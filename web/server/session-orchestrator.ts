@@ -982,14 +982,14 @@ export class SessionOrchestrator {
   // ── Private: Proactive keepalive ────────────────────────────────────────────
 
   /**
-   * Schedules a proactive relaunch of a crashed CLI process, regardless of
-   * whether any browsers are connected. Uses exponential backoff (3s, 6s, 12s)
-   * based on the auto-relaunch attempt count.
+   * Schedules a proactive relaunch of a crashed CLI process. Uses exponential
+   * backoff (3s, 6s, 12s) based on the auto-relaunch attempt count.
    *
    * Skips relaunch for:
    * - Intentional kills (idle-kill, manual delete/archive)
    * - Archived sessions
    * - Sessions that have exhausted their relaunch budget
+   * - Detached sessions, unless `keepaliveDetachedSessions` is on (see below)
    */
   private scheduleProactiveRelaunch(sessionId: string): void {
     // Respect the global kill-switch — lets operators experiment with letting
@@ -1005,6 +1005,35 @@ export class SessionOrchestrator {
 
     const info = this.launcher.getSession(sessionId);
     if (!info || info.archived) return;
+
+    // Detached sessions: nobody is watching, so nobody is waiting on the
+    // latency this relaunch buys. Relaunching them anyway is what turns a
+    // handful of crashes into a load spike — every relaunch re-initialises the
+    // session's MCP servers from scratch (`npm exec` + node boot, plus chromium
+    // for @playwright/mcp). Measured on a 4-core host: 90 relaunches in 21
+    // minutes drove the load average to 36, which starved the *live* sessions
+    // into failing, producing more relaunches.
+    //
+    // Nothing is lost by waiting. Typing into a terminated session already
+    // requests a relaunch on demand (`terminated -> starting` is legal, and the
+    // queued message flushes on attach), which is the same path that replays an
+    // in-flight turn after a wedge-kill. The cost is a one-time resume on first
+    // message instead of a permanent warm process.
+    //
+    // Agent- and cron-spawned sessions are exempt: they legitimately run with no
+    // browser attached, and for them a dead CLI means dropped work, not just a
+    // slower first reply.
+    // Fails open: only a session the bridge positively reports as having zero
+    // browsers is treated as detached. If the bridge has no record of it we
+    // relaunch as before, so a bookkeeping gap can never silently cost a session
+    // its recovery.
+    if (!info.agentId && !getSettings().keepaliveDetachedSessions) {
+      const tracked = this.wsBridge.getSession(sessionId);
+      if (tracked && tracked.browserSockets.size === 0) {
+        log.info("orchestrator", "Session detached; deferring relaunch until it is opened", { sessionId });
+        return;
+      }
+    }
 
     // Skip if already at relaunch limit
     if (this.relaunchExhaustedNotified.has(sessionId)) return;
