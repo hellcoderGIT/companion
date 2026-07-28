@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.111.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.111.0...companion-v0.111.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **session:** detect a silent CLI whose stdout is still open ([#79](https://github.com/hellcoderGIT/companion/issues/79)) ([443e1b3](https://github.com/hellcoderGIT/companion/commit/443e1b3bca7251fa6d1b080ab50953ceedab0b74))
+
 ## [0.111.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.110.3...companion-v0.111.0) (2026-07-27)
 
 
