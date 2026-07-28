@@ -28,9 +28,15 @@ vi.mock("node:crypto", () => ({
 // Default 0 (childless) preserves the existing tests' behaviour; individual
 // tests override it.
 const mockCountDescendants = vi.hoisted(() => vi.fn(() => 0));
+// getDescendants is stubbed so the orphan-reaping tests can present a known tree
+// without spawning real children. Default empty, matching a childless CLI.
+const mockGetDescendants = vi.hoisted(() =>
+  vi.fn((): { pid: number; comm?: string; state?: string }[] => []),
+);
 vi.mock("./proc-diagnostics.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./proc-diagnostics.js")>()),
   countDescendants: mockCountDescendants,
+  getDescendants: mockGetDescendants,
 }));
 
 // Settings are stubbed so the wedge-kill and silence-probe switches can be
@@ -1868,5 +1874,298 @@ describe("stdio silence probe", () => {
 
     expect(disconnectCb).not.toHaveBeenCalled();
     expect(adapter.isConnected()).toBe(true);
+  });
+});
+
+/**
+ * Turn-stall — the variant the silence probe structurally cannot catch.
+ *
+ * Reported from production on 0.111.1 (session aa37e7de): the turn died at
+ * 02:10:56 mid-`stream_event` while the CLI kept answering probes. Each reply
+ * refreshes `lastInboundAt` and pushes escalation out another interval — five
+ * probes were answered before the process went silent outright and the existing
+ * probe could fire, landing recovery at 02:29:33. An 18.6-minute hang, nearly
+ * all of it after the turn was already dead. Turn progress has to be tracked
+ * independently of transport liveness.
+ */
+describe("stdio turn-stall detection", () => {
+  let adapter: ClaudeAdapter;
+  let disconnectCb: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    adapter = new ClaudeAdapter("turn-stall-session");
+    disconnectCb = vi.fn();
+    adapter.onDisconnect(disconnectCb as unknown as () => void);
+    mockSettings.silenceProbeEnabled = true;
+  });
+
+  afterEach(() => {
+    mockSettings.silenceProbeEnabled = true;
+    vi.useRealTimers();
+  });
+
+  const controlResponse = (i: number) =>
+    JSON.stringify({
+      type: "control_response",
+      response: { subtype: "mcp_status", request_id: `r-${i}` },
+    }) + "\n";
+
+  const streamEvent = () =>
+    JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "" } },
+      session_id: "s",
+    }) + "\n";
+
+  const startTurn = () => adapter.send({ type: "user_message", content: "go" } as never);
+
+  it("fires when the CLI answers control requests but the turn is dead", async () => {
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+    startTurn();
+
+    // The turn streams briefly, then dies — exactly the aa37e7de shape.
+    pushStdout(streamEvent());
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // ...while the transport stays chatty. This is what pins the silence probe
+    // permanently disarmed, so anything that fires here is the turn-stall check.
+    for (let i = 0; i < 12; i++) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      pushStdout(controlResponse(i));
+    }
+
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+    expect(adapter.isConnected()).toBe(false);
+  });
+
+  it("does NOT fire while a tool call is outstanding", async () => {
+    // The critical false-positive guard: a long `Bash` run legitimately emits
+    // nothing for many minutes and must never be torn down.
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+    startTurn();
+
+    pushStdout(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          model: "m",
+          content: [{ type: "tool_use", id: "tu-1", name: "Bash", input: {} }],
+        },
+        session_id: "s",
+      }) + "\n",
+    );
+
+    // Keep the transport answering so the (separate) silence probe stays out of
+    // it — this test is only about the turn-stall check.
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      pushStdout(controlResponse(i));
+    }
+
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+  });
+
+  it("resumes watching once the tool result comes back", async () => {
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+    startTurn();
+
+    pushStdout(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          model: "m",
+          content: [{ type: "tool_use", id: "tu-1", name: "Bash", input: {} }],
+        },
+        session_id: "s",
+      }) + "\n",
+    );
+    for (let i = 0; i < 14; i++) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      pushStdout(controlResponse(i));
+    }
+    expect(disconnectCb).not.toHaveBeenCalled();
+
+    // Tool finished; the model should now be producing output again. It does
+    // not, so the exemption lifts and the stall is caught.
+    pushStdout(
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tu-1", content: "ok" }] },
+        session_id: "s",
+      }) + "\n",
+    );
+    for (let i = 0; i < 12; i++) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      pushStdout(controlResponse(100 + i));
+    }
+
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT fire on an idle session with no turn outstanding", async () => {
+    // A session simply waiting for the user emits nothing for hours.
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    for (let i = 0; i < 12; i++) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      pushStdout(controlResponse(i));
+    }
+
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+  });
+
+  it("does NOT fire while the turn keeps producing output", async () => {
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+    startTurn();
+
+    for (let i = 0; i < 12; i++) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      pushStdout(streamEvent());
+    }
+
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+  });
+
+  it("does NOT fire after the turn ends with a result", async () => {
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+    startTurn();
+
+    pushStdout(
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "s" }) + "\n",
+    );
+    for (let i = 0; i < 12; i++) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      pushStdout(controlResponse(i));
+    }
+
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+  });
+});
+
+/**
+ * Orphaned MCP descendants.
+ *
+ * Signals go to a pid, not a tree, so killing a wedged CLI leaves its 2-3 stdio
+ * MCP servers (and, for @playwright/mcp, a headless chromium) re-parented to
+ * init with no client that can ever reach them. Under kill/relaunch churn they
+ * accumulate: a production box was found holding 123 orphans across 11.9 GB of
+ * 23 GB total, starving the surviving CLIs until they stopped answering — which
+ * caused more kills, and more orphans.
+ */
+describe("orphaned descendant reaping", () => {
+  let adapter: ClaudeAdapter;
+  let killSpy: ReturnType<typeof vi.spyOn>;
+  let signalled: { pid: number; sig: unknown }[];
+
+  beforeEach(() => {
+    adapter = new ClaudeAdapter("orphan-session");
+    signalled = [];
+    // Simulate a live process table: signal 0 succeeds, real signals recorded.
+    killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, sig?: unknown) => {
+      if (sig === 0) return true;
+      signalled.push({ pid, sig });
+      return true;
+    }) as unknown as typeof process.kill);
+  });
+
+  afterEach(() => {
+    killSpy.mockRestore();
+    mockGetDescendants.mockReturnValue([]);
+    vi.useRealTimers();
+  });
+
+  /** Drive the wedge path far enough to trigger killWithEscalation. */
+  const wedgeAndKill = async (endStdout: () => void) => {
+    endStdout();
+    await vi.advanceTimersByTimeAsync(11_000); // past the stdout-close grace
+  };
+
+  it("terminates descendants that outlived the CLI", async () => {
+    vi.useFakeTimers();
+    mockGetDescendants.mockReturnValue([{ pid: 99001 }, { pid: 99002 }]);
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    await wedgeAndKill(endStdout);
+
+    expect(proc.kill).toHaveBeenCalled();
+    expect(signalled.map((s) => s.pid).sort()).toEqual([99001, 99002]);
+    expect(signalled.every((s) => s.sig === "SIGTERM")).toBe(true);
+  });
+
+  it("escalates to SIGKILL for descendants that ignore SIGTERM", async () => {
+    // Chromium routinely ignores SIGTERM.
+    vi.useFakeTimers();
+    mockGetDescendants.mockReturnValue([{ pid: 99003 }]);
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    await wedgeAndKill(endStdout);
+    expect(signalled).toEqual([{ pid: 99003, sig: "SIGTERM" }]);
+
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(signalled).toContainEqual({ pid: 99003, sig: "SIGKILL" });
+  });
+
+  it("does NOT signal a pid whose identity can no longer be confirmed", async () => {
+    // The recycled-pid guard. A snapshotted descendant carrying a `comm` is only
+    // signalled if /proc still reports that same comm — otherwise the pid has
+    // been reused by an unrelated process and must be left alone. Here /proc has
+    // no such entry at all, so it must be skipped.
+    vi.useFakeTimers();
+    mockGetDescendants.mockReturnValue([{ pid: 99004, comm: "npm exec" }]);
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    await wedgeAndKill(endStdout);
+
+    expect(proc.kill).toHaveBeenCalled();
+    expect(signalled).toEqual([]);
+  });
+
+  it("skips descendants that already exited with their parent", async () => {
+    vi.useFakeTimers();
+    killSpy.mockImplementation(((pid: number, sig?: unknown) => {
+      if (sig === 0) throw new Error("ESRCH"); // nothing alive
+      signalled.push({ pid, sig });
+      return true;
+    }) as unknown as typeof process.kill);
+    mockGetDescendants.mockReturnValue([{ pid: 99005 }, { pid: 99006 }]);
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    await wedgeAndKill(endStdout);
+
+    expect(signalled).toEqual([]);
+  });
+
+  it("is a no-op for a childless CLI", async () => {
+    vi.useFakeTimers();
+    mockGetDescendants.mockReturnValue([]);
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    await wedgeAndKill(endStdout);
+
+    expect(proc.kill).toHaveBeenCalled();
+    expect(signalled).toEqual([]);
   });
 });

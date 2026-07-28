@@ -18,6 +18,7 @@ import { WsBridge } from "./ws-bridge.js";
 import { SessionStore } from "./session-store.js";
 import { WorktreeTracker } from "./worktree-tracker.js";
 import { containerManager } from "./container-manager.js";
+import { startOrphanSweeper } from "./orphan-sweeper.js";
 import { join } from "node:path";
 import { COMPANION_HOME } from "./paths.js";
 import { TerminalManager } from "./terminal-manager.js";
@@ -101,6 +102,14 @@ containerManager.restoreState(CONTAINER_STATE_PATH);
 
 // ── Session orchestrator — centralizes lifecycle event wiring ────────────────
 orchestrator.initialize();
+
+// ── Reap orphaned MCP servers: once now, then periodically ───────────────────
+// Per-kill reaping cannot cover kills this process did not perform. A previous
+// run that crashed or was OOM-killed orphans every CLI it owned along with those
+// CLIs' MCP children, and a CLI the kernel OOM-kills mid-run does the same. With
+// nothing holding the reference needed to clean them up they survive for the
+// life of the host, holding memory nobody can reclaim.
+startOrphanSweeper();
 
 console.log(`[server] Session persistence: ${sessionStore.directory}`);
 if (recorder.isGloballyEnabled()) {
