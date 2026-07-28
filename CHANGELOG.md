@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.113.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.0...companion-v0.113.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **session:** continue a turn interrupted mid-answer instead of idling ([#92](https://github.com/hellcoderGIT/companion/issues/92)) ([dc990d1](https://github.com/hellcoderGIT/companion/commit/dc990d1985ffa76721deb03fbf6ae0b6905a0716))
+
 ## [0.113.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.112.0...companion-v0.113.0) (2026-07-28)
 
 
