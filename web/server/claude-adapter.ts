@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { log } from "./logger.js";
 import type { ServerWebSocket, Subprocess } from "bun";
@@ -46,7 +46,7 @@ import type {
 import type { SocketData } from "./ws-bridge-types.js";
 import type { PendingControlRequest } from "./ws-bridge-types.js";
 import type { RecorderManager } from "./recorder.js";
-import { captureProcState, hasLiveDescendants, countDescendants } from "./proc-diagnostics.js";
+import { captureProcState, hasLiveDescendants, countDescendants, getDescendants, type ProcDescendant } from "./proc-diagnostics.js";
 import { getSettings } from "./settings-manager.js";
 import { parseNDJSON, isDuplicateCLIMessage } from "./ws-bridge-cli-ingest.js";
 import type { CLIDedupState } from "./ws-bridge-cli-ingest.js";
@@ -129,8 +129,70 @@ const SILENCE_PROBE_AFTER_MS = Number(process.env.COMPANION_SILENCE_PROBE_AFTER_
 const SILENCE_PROBE_TIMEOUT_MS = Number(process.env.COMPANION_SILENCE_PROBE_TIMEOUT_MS) || 60_000;
 const SILENCE_CHECK_INTERVAL_MS = Number(process.env.COMPANION_SILENCE_CHECK_INTERVAL_MS) || 15_000;
 
+/**
+ * Turn-stall threshold.
+ *
+ * The silence probe above keys on *total* inbound silence, which recovers a
+ * dead turn far later than it needs to — and only if the CLI eventually stops
+ * answering control requests as well.
+ *
+ * Observed on 0.111.1 (session aa37e7de): turn output stopped at 02:10:56
+ * mid-`stream_event`, but the CLI kept replying to probes. Every reply refreshes
+ * `lastInboundAt`, so escalation is pushed out another full interval each time —
+ * five probes were answered before the process finally went silent outright and
+ * the probe could fire. Recovery landed at 02:29:33: an **18.6-minute** hang for
+ * the user, nearly all of it spent watching a turn that was already dead.
+ *
+ * The probe is doing its job; it is just asking the wrong question. Transport
+ * liveness and turn progress are independent, and a CLI that answers pings
+ * forever while its turn is dead would postpone escalation forever.
+ *
+ * So track turn progress separately from transport liveness. Only substantive
+ * turn frames (`stream_event`, `assistant`, `user`, `result`, `tool_progress`)
+ * count — control and keepalive traffic does not.
+ *
+ * False positives are the thing to fear (every previous timer in this file was
+ * too aggressive), so this only applies while a turn is actually outstanding,
+ * and never while a tool call is in flight: a long `Bash` run legitimately
+ * emits nothing for many minutes. The default is deliberately well beyond any
+ * plausible model think-time.
+ */
+const TURN_STALL_AFTER_MS = Number(process.env.COMPANION_TURN_STALL_AFTER_MS) || 300_000;
+
 /** How often to re-check the descendant count while waiting for teardown. */
 const TEARDOWN_POLL_MS = Number(process.env.COMPANION_TEARDOWN_POLL_MS) || 500;
+
+/**
+ * Does this frame type represent the turn actually making progress?
+ *
+ * `control_response` and `keep_alive` are excluded on purpose — they are the
+ * frames a stalled-but-responsive CLI keeps sending. `system` is excluded for
+ * the same reason it is excluded from `lastInboundWasResult`: it carries status
+ * and keepalive chatter, not turn work.
+ */
+function isTurnOutput(type: string): boolean {
+  return (
+    type === "stream_event" ||
+    type === "assistant" ||
+    type === "user" ||
+    type === "result" ||
+    type === "tool_progress"
+  );
+}
+
+/** Extract `tool_use` / `tool_result` ids from a message's content blocks. */
+function toolBlockIds(content: unknown): { uses: string[]; results: string[] } {
+  const uses: string[] = [];
+  const results: string[] = [];
+  if (!Array.isArray(content)) return { uses, results };
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as { type?: string; id?: string; tool_use_id?: string };
+    if (b.type === "tool_use" && typeof b.id === "string") uses.push(b.id);
+    if (b.type === "tool_result" && typeof b.tool_use_id === "string") results.push(b.tool_use_id);
+  }
+  return { uses, results };
+}
 
 
 // --- Claude Code Adapter ------------------------------------------------------
@@ -173,6 +235,20 @@ export class ClaudeAdapter implements IBackendAdapter {
   /** When the outstanding silence probe was sent, or null if none is in flight. */
   private probeSentAt: number | null = null;
   private silenceTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Timestamp of the last substantive *turn* frame, for the turn-stall check.
+   * Deliberately narrower than `lastInboundAt`: control_response and keep_alive
+   * prove the transport is alive but say nothing about the turn making progress.
+   */
+  private lastTurnOutputAt = Date.now();
+  /** True while a user turn is outstanding — sent to the CLI, no `result` yet. */
+  private turnInFlight = false;
+  /**
+   * `tool_use` ids emitted by the model that have no matching `tool_result` yet.
+   * A long-running tool produces no turn output for minutes at a time and must
+   * never be mistaken for a stall.
+   */
+  private pendingToolUses = new Set<string>();
 
   // Callbacks registered by the bridge via on*() methods
   private browserMessageCb: ((msg: BrowserIncomingMessage) => void) | null = null;
@@ -488,6 +564,11 @@ export class ClaudeAdapter implements IBackendAdapter {
     this.stopSilenceProbe();
     this.lastInboundAt = Date.now();
     this.probeSentAt = null;
+    // A relaunched transport starts with a clean slate: the bridge replays the
+    // in-flight turn, which re-arms turnInFlight via handleOutgoingUserMessage.
+    this.lastTurnOutputAt = Date.now();
+    this.turnInFlight = false;
+    this.pendingToolUses.clear();
     this.silenceTimer = setInterval(() => this.checkSilence(), SILENCE_CHECK_INTERVAL_MS);
     // Never hold the process open for a diagnostic timer.
     (this.silenceTimer as unknown as { unref?: () => void }).unref?.();
@@ -501,11 +582,46 @@ export class ClaudeAdapter implements IBackendAdapter {
     this.probeSentAt = null;
   }
 
+  /**
+   * Maintain the outstanding-tool set so a long tool call is never mistaken for
+   * a stalled turn. The model announces work with `tool_use` blocks on an
+   * `assistant` frame; the CLI echoes the matching `tool_result` blocks back on
+   * a `user` frame when it finishes.
+   */
+  private trackToolCalls(msg: CLIMessage): void {
+    if (msg.type !== "assistant" && msg.type !== "user") return;
+    const content = (msg as { message?: { content?: unknown } }).message?.content;
+    const { uses, results } = toolBlockIds(content);
+    for (const id of uses) this.pendingToolUses.add(id);
+    for (const id of results) this.pendingToolUses.delete(id);
+  }
+
   private checkSilence(): void {
     if (this.transportKind !== "stdio" || !this.stdioConnected) return;
     if (getSettings().silenceProbeEnabled === false) return;
 
     const now = Date.now();
+
+    // Turn-stall: the CLI is answering control requests but its turn is dead,
+    // so `lastInboundAt` never ages and the probe below can never escalate.
+    // Only applies while a turn is outstanding and no tool is running.
+    if (
+      this.turnInFlight &&
+      this.pendingToolUses.size === 0 &&
+      now - this.lastTurnOutputAt >= TURN_STALL_AFTER_MS
+    ) {
+      log.warn("claude-adapter", "turn stalled while transport still responsive; treating transport as dead", {
+        sessionId: this.sessionId,
+        pid: this.stdioProc?.pid,
+        turnSilentForMs: now - this.lastTurnOutputAt,
+        transportSilentForMs: now - this.lastInboundAt,
+        proc: captureProcState(this.stdioProc?.pid),
+      });
+      this.stopSilenceProbe();
+      // Same handoff as the silence probe: relaunch replays the in-flight turn.
+      this.notifyStdioDisconnect();
+      return;
+    }
 
     // An unanswered probe is the actual failure signal: a healthy CLI replies
     // to control requests promptly even while working.
@@ -609,19 +725,35 @@ export class ClaudeAdapter implements IBackendAdapter {
    * and satisfying `handleAutoRelaunch`'s PID-liveness guard, which blocks
    * recovery indefinitely — the exact failure the kill was meant to prevent.
    * Never throws; the process may exit between any two steps here.
+   *
+   * Killing the CLI alone leaks its MCP servers. Signals go to the pid, not the
+   * tree, so each CLI's 2-3 stdio MCP children (plus, for @playwright/mcp, a
+   * headless chromium) are re-parented to init and live on with no client that
+   * could ever reach them. Under kill/relaunch churn they accumulate: a
+   * production box was found holding 123 such orphans across 11.9 GB, on 23 GB
+   * total — which starves the surviving CLIs until they stop answering, causing
+   * more kills and more orphans.
    */
   private async killWithEscalation(proc: Subprocess): Promise<void> {
+    // Snapshot the tree *before* the parent dies. Once it exits its children are
+    // re-parented to init and the link back to this session is gone for good.
+    const spawned = getDescendants(proc.pid);
+
     try {
       proc.kill();
     } catch {
-      return; // Already gone.
+      this.reapOrphans(spawned); // Parent already gone; children may not be.
+      return;
     }
 
     const exited = await Promise.race([
       proc.exited.then(() => true),
       new Promise<boolean>((resolve) => setTimeout(() => resolve(false), SIGKILL_ESCALATION_MS)),
     ]);
-    if (exited || proc.exitCode !== null) return;
+    if (exited || proc.exitCode !== null) {
+      this.reapOrphans(spawned);
+      return;
+    }
 
     log.warn("claude-adapter", "process ignored SIGTERM; escalating to SIGKILL", {
       sessionId: this.sessionId,
@@ -633,6 +765,60 @@ export class ClaudeAdapter implements IBackendAdapter {
     } catch {
       // Exited between the check and the escalation.
     }
+    this.reapOrphans(spawned);
+  }
+
+  /**
+   * Terminate descendants that outlived the CLI they belonged to.
+   *
+   * Only pids snapshotted as descendants of *this* session's process are
+   * touched. A pid could in principle be recycled between the snapshot and the
+   * signal, so each one is re-checked against the `comm` recorded at snapshot
+   * time and skipped if it no longer matches — a recycled pid is a different
+   * process and must not be killed.
+   */
+  private reapOrphans(spawned: ProcDescendant[]): void {
+    if (spawned.length === 0) return;
+
+    const stillAlive = spawned.filter((d) => {
+      try {
+        process.kill(d.pid, 0); // Signal 0 = liveness check only.
+      } catch {
+        return false; // Already reaped with its parent.
+      }
+      if (!d.comm) return true;
+      try {
+        return readFileSync(`/proc/${d.pid}/comm`, "utf8").trim() === d.comm;
+      } catch {
+        return false;
+      }
+    });
+    if (stillAlive.length === 0) return;
+
+    for (const d of stillAlive) {
+      try {
+        process.kill(d.pid, "SIGTERM");
+      } catch {
+        // Exited in the meantime.
+      }
+    }
+    log.info("claude-adapter", "reaped orphaned CLI descendants", {
+      sessionId: this.sessionId,
+      count: stillAlive.length,
+      comms: [...new Set(stillAlive.map((d) => d.comm).filter(Boolean))].slice(0, 5),
+    });
+
+    // Chromium (and npm wrappers mid-install) routinely ignore SIGTERM.
+    setTimeout(() => {
+      for (const d of stillAlive) {
+        try {
+          process.kill(d.pid, 0);
+          process.kill(d.pid, "SIGKILL");
+        } catch {
+          // Gone, which is the desired outcome.
+        }
+      }
+    }, SIGKILL_ESCALATION_MS).unref?.();
   }
 
   /**
@@ -878,7 +1064,16 @@ export class ClaudeAdapter implements IBackendAdapter {
     });
     // Propagate delivery success so the bridge re-queues an undelivered prompt
     // (write to a dying stdio pipe) rather than treating send() as delivery.
-    return this.sendToBackend(ndjson);
+    const delivered = this.sendToBackend(ndjson);
+    if (delivered) {
+      // A turn is now outstanding: arm the turn-stall check. Only armed on
+      // actual delivery, so an undelivered prompt can't start the clock against
+      // a CLI that was never asked to do anything.
+      this.turnInFlight = true;
+      this.lastTurnOutputAt = Date.now();
+      this.pendingToolUses.clear();
+    }
+    return delivered;
   }
 
   /**
@@ -974,6 +1169,9 @@ export class ClaudeAdapter implements IBackendAdapter {
       request: { subtype: "interrupt" },
     });
     this.sendToBackend(ndjson);
+    // The user abandoned the turn, so stop holding it against the CLI.
+    this.turnInFlight = false;
+    this.pendingToolUses.clear();
     return true;
   }
 
@@ -1060,6 +1258,18 @@ export class ClaudeAdapter implements IBackendAdapter {
     // proof the CLI is still answering, which is all the probe asks.
     this.lastInboundAt = Date.now();
     this.probeSentAt = null;
+
+    // Turn progress is tracked separately: a CLI can keep answering control
+    // requests long after its turn has died (see TURN_STALL_AFTER_MS), so only
+    // frames that represent actual turn work count here.
+    if (isTurnOutput(msg.type)) {
+      this.lastTurnOutputAt = Date.now();
+    }
+    this.trackToolCalls(msg);
+    if (msg.type === "result") {
+      this.turnInFlight = false;
+      this.pendingToolUses.clear();
+    }
 
     // Track activity for idle detection (skip keepalives -- they don't indicate real work)
     if (msg.type !== "keep_alive") {

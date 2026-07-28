@@ -687,7 +687,7 @@ export class WsBridge {
         session.pendingPermissions.clear();
         session.stateMachine.transition("terminated", "disconnect_confirmed");
         this.persistSession(session);
-        this.broadcastToBrowsers(session, { type: "cli_disconnected" });
+        this.broadcastCliDisconnected(session, "codex_disconnect_confirmed");
 
         // Request auto-relaunch regardless of browser state — proactive
         // keepalive in the orchestrator ensures headless sessions stay alive.
@@ -931,7 +931,10 @@ export class WsBridge {
         interruptedMidTurn,
       });
       session.stateMachine.transition("terminated", "disconnect_confirmed");
-      this.broadcastToBrowsers(session, { type: "cli_disconnected" });
+      this.broadcastCliDisconnected(session, "cli_disconnect_confirmed", {
+        phaseAtClose,
+        interruptedMidTurn,
+      });
       for (const [reqId] of session.pendingPermissions) {
         this.broadcastToBrowsers(session, { type: "permission_cancelled", request_id: reqId });
       }
@@ -990,8 +993,17 @@ export class WsBridge {
     if (!backendConnected && !this.disconnectTimers.has(sessionId)) {
       // Only signal disconnection if we're not within the debounce window
       // (CLI may be mid-reconnect — avoid UI flap and spurious relaunch)
+      // Same banner, different trigger: a browser attached to a session whose
+      // backend is already gone. Logged in the same shape so both paths surface
+      // under one grep.
+      log.warn("ws-bridge", "UI: CLI disconnected banner shown", {
+        sessionId,
+        reason: "backend_dead_on_browser_open",
+        backendType: session.backendType,
+        phase: session.stateMachine.phase,
+        browsers: session.browserSockets.size,
+      });
       this.sendToBrowser(ws, { type: "cli_disconnected" });
-      console.log(`[ws-bridge] Browser connected but backend is dead for session ${sessionId}, requesting relaunch`);
       companionBus.emit("session:relaunch-needed", { sessionId });
     }
   }
@@ -1302,6 +1314,34 @@ export class WsBridge {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     this.broadcastToBrowsers(session, { type: "session_name_update", name });
+  }
+
+  /**
+   * Broadcast `cli_disconnected` and record it, in that order, from one place.
+   *
+   * `cli_disconnected` is what puts the "CLI disconnected / Reconnect" banner in
+   * front of the user, so every occurrence must be greppable afterwards — this
+   * is the single most reported symptom and was previously logged inconsistently
+   * across the four call sites (two `console.log`, one `log.warn` describing the
+   * cause rather than the broadcast, one silent).
+   *
+   * Emitting it here means the log line and the banner cannot drift apart: if
+   * the user saw the banner, this line exists.
+   */
+  private broadcastCliDisconnected(
+    session: Session,
+    reason: string,
+    detail: Record<string, unknown> = {},
+  ) {
+    log.warn("ws-bridge", "UI: CLI disconnected banner shown", {
+      sessionId: session.id,
+      reason,
+      backendType: session.backendType,
+      phase: session.stateMachine.phase,
+      browsers: session.browserSockets.size,
+      ...detail,
+    });
+    this.broadcastToBrowsers(session, { type: "cli_disconnected" });
   }
 
   private broadcastToBrowsers(session: Session, msg: BrowserIncomingMessage) {

@@ -6,6 +6,7 @@ import {
   getDescendants,
   hasLiveDescendants,
   countDescendants,
+  findOrphanedMcpProcesses,
 } from "./proc-diagnostics.js";
 
 /**
@@ -206,5 +207,83 @@ describe("getDescendants / hasLiveDescendants", () => {
 
     child.kill("SIGKILL");
     await new Promise((r) => child.on("exit", r));
+  });
+});
+
+/**
+ * Orphaned-MCP detection. This drives a sweeper that SIGTERMs whatever it
+ * returns, so both directions matter: missing an orphan leaks memory (a
+ * production host reached 123 orphans across 11.9 GB), but a false positive
+ * kills a live MCP server out from under a working session.
+ */
+describe("findOrphanedMcpProcesses", () => {
+  const spawned: ReturnType<typeof spawn>[] = [];
+
+  afterEach(async () => {
+    for (const p of spawned.splice(0)) {
+      try {
+        p.kill("SIGKILL");
+        await new Promise((r) => p.on("exit", r));
+      } catch {
+        // Already gone.
+      }
+    }
+  });
+
+  it("returns empty on platforms without /proc", () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    expect(findOrphanedMcpProcesses()).toEqual([]);
+  });
+
+  it.runIf(isLinux)("never throws and returns a well-formed list", () => {
+    // Runs against the real /proc of whatever host this is, so it must tolerate
+    // processes exiting mid-scan — the scan races every other process on the box.
+    const orphans = findOrphanedMcpProcesses();
+    expect(Array.isArray(orphans)).toBe(true);
+    for (const o of orphans) {
+      expect(typeof o.pid).toBe("number");
+      expect(o.pid).toBeGreaterThan(0);
+    }
+  });
+
+  it.runIf(isLinux)("detects a process whose cmdline marks it an MCP server with no CLI parent", async () => {
+    // `exec -a` sets argv[0], reproducing the cmdline shape of a CLI-spawned
+    // stdio MCP server. Its parent here is the test runner, not a `claude`
+    // process, so it is exactly the orphan the sweeper targets.
+    const child = spawn("/bin/bash", [
+      "-c",
+      "exec -a 'npm exec @modelcontextprotocol/server-test' sleep 30",
+    ], { stdio: "ignore" });
+    spawned.push(child);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const orphans = findOrphanedMcpProcesses();
+    expect(orphans.some((o) => o.pid === child.pid)).toBe(true);
+  });
+
+  it.runIf(isLinux)("ignores processes with no MCP marker in their cmdline", async () => {
+    // The false-positive guard: an ordinary child must never be swept, or the
+    // sweeper would kill unrelated processes on the host.
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    spawned.push(child);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const orphans = findOrphanedMcpProcesses();
+    expect(orphans.some((o) => o.pid === child.pid)).toBe(false);
+  });
+
+  it.runIf(isLinux)("labels findings with comm where readable", async () => {
+    const child = spawn("/bin/bash", [
+      "-c",
+      "exec -a 'mcp-server-label-test' sleep 30",
+    ], { stdio: "ignore" });
+    spawned.push(child);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const found = findOrphanedMcpProcesses().find((o) => o.pid === child.pid);
+    expect(found).toBeDefined();
+    // comm is the executable name (truncated to 15 chars by the kernel), not
+    // argv[0] — it is a label for the log line, not the match key.
+    expect(typeof found?.comm).toBe("string");
   });
 });

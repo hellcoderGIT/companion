@@ -162,6 +162,73 @@ export function isProcAvailable(): boolean {
   return process.platform === "linux";
 }
 
+/** Command-line markers identifying a CLI-spawned stdio MCP server. */
+const MCP_CMDLINE_MARKERS = ["dev-mcp", "playwright/mcp", "mcp-server", "@modelcontextprotocol"];
+
+/**
+ * Find MCP server processes that no longer belong to a live CLI.
+ *
+ * Per-kill reaping (see `ClaudeAdapter.reapOrphans`) handles the steady state,
+ * but it cannot clean up after the server itself dies: if companion is killed,
+ * restarted or OOM-killed, every CLI it owned is orphaned along with that CLI's
+ * MCP children, and nothing is left holding the reference needed to reap them.
+ * They then sit there for the lifetime of the host, holding memory no one can
+ * reclaim — 123 such processes across 11.9 GB were found on a 23 GB production
+ * box.
+ *
+ * An MCP stdio server whose parent is not a `claude` process has no client and
+ * can never acquire one, which makes it unambiguously safe to terminate.
+ */
+export function findOrphanedMcpProcesses(): ProcDescendant[] {
+  if (!isProcAvailable()) return [];
+
+  const orphans: ProcDescendant[] = [];
+  let pids: string[];
+  try {
+    pids = readdirSync("/proc").filter((n) => /^\d+$/.test(n));
+  } catch {
+    return [];
+  }
+
+  for (const entry of pids) {
+    const pid = Number(entry);
+    if (pid === process.pid) continue;
+
+    let cmdline: string;
+    try {
+      cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+    } catch {
+      continue; // Exited mid-scan.
+    }
+    if (!MCP_CMDLINE_MARKERS.some((m) => cmdline.includes(m))) continue;
+
+    // Parent still a live claude process → it has a client; leave it alone.
+    let ppid: number | undefined;
+    try {
+      ppid = Number(readFileSync(`/proc/${pid}/stat`, "utf8").split(" ")[3]);
+    } catch {
+      continue;
+    }
+    if (ppid && ppid !== 1) {
+      try {
+        if (readFileSync(`/proc/${ppid}/cmdline`, "utf8").includes("claude")) continue;
+      } catch {
+        // Parent vanished between reads — treat as orphaned.
+      }
+    }
+
+    const orphan: ProcDescendant = { pid };
+    try {
+      orphan.comm = readFileSync(`/proc/${pid}/comm`, "utf8").trim();
+    } catch {
+      // Best-effort label only.
+    }
+    orphans.push(orphan);
+  }
+
+  return orphans;
+}
+
 /**
  * Capture kernel state for a pid. Returns `{ error }` rather than throwing when
  * the platform has no /proc or the process has already exited (the common race:
