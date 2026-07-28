@@ -241,6 +241,7 @@ export class ClaudeAdapter implements IBackendAdapter {
    *  must be killed so recovery can proceed). Transport-level noise
    *  (`keep_alive`, `system` status/keepalive) does not reset it; any
    *  substantive turn activity does. */
+  private getStderrTail: (() => string) | null = null;
   private lastInboundWasResult = false;
   /** Timestamp of the last inbound frame of any kind, for the silence probe. */
   private lastInboundAt = Date.now();
@@ -304,10 +305,19 @@ export class ClaudeAdapter implements IBackendAdapter {
        *  `<cwd>/.companion-uploads/`. Optional because tests may construct
        *  without it; the bridge should always pass it. */
       cwd?: string;
+      /** Reads the rolling stderr tail for this session.
+       *
+       *  The launcher already captures stderr to classify exit reasons, but on
+       *  the wedge path — where the process is killed rather than exiting — that
+       *  buffer was never surfaced. It is the only record of what the CLI said
+       *  before it dropped its stdout, so it is the one piece of evidence that
+       *  can explain a wedge rather than just report it. */
+      getStderrTail?: () => string;
     },
   ) {
     this.sessionId = sessionId;
     this.recorder = opts?.recorder ?? null;
+    this.getStderrTail = opts?.getStderrTail ?? null;
     this.onActivityUpdate = opts?.onActivityUpdate ?? null;
     this.sessionCwd = opts?.cwd ?? null;
   }
@@ -489,6 +499,7 @@ export class ClaudeAdapter implements IBackendAdapter {
           sessionId: this.sessionId,
           pid: proc.pid,
           proc: captureProcState(proc.pid),
+          stderrTail: this.stderrTailForLog(),
         });
       } else if (proc && proc.exitCode === null && !proc.killed) {
         // Which grace applies is decided by whether teardown is actually in
@@ -527,6 +538,7 @@ export class ClaudeAdapter implements IBackendAdapter {
               graceReason: this.lastInboundWasResult ? "result" : "descendants_alive",
               teardownOutcome: this.lastTeardownOutcome,
               proc: captureProcState(proc.pid),
+              stderrTail: this.stderrTailForLog(),
             });
             await this.killWithEscalation(proc);
           }
@@ -553,6 +565,7 @@ export class ClaudeAdapter implements IBackendAdapter {
               graceMs: STDOUT_CLOSE_GRACE_MS,
               graceReason: "no_descendants",
               proc: captureProcState(proc.pid),
+              stderrTail: this.stderrTailForLog(),
             });
             await this.killWithEscalation(proc);
           }
@@ -608,6 +621,21 @@ export class ClaudeAdapter implements IBackendAdapter {
     for (const id of results) this.pendingToolUses.delete(id);
   }
 
+  /**
+   * Last few hundred bytes the CLI wrote to stderr, for kill/stall warnings.
+   *
+   * Trimmed and length-capped so a chatty process cannot flood the log, and
+   * omitted entirely when empty so quiet failures stay quiet.
+   */
+  private stderrTailForLog(): string | undefined {
+    try {
+      const tail = this.getStderrTail?.().trim();
+      return tail ? tail.slice(-600) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private checkSilence(): void {
     if (this.transportKind !== "stdio" || !this.stdioConnected) return;
     if (getSettings().silenceProbeEnabled === false) return;
@@ -628,6 +656,7 @@ export class ClaudeAdapter implements IBackendAdapter {
         turnSilentForMs: now - this.lastTurnOutputAt,
         transportSilentForMs: now - this.lastInboundAt,
         proc: captureProcState(this.stdioProc?.pid),
+        stderrTail: this.stderrTailForLog(),
       });
       this.stopSilenceProbe();
       // Same handoff as the silence probe: relaunch replays the in-flight turn.
@@ -661,6 +690,7 @@ export class ClaudeAdapter implements IBackendAdapter {
           silentForMs: now - this.lastInboundAt,
           probeUnansweredForMs: now - this.probeSentAt,
           proc: captureProcState(this.stdioProc?.pid),
+          stderrTail: this.stderrTailForLog(),
         });
         this.stopSilenceProbe();
         // Hand off to the existing recovery path, which relaunches and replays
@@ -787,6 +817,7 @@ export class ClaudeAdapter implements IBackendAdapter {
       sessionId: this.sessionId,
       pid: proc.pid,
       afterMs: SIGKILL_ESCALATION_MS,
+      stderrTail: this.stderrTailForLog(),
     });
     try {
       proc.kill("SIGKILL");
