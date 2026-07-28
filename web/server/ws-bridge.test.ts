@@ -2040,6 +2040,113 @@ describe("CLI message routing", () => {
     }
   });
 
+  /**
+   * Recovery for turns interrupted MID-ANSWER.
+   *
+   * `inFlightUserTurn` is cleared on the first assistant/stream_event, so the
+   * existing replay only ever covered turns that died before producing output.
+   * A turn cut off mid-answer was not recovered at all: the session idled until
+   * a human typed "continue" by hand. Reported in production as 15 wedge-kills
+   * across 11 sessions in ~34h.
+   */
+  describe("mid-answer turn continuation", () => {
+    async function startTurnWithOutput(sessionId: string) {
+      const cli = makeCliSocket(sessionId);
+      bridge.handleCLIOpen(cli, sessionId);
+      await bridge.handleCLIMessage(cli, makeInitMsg());
+      const browser = makeBrowserSocket(sessionId);
+      bridge.handleBrowserOpen(browser, sessionId);
+
+      await bridge.handleBrowserMessage(browser, JSON.stringify({
+        type: "user_message",
+        content: "do a big task",
+      }));
+      // First output clears inFlightUserTurn — this is what made the case
+      // invisible to the original replay logic.
+      await bridge.handleCLIMessage(cli, JSON.stringify({
+        type: "stream_event",
+        event: { type: "content_block_delta", delta: { type: "text_delta", text: "work" } },
+        session_id: "cli-123",
+        uuid: "se-1",
+      }));
+      return { cli, browser, session: bridge.getSession(sessionId)! };
+    }
+
+    it("nudges a turn that was interrupted after it began answering", async () => {
+      const { session } = await startTurnWithOutput("s1");
+      expect(session.inFlightUserTurn).toBeUndefined();
+      expect(session.turnAwaitingResult).toBe(true);
+
+      // Relaunch: a fresh adapter attaches.
+      const sent: string[] = [];
+      bridge.attachBackendAdapter("s1", {
+        isConnected: () => true,
+        send: (m: unknown) => { sent.push(typeof m === "string" ? m : JSON.stringify(m)); return true; },
+        disconnect: async () => {},
+        onBrowserMessage: () => {},
+        onSessionMeta: () => {},
+        onDisconnect: () => {},
+        onInitError: () => {},
+      } as never, "claude");
+
+      const nudge = sent.map((m) => JSON.parse(m)).find((m) => m.type === "user_message");
+      expect(nudge, `sent: ${JSON.stringify(sent)}`).toBeDefined();
+      expect(nudge.content).toMatch(/continue from where you left off/i);
+      // It must not re-send the original prompt, which would redo tool work.
+      expect(nudge.content).not.toBe("do a big task");
+    });
+
+    it("does not nudge twice for the same turn", async () => {
+      // A turn that keeps dying must not accumulate nudges.
+      const { session } = await startTurnWithOutput("s1");
+      const sent: string[] = [];
+      const attach = () => bridge.attachBackendAdapter("s1", {
+        isConnected: () => true,
+        send: (m: unknown) => { sent.push(typeof m === "string" ? m : JSON.stringify(m)); return true; },
+        disconnect: async () => {},
+        onBrowserMessage: () => {},
+        onSessionMeta: () => {},
+        onDisconnect: () => {},
+        onInitError: () => {},
+      } as never, "claude");
+
+      attach();
+      attach();
+
+      const nudges = sent
+        .map((m) => JSON.parse(m))
+        .filter((m) => m.type === "user_message" && /continue from where/i.test(m.content || ""));
+      expect(nudges).toHaveLength(1);
+    });
+
+    it("does not nudge once the turn has completed", async () => {
+      // A finished turn is not an interrupted one — nudging here would send an
+      // unprompted message to an idle session.
+      const { cli, session } = await startTurnWithOutput("s1");
+      await bridge.handleCLIMessage(cli, JSON.stringify({
+        type: "result", subtype: "success", is_error: false,
+        duration_ms: 10, num_turns: 1, session_id: "cli-123", uuid: "r-1",
+      }));
+      expect(session.turnAwaitingResult).toBe(false);
+
+      const sent: string[] = [];
+      bridge.attachBackendAdapter("s1", {
+        isConnected: () => true,
+        send: (m: unknown) => { sent.push(typeof m === "string" ? m : JSON.stringify(m)); return true; },
+        disconnect: async () => {},
+        onBrowserMessage: () => {},
+        onSessionMeta: () => {},
+        onDisconnect: () => {},
+        onInitError: () => {},
+      } as never, "claude");
+
+      const nudges = sent
+        .map((m) => JSON.parse(m))
+        .filter((m) => m.type === "user_message" && /continue from where/i.test(m.content || ""));
+      expect(nudges).toHaveLength(0);
+    });
+  });
+
   it("tool_progress: broadcasts", async () => {
     const msg = JSON.stringify({
       type: "tool_progress",

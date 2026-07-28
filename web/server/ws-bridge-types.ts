@@ -76,6 +76,22 @@ export interface Session {
    */
   inFlightTurnReplayed?: boolean;
   /**
+   * True from the moment a user message is dispatched until its `result`
+   * arrives, regardless of how much output was produced in between.
+   *
+   * `inFlightUserTurn` is cleared as soon as the first `assistant`/
+   * `stream_event` lands, so it only ever covers turns that die BEFORE
+   * producing output. A turn interrupted mid-answer had already cleared it and
+   * was therefore never recovered — the session simply idled until a human
+   * typed "continue". This flag is what makes that case detectable.
+   */
+  turnAwaitingResult?: boolean;
+  /**
+   * One-shot guard for the mid-answer continuation nudge, so a turn that keeps
+   * dying cannot be nudged in a loop. Reset when a new user_message is sent.
+   */
+  continuationSent?: boolean;
+  /**
    * Set when the last turn failed authentication (expired/invalid credentials).
    * Auto-relaunch is skipped while this is set — relaunching cannot fix auth —
    * and a re-login banner is surfaced instead. Cleared on a successful result.
