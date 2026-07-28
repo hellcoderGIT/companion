@@ -132,6 +132,27 @@ function setStoreProcesses(
   mockStoreValues.sessionProcesses = map;
 }
 
+/** Seed in-flight / completed tool activity for a session. */
+function setStoreToolActivity(
+  sessionId: string,
+  entries: Array<{ toolName: string; preview?: string; startedAt?: number; completedAt?: number }>,
+) {
+  const map = new Map();
+  map.set(
+    sessionId,
+    entries.map((e, i) => ({
+      toolUseId: `tu-${i}`,
+      toolName: e.toolName,
+      preview: e.preview ?? "",
+      startedAt: e.startedAt ?? Date.now() - 45_000,
+      completedAt: e.completedAt,
+      elapsedSeconds: 45,
+      isError: false,
+    })),
+  );
+  mockStoreValues.toolActivity = map;
+}
+
 function resetStore() {
   mockStoreValues.sessionProcesses = new Map();
   mockStoreValues.messages = new Map();
@@ -485,6 +506,66 @@ describe("MessageFeed - activity tiers", () => {
     const bar = screen.getByTestId("activity-indicator");
     expect(bar.getAttribute("data-activity-tier")).toBe("active");
     expect(screen.getByText("Generating")).toBeTruthy();
+  });
+
+  // "Still working… | no update for 47s" tells the user nothing about *what* is
+  // happening, which is the most common reason a working session is reported as
+  // stuck. toolActivity already knows, so name the tool instead.
+  it("names the running tool in the quiet tier instead of only reporting silence", () => {
+    const sid = "test-tier-running-tool";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 60_000);
+    setStoreLastActivity(sid, Date.now() - 45_000); // quiet
+    setStoreToolActivity(sid, [
+      { toolName: "Bash", preview: "bun run test", startedAt: Date.now() - 45_000 },
+    ]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("quiet");
+    expect(screen.getByText("Running Bash")).toBeTruthy();
+    expect(screen.getByText("bun run test")).toBeTruthy();
+    // The uninformative fallback must be gone when we know the tool.
+    expect(screen.queryByText(/no update for/)).toBeNull();
+  });
+
+  it("falls back to 'Still working…' when no tool is in flight", () => {
+    // Completed entries must not be mistaken for a running tool.
+    const sid = "test-tier-no-running-tool";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 60_000);
+    setStoreLastActivity(sid, Date.now() - 45_000);
+    setStoreToolActivity(sid, [
+      { toolName: "Bash", preview: "done", startedAt: Date.now() - 90_000, completedAt: Date.now() - 60_000 },
+    ]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    expect(screen.getByText("Still working…")).toBeTruthy();
+    expect(screen.getByText(/no update for/)).toBeTruthy();
+  });
+
+  it("does not warn 'may be stuck' while a tool is demonstrably running", () => {
+    // Silence past the 15-min stalled threshold, but a tool is in flight — the
+    // agent is working, so the warning would be actively wrong.
+    const sid = "test-tier-stalled-but-tool-running";
+    setStoreMessages(sid, [makeMessage({ role: "user", content: "hi" })]);
+    setStoreStatus(sid, "running");
+    setStoreStreamingStartedAt(sid, Date.now() - 20 * 60_000);
+    setStoreLastActivity(sid, Date.now() - 16 * 60_000);
+    setStoreToolActivity(sid, [
+      { toolName: "Bash", preview: "long build", startedAt: Date.now() - 16 * 60_000 },
+    ]);
+
+    render(<MessageFeed sessionId={sid} />);
+
+    const bar = screen.getByTestId("activity-indicator");
+    expect(bar.getAttribute("data-activity-tier")).toBe("quiet");
+    expect(screen.queryByText(/the agent may be stuck/)).toBeNull();
+    expect(screen.getByText("Running Bash")).toBeTruthy();
   });
 
   it("stays 'quiet' (not stalled) at ~10min of silence — long tool calls are normal", () => {
