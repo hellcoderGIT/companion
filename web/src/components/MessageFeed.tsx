@@ -642,6 +642,19 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
   const hasBackgroundWork = runningProcesses.length > 0;
   // Elapsed for background-only activity is measured from the longest-running
   // process, not from the turn — the turn has already ended.
+  // The tool the agent is currently inside, if any. `toolActivity` already
+  // tracks this — the indicator simply never consulted it, so a long tool call
+  // rendered as the contentless "no update for 47s" when we could say exactly
+  // what is running. This is the single biggest reason a working session reads
+  // as a stuck one.
+  const runningTool = useMemo(() => {
+    const entries = toolActivity ?? [];
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (!entries[i].completedAt) return entries[i];
+    }
+    return undefined;
+  }, [toolActivity]);
+
   const backgroundStartedAt = useMemo(
     () =>
       runningProcesses.length > 0
@@ -964,7 +977,10 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
     // running is worse than saying nothing.
     hasBackgroundWork && (sessionStatus !== "running" || sinceActivity >= ACTIVITY_QUIET_MS)
       ? "background"
-      : sinceActivity >= ACTIVITY_STALLED_MS
+      // A running tool is proof of work, so it demotes "stalled" to "quiet" —
+      // the quiet tier now names the tool, which is far more useful than a
+      // warning that the agent "may be stuck" while it plainly is not.
+      : sinceActivity >= ACTIVITY_STALLED_MS && !runningTool
         ? "stalled"
         : sinceActivity >= ACTIVITY_QUIET_MS
           ? "quiet"
@@ -1120,11 +1136,21 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
                 </span>
               ) : activityTier === "quiet" ? (
                 <>
-                  <span className="text-cc-fg/70">Still working…</span>
+                  <span className="text-cc-fg/70">
+                    {runningTool ? `Running ${runningTool.toolName}` : "Still working…"}
+                  </span>
                   <span className="text-cc-muted/30">|</span>
                   <span className="tabular-nums">
-                    no update for {formatElapsed(sinceActivity)}
+                    {runningTool
+                      ? formatElapsed(Math.max(0, Date.now() - runningTool.startedAt))
+                      : `no update for ${formatElapsed(sinceActivity)}`}
                   </span>
+                  {runningTool?.preview && (
+                    <>
+                      <span className="text-cc-muted/30">|</span>
+                      <span className="truncate max-w-[32ch]">{runningTool.preview}</span>
+                    </>
+                  )}
                 </>
               ) : (
                 <>
