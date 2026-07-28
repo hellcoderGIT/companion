@@ -1864,6 +1864,58 @@ describe("stdio silence probe", () => {
     expect(adapter.isConnected()).toBe(true);
   });
 
+  it("does NOT kill a session that is silent because a tool is running", async () => {
+    // Production regression: a session running its test suite (a single ~200s
+    // Bash call) was declared dead at 182s of silence and relaunched, losing the
+    // turn. The CLI does not service control requests while a synchronous tool
+    // runs, so an unanswered probe proves nothing.
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    pushStdout(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          model: "m",
+          content: [{ type: "tool_use", id: "tu-slow", name: "Bash", input: {} }],
+        },
+        session_id: "s",
+      }) + "\n",
+    );
+
+    // Well past probe-after + probe-timeout, which previously killed it.
+    await vi.advanceTimersByTimeAsync(300_000);
+
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+  });
+
+  it("still escalates when a tool call blows the grace ceiling", async () => {
+    // A tool that never returns must not suppress recovery forever.
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    pushStdout(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          model: "m",
+          content: [{ type: "tool_use", id: "tu-stuck", name: "Bash", input: {} }],
+        },
+        session_id: "s",
+      }) + "\n",
+    );
+
+    await vi.advanceTimersByTimeAsync(700_000); // past the 660s ceiling
+
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+    expect(adapter.isConnected()).toBe(false);
+  });
+
   it("does nothing when the silence probe is disabled", async () => {
     vi.useFakeTimers();
     mockSettings.silenceProbeEnabled = false;

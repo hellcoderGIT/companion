@@ -50,6 +50,7 @@ vi.mock("./settings-manager.js", () => ({
     openaiApiKey: "",
     onboardingCompleted: false,
     proactiveKeepaliveEnabled: true,
+    keepaliveDetachedSessions: false,
     wedgeKillEnabled: true,
     silenceProbeEnabled: true,
   })),
@@ -249,6 +250,7 @@ describe("SessionOrchestrator", () => {
       openaiApiKey: "",
       onboardingCompleted: false,
       proactiveKeepaliveEnabled: true,
+      keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
     } as any);
@@ -433,6 +435,102 @@ describe("SessionOrchestrator", () => {
   });
 
   // ── Crash-loop relaunch budget ────────────────────────────────────────────
+
+  // ── Browser-aware keepalive ───────────────────────────────────────────────
+
+  /**
+   * Relaunching a session nobody has open buys latency nobody is waiting for,
+   * while re-initialising that session's MCP servers from scratch every time.
+   * Measured on a 4-core host: 90 relaunches in 21 minutes drove the load
+   * average to 36, starving the live sessions into failing and producing more
+   * relaunches. Detached sessions revive on demand instead — typing into a
+   * terminated session already requests a relaunch and flushes the queued
+   * message on attach.
+   */
+  describe("keepalive is browser-aware", () => {
+    async function crash() {
+      companionBus.emit("session:exited", { sessionId: "s1", exitCode: 143 });
+      await vi.advanceTimersByTimeAsync(45_000);
+      await vi.advanceTimersByTimeAsync(0);
+    }
+
+    beforeEach(() => {
+      deps.launcher.getSession.mockReturnValue({ archived: false, state: "exited", pid: undefined } as any);
+      deps.launcher.relaunch.mockResolvedValue({ ok: true });
+      deps.wsBridge.isCliConnected.mockReturnValue(false);
+    });
+
+    it("does NOT relaunch a session with no browser attached", async () => {
+      vi.useFakeTimers();
+      deps.wsBridge.getSession.mockReturnValue({ browserSockets: new Set() } as any);
+      orchestrator.initialize();
+
+      await crash();
+
+      expect(deps.launcher.relaunch).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it("relaunches a session someone has open", async () => {
+      vi.useFakeTimers();
+      deps.wsBridge.getSession.mockReturnValue({ browserSockets: new Set(["ws1"]) } as any);
+      orchestrator.initialize();
+
+      await crash();
+
+      expect(deps.launcher.relaunch).toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it("always relaunches agent/cron sessions, which run detached by design", async () => {
+      // For these a dead CLI means dropped work, not just a slower first reply.
+      vi.useFakeTimers();
+      deps.launcher.getSession.mockReturnValue({
+        archived: false, state: "exited", pid: undefined, agentId: "agent-7",
+      } as any);
+      deps.wsBridge.getSession.mockReturnValue({ browserSockets: new Set() } as any);
+      orchestrator.initialize();
+
+      await crash();
+
+      expect(deps.launcher.relaunch).toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it("relaunches detached sessions when the setting opts back in", async () => {
+      vi.useFakeTimers();
+      const { getSettings } = await import("./settings-manager.js");
+      const prior = (getSettings as any).getMockImplementation();
+      // The gate reads getSettings() more than once per relaunch decision, so
+      // this has to hold for the whole cycle rather than a single call.
+      (getSettings as any).mockReturnValue({
+        proactiveKeepaliveEnabled: true,
+        keepaliveDetachedSessions: true,
+        wedgeKillEnabled: true,
+        silenceProbeEnabled: true,
+      });
+      deps.wsBridge.getSession.mockReturnValue({ browserSockets: new Set() } as any);
+      orchestrator.initialize();
+
+      await crash();
+
+      expect(deps.launcher.relaunch).toHaveBeenCalled();
+      (getSettings as any).mockImplementation(prior);
+      vi.useRealTimers();
+    });
+
+    it("fails open when the bridge has no record of the session", async () => {
+      // A bookkeeping gap must never silently cost a session its recovery.
+      vi.useFakeTimers();
+      deps.wsBridge.getSession.mockReturnValue(null as any);
+      orchestrator.initialize();
+
+      await crash();
+
+      expect(deps.launcher.relaunch).toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+  });
 
   describe("auto-relaunch crash budget", () => {
     // Drives one crash→proactive-relaunch cycle: the CLI exits, the keepalive
@@ -1835,6 +1933,7 @@ describe("SessionOrchestrator", () => {
       vi.mocked(settingsManager.getSettings).mockReturnValue({
         ...settingsManager.getSettings(),
         proactiveKeepaliveEnabled: false,
+        keepaliveDetachedSessions: false,
         wedgeKillEnabled: true,
         silenceProbeEnabled: true,
       });
