@@ -1963,6 +1963,39 @@ describe("CLI message routing", () => {
     expect(session.inFlightUserTurn).toBeTruthy();
   });
 
+  /**
+   * The "CLI disconnected / Reconnect" banner is the single most-reported
+   * symptom, so every path that raises it must leave a greppable log line.
+   * Previously the four broadcast sites logged inconsistently — two via
+   * console.log, one describing the cause rather than the broadcast, one
+   * silent — which made post-hoc log analysis miss occurrences entirely.
+   */
+  it("logs a greppable line whenever the CLI-disconnected banner is broadcast", async () => {
+    vi.useFakeTimers();
+    try {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const cli = makeCliSocket("s1");
+      bridge.handleCLIOpen(cli, "s1");
+      await bridge.handleCLIMessage(cli, makeInitMsg());
+
+      const browser = makeBrowserSocket("s1");
+      bridge.handleBrowserOpen(browser, "s1");
+
+      bridge.handleCLIClose(cli);
+      // Past the disconnect debounce, the banner goes out.
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      const calls = warnSpy.mock.calls.map(([a]) => String(a));
+      const banner = calls.find((l) => l.includes("UI: CLI disconnected banner shown"));
+      expect(banner).toBeDefined();
+      // The reason is what makes a log searchable for *why*, not just *that*.
+      expect(banner).toContain("cli_disconnect_confirmed");
+      expect(banner).toContain("s1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("tool_progress: broadcasts", async () => {
     const msg = JSON.stringify({
       type: "tool_progress",

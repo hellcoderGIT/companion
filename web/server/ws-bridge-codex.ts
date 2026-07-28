@@ -8,6 +8,7 @@ import type { Session } from "./ws-bridge-types.js";
 import { appendHistory } from "./ws-bridge-persist.js";
 import { validatePermission } from "./ai-validator.js";
 import { getEffectiveAiValidation } from "./ai-validation-settings.js";
+import { log } from "./logger.js";
 import { companionBus } from "./event-bus.js";
 
 /**
@@ -176,7 +177,15 @@ export function attachCodexAdapterHandlers(
     session.pendingPermissions.clear();
     session.backendAdapter = null;
     deps.persistSession(session);
-    console.log(`[ws-bridge] Codex adapter disconnected for session ${sessionId}`);
+    // Mirrors WsBridge.broadcastCliDisconnected so every path that raises the
+    // "CLI disconnected / Reconnect" banner is greppable under one message.
+    log.warn("ws-bridge", "UI: CLI disconnected banner shown", {
+      sessionId,
+      reason: "codex_adapter_disconnected",
+      backendType: session.backendType,
+      phase: session.stateMachine.phase,
+      browsers: session.browserSockets.size,
+    });
     deps.broadcastToBrowsers(session, { type: "cli_disconnected" });
 
     // Auto-relaunch if browsers are still connected (don't leave users staring
