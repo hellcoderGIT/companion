@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.111.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.111.1...companion-v0.111.2) (2026-07-28)
+
+
+### Bug Fixes
+
+* **session:** reap orphaned MCP servers and detect stalled turns ([#81](https://github.com/hellcoderGIT/companion/issues/81)) ([1fed717](https://github.com/hellcoderGIT/companion/commit/1fed71775bd48714468a4793ddc977016d41a8a5))
+
 ## [0.111.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.111.0...companion-v0.111.1) (2026-07-28)
 
 
