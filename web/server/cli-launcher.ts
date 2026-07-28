@@ -633,6 +633,8 @@ export class CliLauncher {
     const adapter = new ClaudeAdapter(sessionId, {
       recorder: this.recorder ?? undefined,
       cwd: info.cwd,
+      // Lets the adapter quote the CLI's own stderr in its kill/stall warnings.
+      getStderrTail: () => this.stderrTails.get(sessionId) ?? "",
     });
     adapter.attachStdio(proc);
     companionBus.emit("backend:claude-adapter-created", { sessionId, adapter });

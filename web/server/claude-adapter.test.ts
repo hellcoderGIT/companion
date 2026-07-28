@@ -2221,3 +2221,101 @@ describe("orphaned descendant reaping", () => {
     expect(signalled).toEqual([]);
   });
 });
+
+/**
+ * stderr on the kill path.
+ *
+ * The launcher already captures a rolling stderr tail to classify *exit*
+ * reasons, but the wedge path kills the process rather than letting it exit, so
+ * that buffer was never surfaced. Every wedge warning therefore reported kernel
+ * state (S/ep_poll, RSS, fds) and nothing about what the CLI itself said before
+ * dropping stdout — which is the one piece of evidence that could explain a
+ * wedge rather than merely report it. In production 35 of 36 kills were
+ * `no_descendants` on healthy sleeping processes with no explanation available.
+ */
+describe("stderr tail on kill warnings", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  const wedgeWarning = () =>
+    warnSpy.mock.calls.find((c: unknown[]) => String(c[1]).includes("killing wedged process"));
+
+  it("includes the CLI's stderr in the wedge-kill warning", async () => {
+    vi.useFakeTimers();
+    const adapter = new ClaudeAdapter("stderr-session", {
+      getStderrTail: () => "FATAL: upstream stream closed unexpectedly",
+    });
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    endStdout();
+    await vi.advanceTimersByTimeAsync(11_000);
+
+    const call = wedgeWarning();
+    expect(call).toBeDefined();
+    expect(call?.[2]).toMatchObject({ stderrTail: "FATAL: upstream stream closed unexpectedly" });
+  });
+
+  it("omits the field entirely when the CLI said nothing", async () => {
+    // A quiet failure should stay quiet rather than log an empty string.
+    vi.useFakeTimers();
+    const adapter = new ClaudeAdapter("stderr-quiet", { getStderrTail: () => "   " });
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    endStdout();
+    await vi.advanceTimersByTimeAsync(11_000);
+
+    expect(wedgeWarning()?.[2]).toMatchObject({ stderrTail: undefined });
+  });
+
+  it("caps a chatty process so it cannot flood the log", async () => {
+    vi.useFakeTimers();
+    const adapter = new ClaudeAdapter("stderr-loud", { getStderrTail: () => "x".repeat(5000) });
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    endStdout();
+    await vi.advanceTimersByTimeAsync(11_000);
+
+    const tail = (wedgeWarning()?.[2] as { stderrTail?: string })?.stderrTail;
+    expect(tail).toHaveLength(600);
+  });
+
+  it("still kills when the stderr reader throws", async () => {
+    // Diagnostics must never be able to block recovery.
+    vi.useFakeTimers();
+    const adapter = new ClaudeAdapter("stderr-throws", {
+      getStderrTail: () => { throw new Error("launcher gone"); },
+    });
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    endStdout();
+    await vi.advanceTimersByTimeAsync(11_000);
+
+    expect(proc.kill).toHaveBeenCalled();
+    expect(wedgeWarning()?.[2]).toMatchObject({ stderrTail: undefined });
+  });
+
+  it("works when no stderr reader is supplied at all", async () => {
+    vi.useFakeTimers();
+    const adapter = new ClaudeAdapter("stderr-absent");
+    const { proc, endStdout } = createMockProc();
+    adapter.attachStdio(proc);
+
+    endStdout();
+    await vi.advanceTimersByTimeAsync(11_000);
+
+    expect(proc.kill).toHaveBeenCalled();
+    expect(wedgeWarning()).toBeDefined();
+  });
+});
