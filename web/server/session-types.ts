@@ -297,10 +297,34 @@ export interface CLIUserEchoMessage {
   session_id?: string;
 }
 
+/**
+ * Rate-limit status from the Claude API.
+ *
+ * Field shapes verified against 200 recorded events: status was `allowed`
+ * (183), `allowed_warning` (14) and `rejected` (3); `utilization` and
+ * `surpassedThreshold` appear on warning events, and `rateLimitType` was
+ * always `five_hour` — the plan window, not the per-minute RPM/TPM cap.
+ */
+export interface RateLimitInfo {
+  /** `allowed` | `allowed_warning` | `rejected`, per observed traffic. */
+  status?: string;
+  /** Fraction of the window consumed, 0-1 (e.g. 0.95). Warning events only. */
+  utilization?: number;
+  /** The threshold that tripped this warning, 0-1 (e.g. 0.9). */
+  surpassedThreshold?: number;
+  /** Unix seconds at which the window resets. */
+  resetsAt?: number;
+  /** e.g. "five_hour". */
+  rateLimitType?: string;
+  overageStatus?: string;
+  overageDisabledReason?: string;
+  isUsingOverage?: boolean;
+}
+
 /** Rate-limit status from Claude API (allowed/throttled). */
 export interface CLIRateLimitEventMessage {
   type: "rate_limit_event";
-  rate_limit_info: Record<string, unknown>;
+  rate_limit_info: RateLimitInfo & Record<string, unknown>;
   uuid?: string;
 }
 
@@ -414,6 +438,7 @@ export type BrowserIncomingMessageBase =
   | { type: "session_name_update"; name: string }
   | { type: "pr_status_update"; pr: import("./github-pr.js").GitHubPRInfo | null; available: boolean }
   | { type: "mcp_status"; servers: McpServerDetail[] }
+  | { type: "rate_limit"; info: RateLimitInfo }
   | { type: "session_phase"; phase: SessionPhase; previousPhase: SessionPhase }
   | { type: "prompt_suggestion"; suggestions: string[] }
   | { type: "streamlined_text"; text: string }

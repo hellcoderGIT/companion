@@ -1996,6 +1996,50 @@ describe("CLI message routing", () => {
     }
   });
 
+  /**
+   * Regression: the server-owned-adapter disconnect path serves BOTH stdio
+   * Claude and Codex, but every label on it said "Codex" — so a Claude
+   * session's disconnects were filed under the wrong backend and any forensic
+   * search for them looked under the wrong term. Observed live:
+   *   reason=codex_disconnect_confirmed backendType=claude
+   */
+  it("labels adapter disconnects with the session's actual backend", async () => {
+    vi.useFakeTimers();
+    try {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const session = bridge.getOrCreateSession("s1");
+      expect(session.backendType).toBe("claude");
+
+      const browser = makeBrowserSocket("s1");
+      bridge.handleBrowserOpen(browser, "s1");
+
+      let disconnectCb: (() => void) | undefined;
+      const adapter = {
+        isConnected: () => false,
+        send: () => true,
+        disconnect: async () => {},
+        onBrowserMessage: () => {},
+        onSessionMeta: () => {},
+        onDisconnect: (cb: () => void) => { disconnectCb = cb; },
+        onInitError: () => {},
+      };
+      bridge.attachBackendAdapter("s1", adapter as never, "claude");
+
+      disconnectCb!();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const banner = warnSpy.mock.calls
+        .map(([a]) => String(a))
+        .find((l) => l.includes("UI: CLI disconnected banner shown"));
+      expect(banner).toBeDefined();
+      // A Claude session must never be filed under codex_*.
+      expect(banner).toContain("claude_disconnect_confirmed");
+      expect(banner).not.toContain("codex_disconnect_confirmed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("tool_progress: broadcasts", async () => {
     const msg = JSON.stringify({
       type: "tool_progress",

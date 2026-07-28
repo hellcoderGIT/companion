@@ -910,6 +910,67 @@ function LinearIssueSection({ sessionId }: { sessionId: string }) {
 // ─── Extracted Section Components ───────────────────────────────────────────
 
 /** Wrapper that renders the correct usage/rate-limit component based on backend type */
+/**
+ * Claude API plan-window usage.
+ *
+ * The CLI emits `rate_limit_event` continuously and companion discarded it, so
+ * a throttled account looked identical to a healthy one. Recorded traffic shows
+ * it does fire in anger — across 200 samples, 14 `allowed_warning` and 3
+ * `rejected` — while the UI said nothing.
+ *
+ * `utilization` is only present on warning events, so a plain `allowed` renders
+ * nothing rather than a misleading empty bar; there is no usable number until
+ * the API starts warning.
+ */
+function ClaudeRateLimitSection({ sessionId }: { sessionId: string }) {
+  const info = useStore((s) => s.rateLimit.get(sessionId));
+
+  // Re-render on a slow tick so the reset countdown stays honest.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!info) return;
+    const id = setInterval(() => setTick((t) => t + 1), COUNTDOWN_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [info]);
+
+  if (!info?.status || info.status === "allowed") return null;
+
+  const rejected = info.status === "rejected";
+  const pct = typeof info.utilization === "number" ? info.utilization * 100 : undefined;
+  const resetsIn =
+    typeof info.resetsAt === "number" && info.resetsAt > 0
+      ? formatCodexResetTime(info.resetsAt)
+      : undefined;
+
+  return (
+    <div className="shrink-0 px-4 py-2.5 space-y-2" data-testid="claude-rate-limit">
+      {pct !== undefined ? (
+        <ProgressMeter
+          label={info.rateLimitType === "five_hour" ? "5h Limit" : "Plan Limit"}
+          pct={pct}
+          detail={resetsIn}
+        />
+      ) : (
+        // Rejected events carry no utilization, so state it plainly instead of
+        // rendering a bar with nothing behind it.
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-cc-muted uppercase tracking-wider">Plan Limit</span>
+          <span className={`text-[11px] tabular-nums ${rejected ? "text-cc-error" : "text-cc-warning"}`}>
+            {rejected ? "rate limited" : info.status}
+            {resetsIn && ` · resets ${resetsIn}`}
+          </span>
+        </div>
+      )}
+      {rejected && (
+        <p className="text-[11px] text-cc-error">
+          The API is refusing requests for this plan window
+          {resetsIn ? ` — resets in ${resetsIn}.` : "."}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function UsageLimitsRenderer({ sessionId }: { sessionId: string }) {
   const session = useStore((s) => s.sessions.get(sessionId));
   const sdk = useSdkSession(sessionId);
@@ -923,7 +984,12 @@ function UsageLimitsRenderer({ sessionId }: { sessionId: string }) {
       </>
     );
   }
-  return <UsageLimitsSection sessionId={sessionId} />;
+  return (
+    <>
+      <ClaudeRateLimitSection sessionId={sessionId} />
+      <UsageLimitsSection sessionId={sessionId} />
+    </>
+  );
 }
 
 /** Git branch info */

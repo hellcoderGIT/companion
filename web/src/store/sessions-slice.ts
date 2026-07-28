@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
 import type { AppState } from "./index.js";
-import type { SessionState, SdkSessionInfo, McpServerDetail } from "../types.js";
+import type { SessionState, SdkSessionInfo, McpServerDetail, RateLimitInfo } from "../types.js";
 import type { PRStatusResponse, LinearIssue } from "../api.js";
 import { deleteFromMap, deleteFromSet } from "./utils.js";
 
@@ -41,6 +41,8 @@ export interface SessionsSlice {
   prStatus: Map<string, PRStatusResponse>;
   linkedLinearIssues: Map<string, LinearIssue>;
   mcpServers: Map<string, McpServerDetail[]>;
+  /** Latest API rate-limit status per session, from the CLI's rate_limit_event. */
+  rateLimit: Map<string, RateLimitInfo>;
   collapsedProjects: Set<string>;
 
   setCurrentSession: (id: string | null) => void;
@@ -59,6 +61,7 @@ export interface SessionsSlice {
   setPRStatus: (sessionId: string, status: PRStatusResponse) => void;
   setLinkedLinearIssue: (sessionId: string, issue: LinearIssue | null) => void;
   setMcpServers: (sessionId: string, servers: McpServerDetail[]) => void;
+  setRateLimit: (sessionId: string, info: RateLimitInfo) => void;
   toggleProjectCollapse: (projectKey: string) => void;
   setSessionAiValidation: (sessionId: string, settings: { aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null }) => void;
 }
@@ -77,6 +80,7 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
   prStatus: new Map(),
   linkedLinearIssues: new Map(),
   mcpServers: new Map(),
+  rateLimit: new Map(),
   collapsedProjects: getInitialCollapsedProjects(),
 
   setCurrentSession: (id) => {
@@ -125,6 +129,7 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
         sessionNames,
         recentlyRenamed: deleteFromSet(s.recentlyRenamed, sessionId),
         mcpServers: deleteFromMap(s.mcpServers, sessionId),
+        rateLimit: deleteFromMap(s.rateLimit, sessionId),
         prStatus: deleteFromMap(s.prStatus, sessionId),
         linkedLinearIssues: deleteFromMap(s.linkedLinearIssues, sessionId),
         sdkSessions: s.sdkSessions.filter((sdk) => sdk.sessionId !== sessionId),
@@ -236,6 +241,13 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
       const mcpServers = new Map(s.mcpServers);
       mcpServers.set(sessionId, servers);
       return { mcpServers };
+    }),
+
+  setRateLimit: (sessionId, info) =>
+    set((s) => {
+      const rateLimit = new Map(s.rateLimit);
+      rateLimit.set(sessionId, info);
+      return { rateLimit };
     }),
 
   toggleProjectCollapse: (projectKey) =>

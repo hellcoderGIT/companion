@@ -669,9 +669,17 @@ export class WsBridge {
       // "reconnecting" with a short debounce (5s vs 15s for the legacy WS
       // Claude transport, since there's no WebSocket cycling).
       session.backendAdapter = null;
-      session.stateMachine.transition("reconnecting", "codex_adapter_disconnected");
+      // This path serves BOTH stdio Claude and Codex, but every label here used
+      // to say "Codex" — so a Claude session's disconnects were filed under the
+      // wrong backend in the logs, and forensics silently searched the wrong
+      // term. Label from the session's actual backend instead.
+      const backend = session.backendType;
+      session.stateMachine.transition("reconnecting", `${backend}_adapter_disconnected`);
       this.persistSession(session);
-      log.info("ws-bridge", "Codex adapter disconnected, starting debounce", { sessionId });
+      log.info("ws-bridge", "Backend adapter disconnected, starting debounce", {
+        sessionId,
+        backendType: backend,
+      });
 
       const existing = this.disconnectTimers.get(sessionId);
       if (existing) clearTimeout(existing);
@@ -680,14 +688,14 @@ export class WsBridge {
         // Check if a new adapter reconnected during the grace period
         if (session.backendAdapter?.isConnected()) return;
 
-        log.warn("ws-bridge", "Codex disconnect confirmed", { sessionId });
+        log.warn("ws-bridge", "Backend disconnect confirmed", { sessionId, backendType: backend });
         for (const [reqId] of session.pendingPermissions) {
           this.broadcastToBrowsers(session, { type: "permission_cancelled", request_id: reqId });
         }
         session.pendingPermissions.clear();
         session.stateMachine.transition("terminated", "disconnect_confirmed");
         this.persistSession(session);
-        this.broadcastCliDisconnected(session, "codex_disconnect_confirmed");
+        this.broadcastCliDisconnected(session, `${backend}_disconnect_confirmed`);
 
         // Request auto-relaunch regardless of browser state — proactive
         // keepalive in the orchestrator ensures headless sessions stay alive.

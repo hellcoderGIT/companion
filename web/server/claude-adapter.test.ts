@@ -55,6 +55,7 @@ vi.mock("./settings-manager.js", () => ({
 }));
 
 import { ClaudeAdapter } from "./claude-adapter.js";
+import type { BrowserIncomingMessage } from "./session-types.js";
 import { log } from "./logger.js";
 
 // ─── Mock socket factory ────────────────────────────────────────────────────
@@ -2317,5 +2318,75 @@ describe("stderr tail on kill warnings", () => {
 
     expect(proc.kill).toHaveBeenCalled();
     expect(wedgeWarning()).toBeDefined();
+  });
+});
+
+/**
+ * rate_limit_event was previously discarded with the comment "no user-facing
+ * action needed". Recorded traffic disagrees: across 200 events there were 14
+ * `allowed_warning` and 3 `rejected`, none of which reached the UI or the logs.
+ * It is also the only signal we get about plan-window usage.
+ */
+describe("rate_limit_event surfacing", () => {
+  it("forwards the info to the browser", async () => {
+    const emitted: BrowserIncomingMessage[] = [];
+    const a = new ClaudeAdapter("rl-1");
+    a.onBrowserMessage((m) => emitted.push(m));
+    const { proc, pushStdout } = createMockProc();
+    a.attachStdio(proc);
+
+    pushStdout(JSON.stringify({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed_warning",
+        utilization: 0.95,
+        rateLimitType: "five_hour",
+        resetsAt: 1784441400,
+      },
+      uuid: "rl-uuid-1",
+      session_id: "s",
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const msg = emitted.find((m) => m.type === "rate_limit") as
+      | { type: "rate_limit"; info: Record<string, unknown> }
+      | undefined;
+    expect(msg).toBeDefined();
+    expect(msg?.info.status).toBe("allowed_warning");
+    // Utilization must survive intact — it drives the meter fill.
+    expect(msg?.info.utilization).toBe(0.95);
+  });
+
+  it("still forwards allowed events so the UI can clear a stale warning", async () => {
+    // If only warnings were forwarded, a session would stay visually throttled
+    // after recovering.
+    const emitted: BrowserIncomingMessage[] = [];
+    const a = new ClaudeAdapter("rl-2");
+    a.onBrowserMessage((m) => emitted.push(m));
+    const { proc, pushStdout } = createMockProc();
+    a.attachStdio(proc);
+
+    pushStdout(JSON.stringify({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", rateLimitType: "five_hour" },
+      session_id: "s",
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(emitted.some((m) => m.type === "rate_limit")).toBe(true);
+  });
+
+  it("tolerates a missing rate_limit_info without throwing", async () => {
+    // A throw here would kill the stdout reader for the life of the process —
+    // the exact failure the e2e harness hit with Bun.hash.
+    const a = new ClaudeAdapter("rl-3");
+    const { proc, pushStdout } = createMockProc();
+    a.attachStdio(proc);
+
+    expect(() => {
+      pushStdout(JSON.stringify({ type: "rate_limit_event", session_id: "s" }) + "\n");
+    }).not.toThrow();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(a.isConnected()).toBe(true);
   });
 });
