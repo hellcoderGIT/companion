@@ -665,6 +665,21 @@ export class ClaudeAdapter implements IBackendAdapter {
       return;
     }
 
+    // Nothing to rescue when no turn is outstanding. An idle session is silent
+    // because the user has not typed, which is indistinguishable from a dead
+    // turn by elapsed time alone — so probing it produced "Response interrupted
+    // — the backend disconnected" banners for turns that never existed. That is
+    // most of the disconnect noise users report.
+    //
+    // Recovery is not lost: a message sent to a terminated session already
+    // requests a relaunch and flushes on attach, so a dead idle CLI is revived
+    // on demand rather than pre-emptively. Same trade as the browser-aware
+    // keepalive — pay the cost when someone is actually waiting.
+    if (!this.turnInFlight) {
+      this.probeSentAt = null;
+      return;
+    }
+
     // An unanswered probe is the actual failure signal: a healthy CLI replies
     // to control requests promptly even while working.
     if (this.probeSentAt !== null) {

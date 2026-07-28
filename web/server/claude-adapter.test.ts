@@ -1812,6 +1812,10 @@ describe("stdio silence probe", () => {
     adapter.attachStdio(proc);
     expect(adapter.isConnected()).toBe(true);
 
+    // A turn must be outstanding: the probe no longer escalates on an idle
+    // session, because silence there just means the user has not typed.
+    adapter.send({ type: "user_message", content: "do something" });
+
     // Silence short of the probe threshold: nothing happens yet.
     await vi.advanceTimersByTimeAsync(110_000);
     expect(disconnectCb).not.toHaveBeenCalled();
@@ -1893,11 +1897,57 @@ describe("stdio silence probe", () => {
     expect(adapter.isConnected()).toBe(true);
   });
 
+  /**
+   * Idle sessions must never be torn down by the probe.
+   *
+   * Silence on an idle session means the user has not typed — indistinguishable
+   * from a dead turn by elapsed time alone. Escalating there produced "Response
+   * interrupted — the backend disconnected" banners for turns that never
+   * existed, which is most of the disconnect noise users report. Observed on
+   * this very session: `CLI silent; sending liveness probe silentForMs=133784`
+   * while simply waiting for input.
+   */
+  it("never escalates on an idle session with no turn outstanding", async () => {
+    vi.useFakeTimers();
+    const { proc } = createMockProc();
+    adapter.attachStdio(proc);
+
+    // Ten minutes of silence with no user message ever sent.
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+  });
+
+  it("stops escalating once the turn completes", async () => {
+    // The turn ends mid-silence: what was a recoverable stall becomes an idle
+    // session, and must stop being a kill candidate.
+    vi.useFakeTimers();
+    const { proc, pushStdout } = createMockProc();
+    adapter.attachStdio(proc);
+    adapter.send({ type: "user_message", content: "quick question" });
+
+    pushStdout(JSON.stringify({
+      type: "result", subtype: "success", is_error: false,
+      duration_ms: 5, num_turns: 1, session_id: "s", uuid: "r-idle",
+    }) + "\n");
+    await vi.advanceTimersByTimeAsync(10);
+
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    expect(disconnectCb).not.toHaveBeenCalled();
+    expect(adapter.isConnected()).toBe(true);
+  });
+
   it("still escalates when a tool call blows the grace ceiling", async () => {
     // A tool that never returns must not suppress recovery forever.
     vi.useFakeTimers();
     const { proc, pushStdout } = createMockProc();
     adapter.attachStdio(proc);
+
+    // Establish an outstanding turn — escalation is gated on one, so that an
+    // idle session is never torn down for simply having nothing to say.
+    adapter.send({ type: "user_message", content: "run a tool" });
 
     pushStdout(
       JSON.stringify({
