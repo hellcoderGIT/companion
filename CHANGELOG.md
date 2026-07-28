@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.113.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.112.0...companion-v0.113.0) (2026-07-28)
+
+
+### Features
+
+* **diagnostics:** quote the CLI's stderr in kill and stall warnings ([#89](https://github.com/hellcoderGIT/companion/issues/89)) ([bf82019](https://github.com/hellcoderGIT/companion/commit/bf820194866a6d4caad65b2f421f66b3b326ceb0))
+* **ui:** surface Claude API rate limits instead of discarding them ([#90](https://github.com/hellcoderGIT/companion/issues/90)) ([6010091](https://github.com/hellcoderGIT/companion/commit/6010091cf709e5470d2a9d64f660c882b4bdbe2c))
+
 ## [0.112.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.111.3...companion-v0.112.0) (2026-07-28)
 
 
