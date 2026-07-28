@@ -527,6 +527,8 @@ export class WsBridge {
         const resultData = msg.data;
         // The turn completed (even if it errored) — no replay needed.
         session.inFlightUserTurn = undefined;
+        // The turn is genuinely finished, so a later relaunch must not nudge it.
+        session.turnAwaitingResult = false;
         // Detect auth failures (expired/invalid credentials). The CLI keeps
         // running in stream-json mode, so this is the primary auth signal — not
         // a process exit. Flag the session so auto-relaunch is skipped (the
@@ -728,6 +730,36 @@ export class WsBridge {
       this.broadcastToBrowsers(session, {
         type: "error",
         message: "Reconnected — re-sending your last message, which the previous session didn't answer.",
+      });
+    } else if (
+      !isLegacyWsClaude &&
+      // Only when output had already begun: inFlightUserTurn is cleared by the
+      // first token, so its absence is what distinguishes "died mid-answer"
+      // from "died before answering". Without this check a poison prompt that
+      // has exhausted its one replay would get nudged on every subsequent
+      // relaunch, defeating inFlightTurnReplayed.
+      !session.inFlightUserTurn &&
+      session.turnAwaitingResult &&
+      !session.continuationSent
+    ) {
+      // The turn died AFTER it had begun answering. `--resume` restores the
+      // transcript but does not restart the turn, so without this the session
+      // idles forever and a human eventually types "continue" by hand.
+      //
+      // Re-sending the original prompt is wrong here: work already happened and
+      // replaying it would redo tool calls. A continuation nudge asks the model
+      // to finish from where the transcript stops instead.
+      session.continuationSent = true;
+      session.pendingMessages.unshift(JSON.stringify({
+        type: "user_message",
+        content: "Your previous response was interrupted before it finished. Continue from where you left off — do not repeat work that is already in the transcript.",
+      }));
+      log.info("ws-bridge", "Nudging interrupted turn to continue after relaunch", {
+        sessionId,
+      });
+      this.broadcastToBrowsers(session, {
+        type: "error",
+        message: "Reconnected — the previous answer was cut off, asking it to continue.",
       });
     }
 
@@ -1257,6 +1289,11 @@ export class WsBridge {
       // one-shot replay guard.
       session.inFlightUserTurn = JSON.stringify(msg);
       session.inFlightTurnReplayed = false;
+      // Tracked separately from inFlightUserTurn, which is cleared on the first
+      // token: this stays set until the turn actually finishes, so an interrupt
+      // *mid-answer* is still recognisable as an unfinished turn.
+      session.turnAwaitingResult = true;
+      session.continuationSent = false;
       // A fresh turn is an attempt to make progress (e.g. after the user
       // re-authenticated), so clear any stale auth-block — a genuine crash on
       // this new turn should be allowed to auto-relaunch again.
