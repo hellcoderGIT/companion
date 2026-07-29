@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.113.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.1...companion-v0.113.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* **session:** widen the result grace, split the detectors, stamp the version ([#95](https://github.com/hellcoderGIT/companion/issues/95)) ([dc3090c](https://github.com/hellcoderGIT/companion/commit/dc3090cf62c876e30c67f2e45281b7329bd1d446))
+
 ## [0.113.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.0...companion-v0.113.1) (2026-07-28)
 
 
