@@ -1726,8 +1726,14 @@ describe("stdio transport disconnect propagation", () => {
       await vi.advanceTimersByTimeAsync(2100);
       expect(proc.kill).not.toHaveBeenCalled();
 
+      // Past the OLD 10s result grace but inside the new 20s one. Raised
+      // because on a multi-user host five kills missed the 10s window by under
+      // 150ms (10008-10141ms) — pure off-by-a-hair losses of healthy sessions.
+      await vi.advanceTimersByTimeAsync(9000);
+      expect(proc.kill).not.toHaveBeenCalled();
+
       // ...but past the longer result grace (10s) with no self-exit → killed.
-      await vi.advanceTimersByTimeAsync(8000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(proc.kill).toHaveBeenCalledTimes(1);
       expect(adapter.isConnected()).toBe(false);
       expect(disconnectCb).toHaveBeenCalledTimes(1);
@@ -1937,6 +1943,66 @@ describe("stdio silence probe", () => {
 
     expect(disconnectCb).not.toHaveBeenCalled();
     expect(adapter.isConnected()).toBe(true);
+  });
+
+  /**
+   * The probe flag must gate ONLY the probe.
+   *
+   * Measured on a multi-user host: `checkSilence()` early-returned on
+   * silenceProbeEnabled, which disabled the stdout-open probe *and* the
+   * turn-stall detector together. Operators turning the probe off to stop
+   * spurious kills were left with no detection at all for a CLI that goes
+   * silent with stdout still open — the failure mode that hangs a session
+   * indefinitely with no error and needs a manual kill.
+   */
+  it("still detects a stalled turn when the silence probe is disabled", async () => {
+    vi.useFakeTimers();
+    mockSettings.silenceProbeEnabled = false;
+    try {
+      const { proc, pushStdout } = createMockProc();
+      adapter.attachStdio(proc);
+      adapter.send({ type: "user_message", content: "do work" });
+
+      // Output begins, then the turn dies while the transport stays responsive.
+      pushStdout(JSON.stringify({
+        type: "stream_event",
+        event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
+        session_id: "s", uuid: "se-stall",
+      }) + "\n");
+      await vi.advanceTimersByTimeAsync(10);
+
+      // Keep the transport alive so the probe path could never fire anyway.
+      for (let i = 0; i < 12; i++) {
+        await vi.advanceTimersByTimeAsync(30_000);
+        pushStdout(JSON.stringify({ type: "keep_alive", session_id: "s", uuid: `ka-${i}` }) + "\n");
+      }
+
+      // Turn-stall must still fire despite the probe being off.
+      expect(disconnectCb).toHaveBeenCalled();
+    } finally {
+      mockSettings.silenceProbeEnabled = true;
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not run the silence probe when disabled", async () => {
+    // The flag must still do its job for the probe itself.
+    vi.useFakeTimers();
+    mockSettings.silenceProbeEnabled = false;
+    try {
+      const { proc } = createMockProc();
+      adapter.attachStdio(proc);
+      adapter.send({ type: "user_message", content: "work" });
+
+      // Total silence well past probe + timeout, but no turn output tracking
+      // has aged enough to trip turn-stall.
+      await vi.advanceTimersByTimeAsync(200_000);
+
+      expect(disconnectCb).not.toHaveBeenCalled();
+    } finally {
+      mockSettings.silenceProbeEnabled = true;
+      vi.useRealTimers();
+    }
   });
 
   it("still escalates when a tool call blows the grace ceiling", async () => {

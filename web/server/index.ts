@@ -34,7 +34,7 @@ import { authenticateManagedWebSocket } from "./ws-auth.js";
 import { LinearAgentBridge } from "./linear-agent-bridge.js";
 import { NoVncProxy } from "./novnc-proxy.js";
 
-import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
+import { startPeriodicCheck, setServiceMode, getCurrentVersion } from "./update-checker.js";
 import { startDashboardScheduler } from "./dashboard-scheduler.js";
 import {
   startPeriodicCheck as startClaudeCompatPeriodicCheck,
@@ -110,6 +110,17 @@ orchestrator.initialize();
 // nothing holding the reference needed to clean them up they survive for the
 // life of the host, holding memory nobody can reclaim.
 startOrphanSweeper();
+
+// Stamp the running build into every log file. Log files span multiple builds
+// and carry no version marker, so a reader aggregating across them silently
+// mixes releases — measured on a multi-user host, that inverted the answer to
+// three of four diagnostic questions, because a retired failure mode from an
+// older build dominated the flat totals.
+log.info("server", "Companion started", {
+  version: getCurrentVersion(),
+  pid: process.pid,
+  node: process.version,
+});
 
 console.log(`[server] Session persistence: ${sessionStore.directory}`);
 if (recorder.isGloballyEnabled()) {

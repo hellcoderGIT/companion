@@ -80,7 +80,7 @@ const STDOUT_CLOSE_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_GRACE_MS
  * Still bounded so a process that wedges *after* a result (e.g. a teardown
  * deadlock) cannot hang the reader and block recovery indefinitely.
  */
-const STDOUT_CLOSE_RESULT_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_RESULT_GRACE_MS) || 10000;
+const STDOUT_CLOSE_RESULT_GRACE_MS = Number(process.env.COMPANION_STDOUT_CLOSE_RESULT_GRACE_MS) || 20_000;
 
 /**
  * How long to wait after SIGTERM before escalating to SIGKILL.
@@ -639,7 +639,6 @@ export class ClaudeAdapter implements IBackendAdapter {
 
   private checkSilence(): void {
     if (this.transportKind !== "stdio" || !this.stdioConnected) return;
-    if (getSettings().silenceProbeEnabled === false) return;
 
     const now = Date.now();
 
@@ -662,6 +661,16 @@ export class ClaudeAdapter implements IBackendAdapter {
       this.stopSilenceProbe();
       // Same handoff as the silence probe: relaunch replays the in-flight turn.
       this.notifyStdioDisconnect();
+      return;
+    }
+
+    // Only the probe is gated by the setting. The turn-stall check above is a
+    // separate detector and deliberately still runs: measured on a multi-user
+    // host, disabling the flag removed BOTH, leaving no detection at all for a
+    // CLI that goes silent with stdout still open — the failure mode that hangs
+    // a session indefinitely with no error and needs a manual kill.
+    if (getSettings().silenceProbeEnabled === false) {
+      this.probeSentAt = null;
       return;
     }
 
