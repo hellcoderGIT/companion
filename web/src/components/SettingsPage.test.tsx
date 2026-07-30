@@ -355,6 +355,45 @@ describe("SettingsPage", () => {
     });
   });
 
+  // The Agent SDK transport toggle switches which layer drives Claude
+  // sessions (companion's stdio bridge vs @anthropic-ai/claude-agent-sdk).
+  // Applied at spawn/relaunch time; default must stay "stdio".
+  it("toggles the Agent SDK transport and persists claudeTransport via updateSettings", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Use Agent SDK transport/i });
+    // Default is the stdio bridge (aria-checked=false → not on SDK).
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ claudeTransport: "sdk" });
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("reflects claudeTransport=sdk loaded from the server", async () => {
+    mockApi.getSettings.mockResolvedValueOnce({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      linearApiKeyConfigured: false,
+      linearAutoTransition: false,
+      linearAutoTransitionStateName: "",
+      updateChannel: "stable",
+      publicUrl: "",
+      proactiveKeepaliveEnabled: true,
+      wedgeKillEnabled: true,
+      silenceProbeEnabled: true,
+      claudeTransport: "sdk",
+    });
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("switch", { name: /Use Agent SDK transport/i });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+  });
+
   it("reflects proactiveKeepaliveEnabled=false loaded from the server", async () => {
     mockApi.getSettings.mockResolvedValueOnce({
       anthropicApiKeyConfigured: true,

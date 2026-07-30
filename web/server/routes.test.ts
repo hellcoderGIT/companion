@@ -1161,6 +1161,7 @@ describe("GET /api/sessions/:id/archive-info", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
     const res = await app.request("/api/sessions/s1/archive-info", { method: "GET" });
@@ -1539,6 +1540,7 @@ describe("GET /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 123,
     });
 
@@ -1575,6 +1577,7 @@ describe("GET /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
     });
   });
 
@@ -1611,6 +1614,7 @@ describe("GET /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 123,
     });
 
@@ -1647,6 +1651,7 @@ describe("GET /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
     });
   });
 
@@ -1684,6 +1689,7 @@ describe("GET /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 100,
     });
 
@@ -1729,6 +1735,7 @@ describe("PUT /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 456,
     });
 
@@ -1787,6 +1794,7 @@ describe("PUT /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
     });
   });
 
@@ -1823,6 +1831,7 @@ describe("PUT /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 789,
     });
 
@@ -1876,6 +1885,7 @@ describe("PUT /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 999,
     });
 
@@ -2029,6 +2039,7 @@ describe("PUT /api/settings", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 500,
     });
 
@@ -2288,6 +2299,7 @@ describe("GET /api/linear/issues", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2331,6 +2343,7 @@ describe("GET /api/linear/issues", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -2427,6 +2440,7 @@ describe("GET /api/linear/issues", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -2530,6 +2544,7 @@ describe("GET /api/linear/issues", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -2598,6 +2613,7 @@ describe("GET /api/linear/connection", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2641,6 +2657,7 @@ describe("GET /api/linear/connection", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -2706,6 +2723,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -2753,6 +2771,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -2799,6 +2818,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -2847,6 +2867,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -2929,6 +2950,7 @@ describe("POST /api/linear/issues/:id/transition", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -2990,6 +3012,7 @@ describe("GET /api/linear/projects", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -3033,6 +3056,7 @@ describe("GET /api/linear/projects", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -3106,6 +3130,7 @@ describe("GET /api/linear/project-issues", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
     vi.mocked(resolveApiKey).mockReturnValue(null);
@@ -3149,6 +3174,7 @@ describe("GET /api/linear/project-issues", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 
@@ -3237,6 +3263,7 @@ describe("GET /api/linear/project-issues", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+      claudeTransport: "stdio",
       updatedAt: 0,
     });
 

@@ -49,6 +49,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [proactiveKeepaliveEnabled, setProactiveKeepaliveEnabled] = useState(true);
   const [wedgeKillEnabled, setWedgeKillEnabled] = useState(true);
   const [silenceProbeEnabled, setSilenceProbeEnabled] = useState(true);
+  const [claudeTransport, setClaudeTransport] = useState<"stdio" | "sdk">("stdio");
   const [cliBridgeMode, setCliBridgeMode] = useState<"loopback" | "jsonHandoff">("loopback");
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingApp, setUpdatingApp] = useState(false);
@@ -154,6 +155,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (typeof s.proactiveKeepaliveEnabled === "boolean") setProactiveKeepaliveEnabled(s.proactiveKeepaliveEnabled);
         if (typeof s.wedgeKillEnabled === "boolean") setWedgeKillEnabled(s.wedgeKillEnabled);
         if (typeof s.silenceProbeEnabled === "boolean") setSilenceProbeEnabled(s.silenceProbeEnabled);
+        if (s.claudeTransport === "sdk" || s.claudeTransport === "stdio") setClaudeTransport(s.claudeTransport);
         if (s.cliBridgeMode === "loopback" || s.cliBridgeMode === "jsonHandoff") setCliBridgeMode(s.cliBridgeMode);
         if (typeof s.publicUrl === "string") {
           setPublicUrl(s.publicUrl);
@@ -493,6 +495,37 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     session is relaunched and the in-flight turn replayed. Without this such a session hangs
                     indefinitely showing &ldquo;Still working&hellip;&rdquo; with no error, because nothing ever closes
                     the stream for companion to notice.
+                  </p>
+                </div>
+
+                <div className="pt-3 border-t border-cc-border">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={claudeTransport === "sdk"}
+                    aria-label="Use Agent SDK transport (experimental)"
+                    onClick={async () => {
+                      const next = claudeTransport === "sdk" ? "stdio" : "sdk";
+                      const prev = claudeTransport;
+                      setClaudeTransport(next);
+                      try {
+                        await api.updateSettings({ claudeTransport: next });
+                      } catch {
+                        setClaudeTransport(prev);
+                      }
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg text-sm bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+                  >
+                    <span>Use Agent SDK transport (experimental)</span>
+                    <span className="text-xs text-cc-muted">{claudeTransport === "sdk" ? "SDK" : "stdio"}</span>
+                  </button>
+                  <p className="mt-1 text-xs text-cc-muted px-1">
+                    Claude Code only — Codex sessions are unaffected. When on, new and reconnected Claude
+                    sessions run through Anthropic&rsquo;s official Agent SDK instead of companion&rsquo;s own
+                    stdio bridge: same <code>claude</code> binary, same subscription login and usage windows,
+                    but the protocol layer is maintained upstream. Applies at launch time, so flip it and hit
+                    Reconnect on a session to migrate it (history is preserved via resume). Containerized
+                    sessions always use the stdio bridge.
                   </p>
                 </div>
               </div>
