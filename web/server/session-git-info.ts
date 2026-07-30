@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { exec } from "node:child_process";
 import { resolve } from "node:path";
 import type { SessionState } from "./session-types.js";
 import { containerManager } from "./container-manager.js";
@@ -7,23 +7,38 @@ function shellEscapeSingle(value: string): string {
   return value.replace(/'/g, "'\\''");
 }
 
-function runGitCommand(sessionId: string, state: SessionState, command: string): string {
+/**
+ * Run a git (or docker-wrapped git) command asynchronously.
+ *
+ * This used to be execSync. Resolving git info runs up to four commands per
+ * session and fires for EVERY session on browser connect — a browser
+ * reconnect storm over a dozen sessions meant dozens of back-to-back
+ * synchronous subprocess calls (3s timeout each) on the event loop. Those
+ * stalls starved live CLI stdio streams mid-turn, which the wedge detector
+ * then misread as dead transports. Async keeps the loop free; the git info
+ * lands a few ms later, which nothing here is sensitive to.
+ */
+function runGitCommand(sessionId: string, state: SessionState, command: string): Promise<string> {
+  let fullCommand = command;
+  let cwd: string | undefined = state.cwd;
+
   if (state.is_containerized) {
     const container = containerManager.getContainer(sessionId);
-    if (container?.containerId) {
-      const containerCwd = container.containerCwd || "/workspace";
-      const inner = `cd '${shellEscapeSingle(containerCwd)}' && ${command}`;
-      const dockerCmd = `docker exec ${container.containerId} sh -lc ${JSON.stringify(inner)}`;
-      return execSync(dockerCmd, { encoding: "utf-8", timeout: 3000 }).trim();
+    if (!container?.containerId) {
+      return Promise.reject(new Error("container not tracked"));
     }
-    throw new Error("container not tracked");
+    const containerCwd = container.containerCwd || "/workspace";
+    const inner = `cd '${shellEscapeSingle(containerCwd)}' && ${command}`;
+    fullCommand = `docker exec ${container.containerId} sh -lc ${JSON.stringify(inner)}`;
+    cwd = undefined;
   }
 
-  return execSync(command, {
-    cwd: state.cwd,
-    encoding: "utf-8",
-    timeout: 3000,
-  }).trim();
+  return new Promise((resolvePromise, rejectPromise) => {
+    exec(fullCommand, { cwd, encoding: "utf-8", timeout: 3000 }, (error, stdout) => {
+      if (error) rejectPromise(error);
+      else resolvePromise(stdout.trim());
+    });
+  });
 }
 
 function mapContainerPathToHost(sessionId: string, state: SessionState, pathValue: string): string {
@@ -39,7 +54,7 @@ function mapContainerPathToHost(sessionId: string, state: SessionState, pathValu
   return pathValue;
 }
 
-export function resolveSessionGitInfo(sessionId: string, state: SessionState): void {
+export async function resolveSessionGitInfo(sessionId: string, state: SessionState): Promise<void> {
   if (!state.cwd) return;
   const wasContainerized = state.is_containerized;
   const previous = {
@@ -50,10 +65,10 @@ export function resolveSessionGitInfo(sessionId: string, state: SessionState): v
     git_behind: state.git_behind,
   };
   try {
-    state.git_branch = runGitCommand(sessionId, state, "git rev-parse --abbrev-ref HEAD 2>/dev/null");
+    state.git_branch = await runGitCommand(sessionId, state, "git rev-parse --abbrev-ref HEAD 2>/dev/null");
 
     try {
-      const gitDir = runGitCommand(sessionId, state, "git rev-parse --git-dir 2>/dev/null");
+      const gitDir = await runGitCommand(sessionId, state, "git rev-parse --git-dir 2>/dev/null");
       state.is_worktree = gitDir.includes("/worktrees/");
     } catch {
       state.is_worktree = false;
@@ -61,10 +76,10 @@ export function resolveSessionGitInfo(sessionId: string, state: SessionState): v
 
     try {
       if (state.is_worktree) {
-        const commonDir = runGitCommand(sessionId, state, "git rev-parse --git-common-dir 2>/dev/null");
+        const commonDir = await runGitCommand(sessionId, state, "git rev-parse --git-common-dir 2>/dev/null");
         state.repo_root = resolve(state.cwd, commonDir, "..");
       } else {
-        state.repo_root = runGitCommand(sessionId, state, "git rev-parse --show-toplevel 2>/dev/null");
+        state.repo_root = await runGitCommand(sessionId, state, "git rev-parse --show-toplevel 2>/dev/null");
       }
       state.repo_root = mapContainerPathToHost(sessionId, state, state.repo_root);
     } catch {
@@ -72,7 +87,7 @@ export function resolveSessionGitInfo(sessionId: string, state: SessionState): v
     }
 
     try {
-      const counts = runGitCommand(
+      const counts = await runGitCommand(
         sessionId,
         state,
         "git rev-list --left-right --count @{upstream}...HEAD 2>/dev/null",

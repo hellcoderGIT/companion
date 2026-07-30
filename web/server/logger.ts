@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { COMPANION_HOME } from "./paths.js";
-import { countFileLines } from "./fs-utils.js";
+import { countFileLinesCached, type FileLinesCacheEntry } from "./fs-utils.js";
 
 type LogLevel = "info" | "warn" | "error";
 
@@ -52,7 +52,9 @@ function formatEntry(level: LogLevel, module: string, msg: string, data?: Record
   }
 
   // Human-readable format (default): [module] msg key=value key=value
-  let line = `[${module}] ${msg}`;
+  // warn/error carry an explicit level tag so severity survives in a combined
+  // stdout log and stays greppable (`grep 'WARN:' companion.log`).
+  let line = level === "info" ? `[${module}] ${msg}` : `[${module}] ${level.toUpperCase()}: ${msg}`;
   if (data) {
     const pairs = Object.entries(data)
       .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
@@ -83,6 +85,12 @@ export class LogFileWriter {
   private dirCreated = false;
   private initialCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  /** Stat-validated line-count cache: rotated files are immutable, so only the
+   *  active file is ever re-read. Keeps the 5-minute scan off the event loop's
+   *  critical path (a sync scan of a 66MB dir was starving CLI stdio streams). */
+  private lineCountCache = new Map<string, FileLinesCacheEntry>();
+  /** Serializes cleanup passes so a slow scan can't overlap the next timer tick. */
+  private cleanupInFlight: Promise<number> | null = null;
 
   constructor(options?: { logsDir?: string; maxLines?: number }) {
     this.logsDir = options?.logsDir ?? LogFileWriter.resolveDir();
@@ -101,10 +109,10 @@ export class LogFileWriter {
     // Defer initial cleanup so it doesn't block the event loop at startup
     this.initialCleanupTimer = setTimeout(() => {
       this.initialCleanupTimer = null;
-      this.cleanup();
+      void this.cleanup();
     }, 2000);
     if (this.initialCleanupTimer.unref) this.initialCleanupTimer.unref();
-    this.cleanupTimer = setInterval(() => this.cleanup(), LOG_CLEANUP_INTERVAL_MS);
+    this.cleanupTimer = setInterval(() => void this.cleanup(), LOG_CLEANUP_INTERVAL_MS);
     if (this.cleanupTimer.unref) this.cleanupTimer.unref();
   }
 
@@ -139,8 +147,21 @@ export class LogFileWriter {
   /**
    * Delete oldest log files until total lines are under maxLines.
    * Skips the current log file (still being written to).
+   *
+   * Async and cache-backed on purpose: the previous sync implementation
+   * re-read every byte of the logs directory on the event loop every 5
+   * minutes, which on a 66MB directory stalled the loop long enough to starve
+   * live CLI stdio streams. Overlapping passes are coalesced.
    */
-  cleanup(): number {
+  cleanup(): Promise<number> {
+    if (this.cleanupInFlight) return this.cleanupInFlight;
+    this.cleanupInFlight = this.runCleanup().finally(() => {
+      this.cleanupInFlight = null;
+    });
+    return this.cleanupInFlight;
+  }
+
+  private async runCleanup(): Promise<number> {
     try {
       this.ensureDir();
       const files = readdirSync(this.logsDir).filter((f) => f.endsWith(".log"));
@@ -151,7 +172,7 @@ export class LogFileWriter {
 
       for (const filename of files) {
         const fullPath = join(this.logsDir, filename);
-        const lines = countFileLines(fullPath);
+        const lines = await countFileLinesCached(fullPath, this.lineCountCache);
         let mtimeMs = 0;
         try {
           mtimeMs = statSync(fullPath).mtimeMs;
@@ -174,6 +195,7 @@ export class LogFileWriter {
         if (entry.path === this.filePath) continue;
         try {
           unlinkSync(entry.path);
+          this.lineCountCache.delete(entry.path);
           totalLines -= entry.lines;
           deleted++;
         } catch {
@@ -238,6 +260,25 @@ export function closeLogFile(): void {
 
 // ─── Public logger ──────────────────────────────────────────────────────────
 
+/**
+ * Mirror a warn/error line onto stdout when stdout is redirected to a file.
+ *
+ * In service mode stdout and stderr land in different files (`companion.log`
+ * vs `companion.error.log`). warn/error used to go only to stderr, so every
+ * kill and stall warning was invisible in `companion.log` — the file everyone
+ * greps first. That hid weeks of "killing wedged process" warnings while the
+ * main log showed only unexplained 143 exits. Mirroring is skipped on a TTY,
+ * where both streams share the terminal and would print twice.
+ */
+function mirrorToStdout(line: string): void {
+  if (process.stdout.isTTY) return;
+  try {
+    process.stdout.write(line + "\n");
+  } catch {
+    // Logging must never disrupt normal operation
+  }
+}
+
 export const log = {
   info(module: string, msg: string, data?: Record<string, unknown>): void {
     const line = formatEntry("info", module, msg, data);
@@ -248,12 +289,14 @@ export const log = {
   warn(module: string, msg: string, data?: Record<string, unknown>): void {
     const line = formatEntry("warn", module, msg, data);
     console.warn(line);
+    mirrorToStdout(line);
     fileWriter?.write(line);
   },
 
   error(module: string, msg: string, data?: Record<string, unknown>): void {
     const line = formatEntry("error", module, msg, data);
     console.error(line);
+    mirrorToStdout(line);
     fileWriter?.write(line);
   },
 };

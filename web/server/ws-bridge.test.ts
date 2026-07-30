@@ -17,7 +17,19 @@ if (typeof globalThis.Bun === "undefined") {
 }
 
 const mockExecSync = vi.hoisted(() => vi.fn());
-vi.mock("node:child_process", () => ({ execSync: mockExecSync }));
+// session-git-info now uses async exec (the sync version stalled the event
+// loop on browser-connect storms); delegate it to the same mockExecSync
+// fixtures so every test keeps configuring git output in one place.
+const mockExec = vi.hoisted(() => (cmd: string, opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
+  process.nextTick(() => {
+    try {
+      cb(null, String(mockExecSync(cmd, opts)));
+    } catch (err) {
+      cb(err as Error, "");
+    }
+  });
+});
+vi.mock("node:child_process", () => ({ execSync: mockExecSync, exec: mockExec }));
 vi.mock("node:crypto", () => ({ randomUUID: () => "test-uuid" }));
 
 // Mock settings-manager to prevent AI validation from interfering with tests.
@@ -680,7 +692,7 @@ describe("CLI handlers", () => {
 
     const state = bridge.getSession("s1")!.state;
     expect(state.cwd).toBe("/Users/stan/Dev/myproject");
-    expect(state.git_branch).toBe("container-branch");
+    await vi.waitFor(() => expect(state.git_branch).toBe("container-branch"));
     expect(state.repo_root).toBe("/Users/stan/Dev/myproject");
     expect(state.git_behind).toBe(1);
     expect(state.git_ahead).toBe(3);
@@ -716,7 +728,7 @@ describe("CLI handlers", () => {
     await bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/workspace" }));
 
     const state = bridge.getSession("s1")!.state;
-    expect(state.repo_root).toBe("/Users/stan/Dev/myproject/packages/api");
+    await vi.waitFor(() => expect(state.repo_root).toBe("/Users/stan/Dev/myproject/packages/api"));
     expect(getContainerSpy).toHaveBeenCalledWith("s1");
     getContainerSpy.mockRestore();
   });
@@ -733,8 +745,9 @@ describe("CLI handlers", () => {
     bridge.handleCLIOpen(cli, "s1");
     await bridge.handleCLIMessage(cli, makeInitMsg());
 
+    // Git info now resolves asynchronously (off the event loop) — wait for it.
+    await vi.waitFor(() => expect(bridge.getSession("s1")!.state.git_branch).toBe("feat/test-branch"));
     const state = bridge.getSession("s1")!.state;
-    expect(state.git_branch).toBe("feat/test-branch");
     expect(state.repo_root).toBe("/repo");
     expect(state.git_ahead).toBe(5);
     expect(state.git_behind).toBe(2);
@@ -754,7 +767,7 @@ describe("CLI handlers", () => {
     await bridge.handleCLIMessage(cli, makeInitMsg({ cwd: "/home/user/myproject" }));
 
     const state = bridge.getSession("s1")!.state;
-    expect(state.repo_root).toBe("/home/user/myproject");
+    await vi.waitFor(() => expect(state.repo_root).toBe("/home/user/myproject"));
   });
 
   it("handleCLIMessage: system.status updates compacting and permissionMode", async () => {
@@ -1182,7 +1195,7 @@ describe("Browser handlers", () => {
     expect(firstMsg.session.session_id).toBe("s1");
   });
 
-  it("handleBrowserOpen: refreshes git branch before sending session snapshot", () => {
+  it("handleBrowserOpen: refreshes git branch and broadcasts the update once it lands", async () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("--abbrev-ref HEAD")) return "feat/dynamic-branch\n";
       if (cmd.includes("--git-dir")) return ".git\n";
@@ -1201,9 +1214,17 @@ describe("Browser handlers", () => {
     const browser = makeBrowserSocket("s1");
     bridge.handleBrowserOpen(browser, "s1");
 
+    // The snapshot goes out immediately — git resolution no longer blocks the
+    // event loop (sync git on browser-connect storms starved CLI stdio and got
+    // healthy CLIs killed as "wedged"). The refreshed branch follows as a
+    // session_update broadcast once the async git calls land.
     const firstMsg = JSON.parse(browser.send.mock.calls[0][0]);
     expect(firstMsg.type).toBe("session_init");
-    expect(firstMsg.session.git_branch).toBe("feat/dynamic-branch");
+    await vi.waitFor(() => {
+      const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+      const update = calls.find((c: { type: string }) => c.type === "session_update");
+      expect(update?.session?.git_branch).toBe("feat/dynamic-branch");
+    });
     expect(gitInfoCb).toHaveBeenCalledWith("s1", "/repo", "feat/dynamic-branch");
   });
 
@@ -1762,9 +1783,12 @@ describe("CLI message routing", () => {
 
     await bridge.handleCLIMessage(cli, msg);
 
-    const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
-    const updateMsg = calls.find((c: any) => c.type === "session_update");
-    expect(updateMsg).toBeDefined();
+    let updateMsg: any;
+    await vi.waitFor(() => {
+      const calls = browser.send.mock.calls.map(([arg]: [string]) => JSON.parse(arg));
+      updateMsg = calls.find((c: any) => c.type === "session_update");
+      expect(updateMsg).toBeDefined();
+    });
     expect(updateMsg.session.git_branch).toBe("feat/new-branch");
     expect(updateMsg.session.git_ahead).toBe(1);
     expect(bridge.getSession("s1")!.state.git_branch).toBe("feat/new-branch");
