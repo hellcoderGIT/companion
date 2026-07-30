@@ -37,7 +37,6 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { ClaudeAdapter } from "./claude-adapter.js";
-import type { RecorderManager } from "./recorder.js";
 import { log } from "./logger.js";
 
 export interface SdkAttachOptions {
