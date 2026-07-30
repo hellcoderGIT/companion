@@ -2120,8 +2120,11 @@ describe("CLI message routing", () => {
       expect(nudge.content).not.toBe("do a big task");
     });
 
-    it("does not nudge twice for the same turn", async () => {
-      // A turn that keeps dying must not accumulate nudges.
+    it("does not nudge twice without intervening output", async () => {
+      // A turn that keeps dying with nothing to show must not accumulate nudges:
+      // that shape is indistinguishable from a poison turn that dies on every
+      // resume. The budget only refills once the turn actually produces output
+      // (see the "nudges again after the continued turn produced output" test).
       const { session } = await startTurnWithOutput("s1");
       const sent: string[] = [];
       const attach = () => bridge.attachBackendAdapter("s1", {
@@ -2168,6 +2171,122 @@ describe("CLI message routing", () => {
         .map((m) => JSON.parse(m))
         .filter((m) => m.type === "user_message" && /continue from where/i.test(m.content || ""));
       expect(nudges).toHaveLength(0);
+    });
+
+    /**
+     * The production failure this budget change exists for.
+     *
+     * The nudge guard used to be a one-shot boolean scoped to the whole turn, so
+     * a turn interrupted a SECOND time got no recovery at all: the replay branch
+     * is skipped by design once output has begun (`inFlightUserTurn` is cleared
+     * by the first token), and the boolean blocked the nudge branch. The banner
+     * cleared, the session went idle with a half-written answer, and a human had
+     * to type "continue".
+     *
+     * Observed on companion 0.113.3 (session afdbec35): prompt at 04:20:20 →
+     * stream EOF → nudge at 04:23:32 → the resumed turn streamed for minutes →
+     * stream EOF again → silent reattach → 9m38s dead until a human typed
+     * "continue" at 04:33:12. Both EOFs were reader-side (the CLI still held
+     * fd 1), i.e. the turn was healthy and genuinely worth continuing.
+     */
+    /**
+     * Attaches a mock adapter the way a relaunch does, capturing both what the
+     * bridge sends and the `onBrowserMessage` handler it registers. Emitting
+     * through that handler is how backend output actually reaches the session
+     * state — `handleCLIMessage` only routes for a real ClaudeAdapter, so it
+     * silently drops once a mock is attached.
+     */
+    function attachMockAdapter(sessionId: string) {
+      const sent: string[] = [];
+      let handler: ((msg: unknown) => void) | undefined;
+      bridge.attachBackendAdapter(sessionId, {
+        isConnected: () => true,
+        send: (m: unknown) => { sent.push(typeof m === "string" ? m : JSON.stringify(m)); return true; },
+        disconnect: async () => {},
+        onBrowserMessage: (cb: (msg: unknown) => void) => { handler = cb; },
+        onSessionMeta: () => {},
+        onDisconnect: () => {},
+        onInitError: () => {},
+      } as never, "claude");
+      return {
+        sent,
+        emit: (msg: unknown) => handler?.(msg),
+        nudges: () => sent
+          .map((m) => JSON.parse(m))
+          .filter((m) => m.type === "user_message" && /continue from where/i.test(m.content || "")),
+      };
+    }
+
+    it("nudges again after the continued turn produced output", async () => {
+      const { session } = await startTurnWithOutput("s1");
+
+      // First interruption → nudge, and the budget is now spent.
+      const first = attachMockAdapter("s1");
+      expect(first.nudges()).toHaveLength(1);
+      expect(session.continuationAttempts).toBe(1);
+
+      // The resumed turn makes real progress. That proves the nudge worked, so
+      // the budget refills — the next failure is a new one, not a loop.
+      first.emit({
+        type: "stream_event",
+        event: { type: "content_block_delta", delta: { type: "text_delta", text: "more work" } },
+        session_id: "cli-123",
+        uuid: "se-2",
+      });
+      expect(session.continuationAttempts).toBe(0);
+
+      // Second interruption → must nudge again instead of stranding the turn.
+      // Under the old one-shot boolean this produced zero nudges and the session
+      // idled until a human typed "continue".
+      const second = attachMockAdapter("s1");
+      expect(second.nudges()).toHaveLength(1);
+      expect(session.turnAwaitingResult).toBe(true);
+    });
+
+    it("refills the budget on assistant output, not just stream_event", async () => {
+      // Non-streaming output surfaces as an `assistant` message with no
+      // preceding stream_event, so both handlers must refill the budget or those
+      // turns keep the one-nudge-per-turn bug.
+      const { session } = await startTurnWithOutput("s1");
+
+      const first = attachMockAdapter("s1");
+      expect(session.continuationAttempts).toBe(1);
+
+      first.emit({
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: "partial answer" }] },
+        session_id: "cli-123",
+        uuid: "a-1",
+      });
+      expect(session.continuationAttempts).toBe(0);
+
+      expect(attachMockAdapter("s1").nudges()).toHaveLength(1);
+    });
+
+    it("stops nudging when the resumed turn dies without producing output", async () => {
+      // The loop protection the budget preserves: repeated nudges that yield
+      // nothing are indistinguishable from a poison turn, so they must stop at
+      // MAX_CONTINUATION_NUDGES (default 1) rather than retry forever.
+      const { session } = await startTurnWithOutput("s1");
+
+      expect(attachMockAdapter("s1").nudges()).toHaveLength(1);
+      expect(attachMockAdapter("s1").nudges()).toHaveLength(0);
+      expect(attachMockAdapter("s1").nudges()).toHaveLength(0);
+      expect(session.continuationAttempts).toBe(1);
+    });
+
+    it("resets the nudge budget when a new user turn starts", async () => {
+      // A fresh prompt is a fresh turn: whatever happened to the previous one
+      // must not eat this turn's recovery.
+      const { browser, session } = await startTurnWithOutput("s1");
+      attachMockAdapter("s1");
+      expect(session.continuationAttempts).toBe(1);
+
+      await bridge.handleBrowserMessage(browser, JSON.stringify({
+        type: "user_message",
+        content: "next question",
+      }));
+      expect(session.continuationAttempts).toBe(0);
     });
   });
 

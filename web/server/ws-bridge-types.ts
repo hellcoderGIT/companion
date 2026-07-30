@@ -87,10 +87,23 @@ export interface Session {
    */
   turnAwaitingResult?: boolean;
   /**
-   * One-shot guard for the mid-answer continuation nudge, so a turn that keeps
-   * dying cannot be nudged in a loop. Reset when a new user_message is sent.
+   * Number of mid-answer continuation nudges sent since the turn last produced
+   * output, so a turn that keeps dying cannot be nudged in a loop.
+   *
+   * Deliberately counts *consecutive unproductive* nudges rather than nudges
+   * per turn: this was a one-shot boolean, which capped recovery at one nudge
+   * for the whole turn. A second stream failure in the same turn — common on a
+   * loaded host, where the server's own stdout reader EOFs mid-answer — then had
+   * no recovery path at all (`inFlightUserTurn` was already cleared by the first
+   * token, so the replay branch is skipped by design), and the session idled
+   * until a human typed "continue".
+   *
+   * Reset to 0 whenever the turn produces output, because a nudge that was
+   * followed by output demonstrably worked: the next interruption is a fresh
+   * failure, not a loop. Only a nudge that yields nothing counts toward
+   * MAX_CONTINUATION_NUDGES. Reset when a new user_message is sent.
    */
-  continuationSent?: boolean;
+  continuationAttempts?: number;
   /**
    * Set when the last turn failed authentication (expired/invalid credentials).
    * Auto-relaunch is skipped while this is set — relaunching cannot fix auth —
