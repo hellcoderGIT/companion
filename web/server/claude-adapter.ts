@@ -211,13 +211,15 @@ function toolBlockIds(content: unknown): { uses: string[]; results: string[] } {
 // --- Claude Code Adapter ------------------------------------------------------
 
 export class ClaudeAdapter implements IBackendAdapter {
-  private sessionId: string;
+  protected sessionId: string;
 
   // Transport selector. "websocket" is the legacy `--sdk-url` transport where
   // the CLI dials back into the server; "stdio" is the supported stream-json
   // transport where the server owns the child process and bridges over its
   // stdin/stdout pipes. See claude-adapter stdio section below.
-  private transportKind: "websocket" | "stdio" = "websocket";
+  // "sdk" is set by SdkClaudeAdapter (claude-sdk-adapter.ts), which reuses
+  // this class's routing/queueing but replaces the byte transport entirely.
+  protected transportKind: "websocket" | "stdio" | "sdk" = "websocket";
 
   // WebSocket to the Claude Code CLI process (transportKind === "websocket")
   private cliSocket: ServerWebSocket<SocketData> | null = null;
@@ -234,7 +236,7 @@ export class ClaudeAdapter implements IBackendAdapter {
   /** Guard so the disconnect callback fires at most once per transport, no
    *  matter which teardown path (stdout reader end, reader error, or process
    *  exit) trips first. Mirrors CodexAdapter.disconnectFired. */
-  private disconnectFired = false;
+  protected disconnectFired = false;
   /** Whether the most recent substantive CLI message was a terminal `result`
    *  (end-of-turn). Used by the stdout-EOF handler to distinguish a process
    *  that closed stdout while *finishing a turn cleanly* (exiting on its own —
@@ -267,10 +269,10 @@ export class ClaudeAdapter implements IBackendAdapter {
   // Callbacks registered by the bridge via on*() methods
   private browserMessageCb: ((msg: BrowserIncomingMessage) => void) | null = null;
   private sessionMetaCb: ((meta: { cliSessionId?: string; model?: string; cwd?: string }) => void) | null = null;
-  private disconnectCb: (() => void) | null = null;
+  protected disconnectCb: (() => void) | null = null;
 
   // Pending NDJSON messages queued before CLI WebSocket connects
-  private pendingMessages: string[] = [];
+  protected pendingMessages: string[] = [];
 
   // Async control request/response pairs (e.g. MCP status queries)
   private pendingControlRequests = new Map<string, PendingControlRequest>();
@@ -282,7 +284,7 @@ export class ClaudeAdapter implements IBackendAdapter {
   };
 
   // Optional recorder for raw protocol messages
-  private recorder: RecorderManager | null;
+  protected recorder: RecorderManager | null;
 
   // Session cwd used to stage non-inline attachments (anything other than
   // image/*, i.e. PDFs and all other files) inside the working directory so the
@@ -1895,7 +1897,7 @@ export class ClaudeAdapter implements IBackendAdapter {
    * delimiter and records the outgoing message. Assumes the transport is
    * connected (callers gate on isConnected() / flush after attach).
    */
-  private sendRaw(ndjson: string): boolean {
+  protected sendRaw(ndjson: string): boolean {
     // Record raw outgoing CLI message
     this.recorder?.record(
       this.sessionId, "out", ndjson, "cli", "claude", "",

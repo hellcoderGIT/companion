@@ -37,6 +37,7 @@ export function registerSettingsRoutes(api: Hono): void {
       keepaliveDetachedSessions: settings.keepaliveDetachedSessions,
       wedgeKillEnabled: settings.wedgeKillEnabled,
       silenceProbeEnabled: settings.silenceProbeEnabled,
+      claudeTransport: settings.claudeTransport ?? "stdio",
       cliBridgeMode: settings.cliBridgeMode,
     });
   });
@@ -144,6 +145,9 @@ export function registerSettingsRoutes(api: Hono): void {
     if (body.silenceProbeEnabled !== undefined && typeof body.silenceProbeEnabled !== "boolean") {
       return c.json({ error: "silenceProbeEnabled must be a boolean" }, 400);
     }
+    if (body.claudeTransport !== undefined && body.claudeTransport !== "stdio" && body.claudeTransport !== "sdk") {
+      return c.json({ error: 'claudeTransport must be "stdio" or "sdk"' }, 400);
+    }
     if (body.cliBridgeMode !== undefined && body.cliBridgeMode !== "loopback" && body.cliBridgeMode !== "jsonHandoff") {
       return c.json({ error: "cliBridgeMode must be 'loopback' or 'jsonHandoff'" }, 400);
     }
@@ -167,6 +171,7 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.keepaliveDetachedSessions !== undefined
       || body.wedgeKillEnabled !== undefined
       || body.silenceProbeEnabled !== undefined
+      || body.claudeTransport !== undefined
       || body.cliBridgeMode !== undefined;
     if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
@@ -293,6 +298,10 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.silenceProbeEnabled === "boolean"
           ? body.silenceProbeEnabled
           : undefined,
+      claudeTransport:
+        body.claudeTransport === "stdio" || body.claudeTransport === "sdk"
+          ? (body.claudeTransport as "stdio" | "sdk")
+          : undefined,
       cliBridgeMode:
         body.cliBridgeMode === "loopback" || body.cliBridgeMode === "jsonHandoff"
           ? (body.cliBridgeMode as CliBridgeMode)
@@ -329,6 +338,7 @@ export function registerSettingsRoutes(api: Hono): void {
       keepaliveDetachedSessions: settings.keepaliveDetachedSessions,
       wedgeKillEnabled: settings.wedgeKillEnabled,
       silenceProbeEnabled: settings.silenceProbeEnabled,
+      claudeTransport: settings.claudeTransport ?? "stdio",
       cliBridgeMode: settings.cliBridgeMode,
     });
   });

@@ -56,6 +56,7 @@ describe("settings-manager", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+  claudeTransport: "stdio",
       cliBridgeMode: "loopback",
       claudeBridgeMode: "none",
       claudeBridgeIngressUrl: "",
@@ -123,6 +124,7 @@ describe("settings-manager", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+  claudeTransport: "stdio",
       cliBridgeMode: "loopback",
       claudeBridgeMode: "none",
       claudeBridgeIngressUrl: "",
@@ -216,6 +218,7 @@ describe("settings-manager", () => {
       keepaliveDetachedSessions: false,
       wedgeKillEnabled: true,
       silenceProbeEnabled: true,
+  claudeTransport: "stdio",
       cliBridgeMode: "loopback",
       claudeBridgeMode: "none",
       claudeBridgeIngressUrl: "",
@@ -309,5 +312,23 @@ describe("settings-manager", () => {
     updateSettings({ publicUrl: "https://example.com" });
     const updated = updateSettings({ anthropicModel: "claude-haiku-3" });
     expect(updated.publicUrl).toBe("https://example.com");
+  });
+
+  // claudeTransport selects which layer drives Claude sessions (stdio bridge
+  // vs Agent SDK). It must default to "stdio", persist a valid "sdk" value,
+  // and normalize anything invalid back to "stdio" so a corrupt settings file
+  // can never strand sessions on a nonexistent transport.
+  it("defaults claudeTransport to stdio and persists sdk", () => {
+    expect(getSettings().claudeTransport).toBe("stdio");
+    const updated = updateSettings({ claudeTransport: "sdk" });
+    expect(updated.claudeTransport).toBe("sdk");
+    // Survives an unrelated update.
+    expect(updateSettings({ anthropicModel: "claude-haiku-3" }).claudeTransport).toBe("sdk");
+  });
+
+  it("normalizes an invalid claudeTransport value from disk to stdio", () => {
+    writeFileSync(settingsPath, JSON.stringify({ claudeTransport: "warp-drive" }));
+    _resetForTest(settingsPath);
+    expect(getSettings().claudeTransport).toBe("stdio");
   });
 });

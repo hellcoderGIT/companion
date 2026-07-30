@@ -465,6 +465,7 @@ export interface AppSettings {
   wedgeKillEnabled: boolean;
   /** When false, a CLI that goes silent with stdout still open is left alone. */
   silenceProbeEnabled: boolean;
+  claudeTransport?: "stdio" | "sdk";
   cliBridgeMode: "loopback" | "jsonHandoff";
 }
 
@@ -1089,6 +1090,7 @@ export const api = {
     proactiveKeepaliveEnabled?: boolean;
     wedgeKillEnabled?: boolean;
     silenceProbeEnabled?: boolean;
+    claudeTransport?: "stdio" | "sdk";
     cliBridgeMode?: "loopback" | "jsonHandoff";
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>

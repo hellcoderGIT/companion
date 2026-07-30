@@ -124,6 +124,18 @@ export interface CompanionSettings {
    * with no error surfaced. Disable to leave silent sessions alone.
    */
   silenceProbeEnabled: boolean;
+  /**
+   * Which transport drives Claude Code sessions.
+   *
+   * "stdio" (default): companion spawns `claude --print --input-format
+   * stream-json` and bridges its pipes itself (ClaudeAdapter.attachStdio).
+   * "sdk": sessions run through the official @anthropic-ai/claude-agent-sdk
+   * (SdkClaudeAdapter) — same binary, same subscription auth, but Anthropic's
+   * maintained protocol layer instead of ours. Applied at spawn/relaunch time,
+   * so flipping this and hitting Reconnect migrates a live session between
+   * transports via --resume. Claude sessions only; Codex is unaffected.
+   */
+  claudeTransport?: "stdio" | "sdk";
   /** See CliBridgeMode. Defaults to "loopback". Optional in fixtures; normalize() applies the default. */
   cliBridgeMode?: CliBridgeMode;
   /** See ClaudeBridgeMode. Defaults to "none". Persists across companion restarts. */
@@ -171,6 +183,7 @@ let settings: CompanionSettings = {
   keepaliveDetachedSessions: false,
   wedgeKillEnabled: true,
   silenceProbeEnabled: true,
+  claudeTransport: "stdio",
   cliBridgeMode: "loopback",
   claudeBridgeMode: "none",
   claudeBridgeIngressUrl: "",
@@ -225,6 +238,7 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
     keepaliveDetachedSessions: typeof raw?.keepaliveDetachedSessions === "boolean" ? raw.keepaliveDetachedSessions : false,
     wedgeKillEnabled: typeof raw?.wedgeKillEnabled === "boolean" ? raw.wedgeKillEnabled : true,
     silenceProbeEnabled: typeof raw?.silenceProbeEnabled === "boolean" ? raw.silenceProbeEnabled : true,
+    claudeTransport: raw?.claudeTransport === "sdk" ? "sdk" : "stdio",
     cliBridgeMode: raw?.cliBridgeMode === "jsonHandoff" ? "jsonHandoff" : "loopback",
     claudeBridgeMode: raw?.claudeBridgeMode === "patched" ? "patched" : "none",
     claudeBridgeIngressUrl: typeof raw?.claudeBridgeIngressUrl === "string" ? raw.claudeBridgeIngressUrl : "",
@@ -258,7 +272,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "keepaliveDetachedSessions" | "wedgeKillEnabled" | "silenceProbeEnabled" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "keepaliveDetachedSessions" | "wedgeKillEnabled" | "silenceProbeEnabled" | "claudeTransport" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -293,6 +307,7 @@ export function updateSettings(
     keepaliveDetachedSessions: patch.keepaliveDetachedSessions ?? settings.keepaliveDetachedSessions,
     wedgeKillEnabled: patch.wedgeKillEnabled ?? settings.wedgeKillEnabled,
     silenceProbeEnabled: patch.silenceProbeEnabled ?? settings.silenceProbeEnabled,
+    claudeTransport: patch.claudeTransport ?? settings.claudeTransport,
     cliBridgeMode: patch.cliBridgeMode ?? settings.cliBridgeMode,
     claudeBridgeMode: patch.claudeBridgeMode ?? settings.claudeBridgeMode,
     claudeBridgeIngressUrl: patch.claudeBridgeIngressUrl ?? settings.claudeBridgeIngressUrl,

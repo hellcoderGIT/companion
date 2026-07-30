@@ -15,6 +15,8 @@ import { looksLikeAuthErrorText } from "./session-types.js";
 import type { RecorderManager } from "./recorder.js";
 import { CodexAdapter } from "./codex-adapter.js";
 import { ClaudeAdapter } from "./claude-adapter.js";
+import { SdkClaudeAdapter } from "./claude-sdk-adapter.js";
+import { getSettings } from "./settings-manager.js";
 import { resolveBinary, getEnrichedPath } from "./path-resolver.js";
 import { containerManager } from "./container-manager.js";
 import { companionBus } from "./event-bus.js";
@@ -204,6 +206,10 @@ export class CliLauncher {
    */
   private stderrTails = new Map<string, string>();
   private static readonly STDERR_TAIL_MAX = 4096;
+  /** Active SDK-transport adapters (settings.claudeTransport === "sdk"). The
+   *  SDK owns the child process, so these sessions have no entry in
+   *  `this.processes`; kill/relaunch go through the adapter's abort(). */
+  private sdkAdapters = new Map<string, SdkClaudeAdapter>();
   private store: SessionStore | null = null;
   private recorder: RecorderManager | null = null;
 
@@ -371,6 +377,13 @@ export class CliLauncher {
     // WS session exit handler, which clears `this.processes`.
     const oldProc = this.processes.get(sessionId);
     const oldProxy = this.codexWsProxies.get(sessionId);
+    const oldSdk = this.sdkAdapters.get(sessionId);
+    if (oldSdk) {
+      // Abort tears down the SDK's child; safe to respawn immediately since
+      // the new session resumes by id, not by pipe.
+      try { oldSdk.abort(); } catch {}
+      this.sdkAdapters.delete(sessionId);
+    }
     if (oldProxy) {
       try {
         oldProxy.kill("SIGTERM");
@@ -483,6 +496,81 @@ export class CliLauncher {
     return Array.from(this.sessions.values()).filter((s) => s.state === "starting");
   }
 
+  /**
+   * Launch a Claude session over the official Agent SDK (claude-sdk-adapter).
+   * Mirrors the stdio path's contract: same adapter-created event, same
+   * session:exited emission (driving proactive keepalive relaunch), same
+   * stderr-tail capture for exit classification. The SDK owns the subprocess,
+   * so there is no `this.processes` entry and no PID-based liveness.
+   */
+  private spawnSdk(
+    sessionId: string,
+    info: SdkSessionInfo,
+    options: LaunchOptions & { resumeSessionId?: string },
+    binary: string,
+  ): void {
+    console.log(
+      `[cli-launcher] Spawning session ${sessionId} via Agent SDK transport` +
+      `${options.resumeSessionId ? ` (resume ${options.resumeSessionId})` : ""}`,
+    );
+
+    const adapter = new SdkClaudeAdapter(sessionId, {
+      recorder: this.recorder ?? undefined,
+      cwd: info.cwd,
+      getStderrTail: () => this.stderrTails.get(sessionId) ?? "",
+      onStderr: (text: string) => {
+        if (!text) return;
+        const merged = (this.stderrTails.get(sessionId) ?? "") + text;
+        this.stderrTails.set(
+          sessionId,
+          merged.length > CliLauncher.STDERR_TAIL_MAX
+            ? merged.slice(-CliLauncher.STDERR_TAIL_MAX)
+            : merged,
+        );
+      },
+    });
+
+    const spawnedAt = Date.now();
+    adapter.onExit((exitCode) => {
+      console.log(`[cli-launcher] Session ${sessionId} exited (code=${exitCode}) [sdk transport]`);
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        session.state = "exited";
+        session.exitCode = exitCode ?? -1;
+        // Immediate death after resume ⇒ the resume likely failed; start fresh
+        // next time. Same heuristic as the stdio path.
+        const uptime = Date.now() - spawnedAt;
+        if (uptime < 5000 && options.resumeSessionId) {
+          console.error(`[cli-launcher] Session ${sessionId} exited immediately after SDK resume (${uptime}ms). Clearing cliSessionId for fresh start.`);
+          session.cliSessionId = undefined;
+        }
+      }
+      this.sdkAdapters.delete(sessionId);
+      this.persistState();
+      const reason = this.classifyExitReason(sessionId, exitCode ?? -1);
+      this.stderrTails.delete(sessionId);
+      companionBus.emit("session:exited", { sessionId, exitCode: exitCode ?? -1, reason });
+    });
+
+    adapter.attachSdk({
+      model: options.model,
+      permissionMode: options.permissionMode,
+      effort: options.effort,
+      cwd: info.cwd,
+      resume: options.resumeSessionId,
+      resumeSessionAt: options.resumeSessionAt,
+      forkSession: options.forkSession,
+      env: options.env,
+      claudeBinary: binary,
+    });
+
+    this.sdkAdapters.set(sessionId, adapter);
+    companionBus.emit("backend:claude-adapter-created", { sessionId, adapter });
+    info.state = "connected";
+    info.pid = undefined;
+    this.persistState();
+  }
+
   private spawnCLI(sessionId: string, info: SdkSessionInfo, options: LaunchOptions & { resumeSessionId?: string }): void {
     const isContainerized = !!options.containerId;
 
@@ -500,6 +588,15 @@ export class CliLauncher {
         this.persistState();
         return;
       }
+    }
+
+    // Experimental switchable transport: run this session through the official
+    // Agent SDK instead of the hand-rolled stdio bridge. Chosen at spawn time,
+    // so flipping the setting + Reconnect migrates a session via --resume.
+    // Containerized sessions always use stdio (the SDK cannot docker-exec).
+    if (!isContainerized && getSettings().claudeTransport === "sdk") {
+      this.spawnSdk(sessionId, info, options, binary);
+      return;
     }
 
     let effectivePermissionMode = options.permissionMode;
@@ -1188,6 +1285,19 @@ export class CliLauncher {
    * Kill a session's CLI process.
    */
   async kill(sessionId: string): Promise<boolean> {
+    const sdkAdapter = this.sdkAdapters.get(sessionId);
+    if (sdkAdapter) {
+      // The SDK terminates its child on abort; onExit fires the shared
+      // session:exited handling.
+      sdkAdapter.abort();
+      this.sdkAdapters.delete(sessionId);
+      const sdkSession = this.sessions.get(sessionId);
+      if (sdkSession) {
+        sdkSession.state = "exited";
+      }
+      this.persistState();
+      return true;
+    }
     const proxy = this.codexWsProxies.get(sessionId);
     if (proxy) {
       try { proxy.kill("SIGTERM"); } catch {}
