@@ -1537,14 +1537,14 @@ describe("SDK transport spawn", () => {
 
   it("emits backend:claude-adapter-created with the SDK adapter", () => {
     const created: Array<{ sessionId: string }> = [];
-    companionBus.on("backend:claude-adapter-created", (e) => created.push(e as never));
+    companionBus.on("backend:claude-adapter-created", (e) => { created.push(e as never); });
     launcher.launch({ cwd: "/tmp" });
     expect(created.some((c) => c.sessionId === "test-session-id")).toBe(true);
   });
 
   it("emits session:exited when the SDK adapter reports exit", async () => {
     const events: Array<{ sessionId: string; exitCode: number }> = [];
-    companionBus.on("session:exited", (e) => events.push(e as never));
+    companionBus.on("session:exited", (e) => { events.push(e as never); });
     launcher.launch({ cwd: "/tmp" });
     sdkMockState.instances[0].exitCb?.(143);
     await new Promise((r) => setTimeout(r, 10));
