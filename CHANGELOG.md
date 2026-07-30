@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.113.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.2...companion-v0.113.3) (2026-07-30)
+
+
+### Bug Fixes
+
+* **session:** stop event-loop stalls that starve CLI stdio and attribute wedge-kills ([#97](https://github.com/hellcoderGIT/companion/issues/97)) ([e99f477](https://github.com/hellcoderGIT/companion/commit/e99f4770d06909928dea9a89780a1e0fdc950843))
+
 ## [0.113.2](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.1...companion-v0.113.2) (2026-07-29)
 
 
