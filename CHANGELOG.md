@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.113.4](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.3...companion-v0.113.4) (2026-07-30)
+
+
+### Bug Fixes
+
+* **ws-bridge:** budget continuation nudges per interruption, not per turn ([#100](https://github.com/hellcoderGIT/companion/issues/100)) ([27d1e4c](https://github.com/hellcoderGIT/companion/commit/27d1e4c04471c2fd3bc9edde7c9f69f382954ae9)), closes [#99](https://github.com/hellcoderGIT/companion/issues/99)
+
 ## [0.113.3](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.2...companion-v0.113.3) (2026-07-30)
 
 
