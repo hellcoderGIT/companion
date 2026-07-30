@@ -64,6 +64,23 @@ const RETRYABLE_BACKEND_MESSAGE_TYPES = new Set<BrowserOutgoingMessage["type"]>(
   "mcp_set_servers",
 ]);
 
+/**
+ * How many continuation nudges a mid-answer-interrupted turn may get *without
+ * producing any output in between*. The counter resets on the turn's next output
+ * (see `continuationAttempts`), so this only bounds a turn that dies again
+ * having emitted nothing — not a turn that is interrupted repeatedly while
+ * making progress.
+ *
+ * Default 1 keeps the loop protection exactly as strict as the boolean it
+ * replaces for the ambiguous case (nudge → died with nothing to show → could be
+ * a poison turn), while making the budget *per interruption* instead of per
+ * turn. Raise it on hosts where the transport flaps hard enough that a resumed
+ * turn sometimes dies before its first token.
+ */
+const MAX_CONTINUATION_NUDGES = Number(
+  process.env.COMPANION_MAX_CONTINUATION_NUDGES || "1",
+);
+
 export class WsBridge {
   private static readonly PROCESSED_CLIENT_MSG_ID_LIMIT = 1000;
   /** Maximum number of queued browser→backend messages per session to prevent unbounded memory growth. */
@@ -565,6 +582,10 @@ export class WsBridge {
         // The turn is producing output — it was delivered, so drop the in-flight
         // replay copy (no need to re-send it after a future relaunch).
         session.inFlightUserTurn = undefined;
+        // Output after a continuation nudge proves the nudge worked, so give the
+        // turn a fresh nudge budget: a later interruption is a new failure, not
+        // the same one looping. Guarded so the common path writes nothing.
+        if (session.continuationAttempts) session.continuationAttempts = 0;
         const assistantMsg = { ...msg, timestamp: msg.timestamp || Date.now() };
         this.appendHistory(session, assistantMsg);
         this.persistSession(session);
@@ -573,6 +594,10 @@ export class WsBridge {
 
       if (msg.type === "stream_event") {
         session.inFlightUserTurn = undefined;
+        // Same as the assistant branch: progress clears the nudge budget. This is
+        // the earliest output signal, so it is what makes a resumed turn that
+        // streams for minutes before failing again eligible for another nudge.
+        if (session.continuationAttempts) session.continuationAttempts = 0;
         companionBus.emit("message:stream_event", { sessionId: session.id, message: msg });
       }
 
@@ -794,7 +819,7 @@ export class WsBridge {
       // relaunch, defeating inFlightTurnReplayed.
       !session.inFlightUserTurn &&
       session.turnAwaitingResult &&
-      !session.continuationSent
+      (session.continuationAttempts ?? 0) < MAX_CONTINUATION_NUDGES
     ) {
       // The turn died AFTER it had begun answering. `--resume` restores the
       // transcript but does not restart the turn, so without this the session
@@ -803,13 +828,24 @@ export class WsBridge {
       // Re-sending the original prompt is wrong here: work already happened and
       // replaying it would redo tool calls. A continuation nudge asks the model
       // to finish from where the transcript stops instead.
-      session.continuationSent = true;
+      //
+      // Budgeted per *unproductive* nudge, not per turn: the counter resets as
+      // soon as the continued turn emits output (see the assistant/stream_event
+      // handlers), so a turn interrupted repeatedly still recovers each time
+      // while a turn that dies without producing anything stops after
+      // MAX_CONTINUATION_NUDGES. Unbounded looping is not a risk here anyway —
+      // a nudge can only fire on adapter attach, and attaches are already
+      // rate-limited by the orchestrator's MAX_AUTO_RELAUNCHES and
+      // MAX_RELAUNCHES_PER_WINDOW caps.
+      session.continuationAttempts = (session.continuationAttempts ?? 0) + 1;
       session.pendingMessages.unshift(JSON.stringify({
         type: "user_message",
         content: "Your previous response was interrupted before it finished. Continue from where you left off — do not repeat work that is already in the transcript.",
       }));
       log.info("ws-bridge", "Nudging interrupted turn to continue after relaunch", {
         sessionId,
+        attempt: session.continuationAttempts,
+        maxAttempts: MAX_CONTINUATION_NUDGES,
       });
       this.broadcastToBrowsers(session, {
         type: "error",
@@ -1350,7 +1386,7 @@ export class WsBridge {
       // token: this stays set until the turn actually finishes, so an interrupt
       // *mid-answer* is still recognisable as an unfinished turn.
       session.turnAwaitingResult = true;
-      session.continuationSent = false;
+      session.continuationAttempts = 0;
       // A fresh turn is an attempt to make progress (e.g. after the user
       // re-authenticated), so clear any stale auth-block — a genuine crash on
       // this new turn should be allowed to auto-relaunch again.

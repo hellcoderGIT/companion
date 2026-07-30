@@ -496,13 +496,20 @@ export class ClaudeAdapter implements IBackendAdapter {
       // a wedge that may be hypothetical.
       const wedgeKillEnabled = getSettings().wedgeKillEnabled !== false;
       if (proc && proc.exitCode === null && !proc.killed && !wedgeKillEnabled) {
+        const cliStdoutOpen = stdoutFdOpen(proc.pid);
         log.info("claude-adapter", "stdout closed but wedge-kill is disabled; leaving process alone", {
           sessionId: this.sessionId,
           pid: proc.pid,
-          cliStdoutOpen: stdoutFdOpen(proc.pid),
+          cliStdoutOpen,
           proc: captureProcState(proc.pid),
           stderrTail: this.stderrTailForLog(),
         });
+        // Emit the reader-side-EOF WARN on this path too. It previously fired
+        // only from the two kill branches, so operators running with the
+        // wedge-kill switch off — the recommended mitigation — saw these events
+        // only as the benign-sounding info line above and had no signal that the
+        // EOF originated in the server's own read side.
+        this.warnIfReaderSideEof(cliStdoutOpen, proc.pid, false);
       } else if (proc && proc.exitCode === null && !proc.killed) {
         // Which grace applies is decided by whether teardown is actually in
         // progress, NOT by whether the last message happened to be a `result`.
@@ -654,12 +661,22 @@ export class ClaudeAdapter implements IBackendAdapter {
    * the warning attributes the root cause so these events can be counted and
    * the reader-side failure fixed where it lives.
    */
-  private warnIfReaderSideEof(cliStdoutOpen: boolean | null, pid: number | undefined): void {
+  private warnIfReaderSideEof(
+    cliStdoutOpen: boolean | null,
+    pid: number | undefined,
+    killing = true,
+  ): void {
     if (cliStdoutOpen !== true) return;
-    log.warn("claude-adapter", "CLI still holds its stdout open — EOF was reader-side (server stream failure), not a CLI wedge; killing anyway so --resume recovery can proceed", {
-      sessionId: this.sessionId,
-      pid,
-    });
+    log.warn(
+      "claude-adapter",
+      killing
+        ? "CLI still holds its stdout open — EOF was reader-side (server stream failure), not a CLI wedge; killing anyway so --resume recovery can proceed"
+        : "CLI still holds its stdout open — EOF was reader-side (server stream failure), not a CLI wedge; leaving the process alone, but the transport is gone and the session will still relaunch",
+      {
+        sessionId: this.sessionId,
+        pid,
+      },
+    );
   }
 
   private checkSilence(): void {
