@@ -59,6 +59,69 @@ describe("logger", () => {
       spy.mockRestore();
     });
 
+    // Regression: warn/error used to go only to stderr. In service mode stdout
+    // and stderr are redirected to different files, so every kill/stall
+    // warning was invisible in companion.log (the main grep target) — weeks of
+    // "killing wedged process" warnings were hidden this way. warn/error must
+    // now be mirrored onto stdout whenever stdout is not a TTY.
+    it("mirrors warn and error lines to stdout when stdout is not a TTY", () => {
+      const ttyDesc = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+      Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      try {
+        log.warn("claude-adapter", "killing wedged process", { pid: 42 });
+        log.error("cli-launcher", "spawn failed", { exitCode: 1 });
+        const written = writeSpy.mock.calls.map((c) => String(c[0])).join("");
+        expect(written).toContain("killing wedged process");
+        expect(written).toContain("spawn failed");
+      } finally {
+        writeSpy.mockRestore();
+        warnSpy.mockRestore();
+        errorSpy.mockRestore();
+        if (ttyDesc) Object.defineProperty(process.stdout, "isTTY", ttyDesc);
+      }
+    });
+
+    // On a TTY both streams share the terminal — mirroring would double-print.
+    it("does not mirror to stdout when stdout is a TTY", () => {
+      const ttyDesc = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      try {
+        log.warn("claude-adapter", "tty warn line", {});
+        const written = writeSpy.mock.calls.map((c) => String(c[0])).join("");
+        expect(written).not.toContain("tty warn line");
+      } finally {
+        writeSpy.mockRestore();
+        warnSpy.mockRestore();
+        if (ttyDesc) Object.defineProperty(process.stdout, "isTTY", ttyDesc);
+      }
+    });
+
+    // Severity must survive in a combined stdout log: warn/error lines carry
+    // an explicit level tag ("WARN:"/"ERROR:") so `grep WARN: companion.log`
+    // finds them; info lines keep the historical untagged format.
+    it("tags warn and error lines with their level in human format", () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        log.info("mod", "plain info");
+        log.warn("mod", "warned");
+        log.error("mod", "errored");
+        expect(String(logSpy.mock.calls[0][0])).toBe("[mod] plain info");
+        expect(String(warnSpy.mock.calls[0][0])).toContain("[mod] WARN: warned");
+        expect(String(errorSpy.mock.calls[0][0])).toContain("[mod] ERROR: errored");
+      } finally {
+        logSpy.mockRestore();
+        warnSpy.mockRestore();
+        errorSpy.mockRestore();
+      }
+    });
+
     it("handles messages without data", () => {
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});
       log.info("server", "Started");
@@ -188,7 +251,7 @@ describe("LogFileWriter", () => {
   });
 
   describe("rotation", () => {
-    it("deletes oldest log files when total lines exceed maxLines", () => {
+    it("deletes oldest log files when total lines exceed maxLines", async () => {
       // Pre-create two old log files with known line counts and distinct mtimes
       // so rotation deletes the oldest first.
       const oldFile1 = join(tmpDir, "companion_2020-01-01T00-00-00_1.log");
@@ -207,7 +270,7 @@ describe("LogFileWriter", () => {
       const writer = new LogFileWriter({ logsDir: tmpDir, maxLines: 8 });
       try {
         // Initial cleanup is deferred — run it explicitly for the test
-        writer.cleanup();
+        await writer.cleanup();
         const files = readdirSync(tmpDir).filter((f) => f.endsWith(".log"));
         // oldFile1 should have been deleted by cleanup, oldFile2 and current remain
         expect(files).toHaveLength(2);
@@ -220,7 +283,7 @@ describe("LogFileWriter", () => {
       }
     });
 
-    it("does not delete the current log file during cleanup", () => {
+    it("does not delete the current log file during cleanup", async () => {
       // Pre-create one old file that puts us over the limit, with an old mtime
       const oldFile = join(tmpDir, "companion_2020-01-01T00-00-00_1.log");
       writeFileSync(oldFile, "line1\nline2\nline3\n");
@@ -234,7 +297,7 @@ describe("LogFileWriter", () => {
         writer.write("current line 3");
 
         // Force another cleanup pass
-        const deleted = writer.cleanup();
+        const deleted = await writer.cleanup();
         expect(deleted).toBeGreaterThanOrEqual(0);
 
         // Current file must still exist and be writable
@@ -246,7 +309,7 @@ describe("LogFileWriter", () => {
       }
     });
 
-    it("returns the number of files deleted during cleanup", () => {
+    it("returns the number of files deleted during cleanup", async () => {
       // Create 3 old files with 5 lines each = 15 lines total, with distinct mtimes
       for (let i = 0; i < 3; i++) {
         const f = join(tmpDir, `companion_2020-0${i + 1}-01T00-00-00_${i}.log`);
@@ -259,7 +322,7 @@ describe("LogFileWriter", () => {
       const writer = new LogFileWriter({ logsDir: tmpDir, maxLines: 5 });
       try {
         // Initial cleanup is deferred — run it explicitly for the test
-        writer.cleanup();
+        await writer.cleanup();
         const files = readdirSync(tmpDir).filter((f) => f.endsWith(".log"));
         // At most the newest old file + current file should remain
         expect(files.length).toBeLessThanOrEqual(2);

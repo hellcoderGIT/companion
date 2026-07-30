@@ -350,7 +350,7 @@ describe("RecorderManager", () => {
 // ─── Cleanup / Rotation ─────────────────────────────────────────────────────
 
 describe("cleanup / rotation", () => {
-  it("deletes oldest files when total lines exceed maxLines", () => {
+  it("deletes oldest files when total lines exceed maxLines", async () => {
     // Create 3 files with 10 entries each (= 11 lines each including header, 33 total)
     // Use different mtimes so we control which is "oldest"
     const now = Date.now();
@@ -365,7 +365,7 @@ describe("cleanup / rotation", () => {
       maxLines: 20,
     });
 
-    const deleted = mgr.cleanup();
+    const deleted = await mgr.cleanup();
 
     // Should have deleted at least the oldest file (11 lines), bringing total to 22,
     // still > 20, so the mid file (11 lines) gets deleted too → total 11 lines
@@ -376,7 +376,7 @@ describe("cleanup / rotation", () => {
     expect(remaining[0]).toContain("new_claude");
   });
 
-  it("does not delete files from active recording sessions", () => {
+  it("does not delete files from active recording sessions", async () => {
     // Create an old file that would normally be deleted
     const now = Date.now();
     createFakeRecording(tempDir, "stale_claude_2025-01-01.jsonl", 10, new Date(now - 3000));
@@ -390,7 +390,7 @@ describe("cleanup / rotation", () => {
     mgr.record("active-sess", "in", "msg", "cli", "claude", "/cwd");
 
     // Now cleanup should delete the stale file but NOT the active recording's file
-    const deleted = mgr.cleanup();
+    const deleted = await mgr.cleanup();
 
     // stale file deleted
     expect(existsSync(join(tempDir, "stale_claude_2025-01-01.jsonl"))).toBe(false);
@@ -403,7 +403,7 @@ describe("cleanup / rotation", () => {
     mgr.closeAll();
   });
 
-  it("is a no-op when total lines are under the limit", () => {
+  it("is a no-op when total lines are under the limit", async () => {
     // 2 files × 3 entries = 2 × 4 lines = 8 total, well under 100
     createFakeRecording(tempDir, "a_claude_2025-01-01.jsonl", 3);
     createFakeRecording(tempDir, "b_claude_2025-01-02.jsonl", 3);
@@ -414,36 +414,38 @@ describe("cleanup / rotation", () => {
       maxLines: 100,
     });
 
-    const deleted = mgr.cleanup();
+    const deleted = await mgr.cleanup();
     expect(deleted).toBe(0);
 
     expect(readDirSafe(tempDir).length).toBe(2);
   });
 
-  it("handles empty recordings directory gracefully", () => {
+  it("handles empty recordings directory gracefully", async () => {
     const mgr = new RecorderManager({
       globalEnabled: false,
       recordingsDir: tempDir,
       maxLines: 10,
     });
 
-    const deleted = mgr.cleanup();
+    const deleted = await mgr.cleanup();
     expect(deleted).toBe(0);
   });
 
-  it("runs cleanup at construction when globally enabled", () => {
+  it("runs cleanup at construction when globally enabled", async () => {
     // Pre-fill the directory over the limit
     const now = Date.now();
     createFakeRecording(tempDir, "old_claude_2025-01-01.jsonl", 20, new Date(now - 2000));
     createFakeRecording(tempDir, "new_claude_2025-01-02.jsonl", 5, new Date(now - 1000));
 
     // Total = 21 + 6 = 27 lines, maxLines = 10
-    // Constructor should run cleanup immediately, deleting the old file
+    // Constructor should kick off cleanup immediately; it is async now, so
+    // await the coalesced in-flight pass before asserting.
     const mgr = new RecorderManager({
       globalEnabled: true,
       recordingsDir: tempDir,
       maxLines: 10,
     });
+    await mgr.cleanup();
 
     const remaining = readDirSafe(tempDir);
     expect(remaining.length).toBe(1);

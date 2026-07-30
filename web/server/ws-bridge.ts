@@ -187,8 +187,10 @@ export class WsBridge {
         stateMachine: new SessionStateMachine(p.id, "terminated"),
       };
       session.state.backend_type = session.backendType;
-      // Resolve git info for restored sessions (may have been persisted without it)
-      resolveSessionGitInfo(session.id, session.state);
+      // Resolve git info for restored sessions (may have been persisted
+      // without it). Fire-and-forget: the info lands asynchronously and
+      // nothing in the restore path reads it synchronously.
+      void resolveSessionGitInfo(session.id, session.state);
       this.sessions.set(p.id, session);
       // Restored sessions with completed turns don't need auto-naming re-triggered
       if (session.state.num_turns > 0) {
@@ -207,10 +209,56 @@ export class WsBridge {
     persistSessionFn(session, this.store);
   }
 
+  /** In-flight git refresh bookkeeping per session: a refresh requested while
+   *  one is running is coalesced into a single re-run (options OR-merged),
+   *  because the running pass may be reading a state object that a
+   *  `system.init`/`session_update` handler has since replaced. */
+  private gitRefreshPending = new Map<string, {
+    rerun: boolean;
+    options: { broadcastUpdate?: boolean; notifyPoller?: boolean };
+  }>();
+
+  /**
+   * Fire-and-forget: git resolution now runs async subprocesses, so this
+   * returns immediately and broadcasts/persists when the info lands. A
+   * browser reconnect storm used to trigger a burst of synchronous git calls
+   * (4 per session × every session) that stalled the event loop and starved
+   * live CLI stdio streams; concurrent refreshes for the same session are
+   * coalesced instead of stacking.
+   */
   private refreshGitInfo(
     session: Session,
     options: { broadcastUpdate?: boolean; notifyPoller?: boolean } = {},
   ): void {
+    const pending = this.gitRefreshPending.get(session.id);
+    if (pending) {
+      pending.rerun = true;
+      pending.options = {
+        broadcastUpdate: pending.options.broadcastUpdate || options.broadcastUpdate,
+        notifyPoller: pending.options.notifyPoller || options.notifyPoller,
+      };
+      return;
+    }
+    const entry = { rerun: false, options: { ...options } };
+    this.gitRefreshPending.set(session.id, entry);
+    void (async () => {
+      try {
+        do {
+          entry.rerun = false;
+          // Reads session.state fresh on every pass, so a re-run picks up a
+          // state object swapped in while the previous pass was mid-flight.
+          await this.doRefreshGitInfo(session, entry.options);
+        } while (entry.rerun);
+      } finally {
+        this.gitRefreshPending.delete(session.id);
+      }
+    })();
+  }
+
+  private async doRefreshGitInfo(
+    session: Session,
+    options: { broadcastUpdate?: boolean; notifyPoller?: boolean } = {},
+  ): Promise<void> {
     const before = {
       git_branch: session.state.git_branch,
       is_worktree: session.state.is_worktree,
@@ -220,7 +268,7 @@ export class WsBridge {
       git_behind: session.state.git_behind,
     };
 
-    resolveSessionGitInfo(session.id, session.state);
+    await resolveSessionGitInfo(session.id, session.state);
 
     let changed = false;
     for (const key of WsBridge.GIT_SESSION_KEYS) {
@@ -449,7 +497,10 @@ export class WsBridge {
         // treated as an auth failure and denied keepalive relaunch. authBlocked
         // is re-set the moment another auth-error result arrives.
         session.authBlocked = false;
-        this.refreshGitInfo(session, { notifyPoller: true });
+        // broadcastUpdate: the refresh is async now, so fresh git info can no
+        // longer ride along in the snapshot broadcast below — it follows as a
+        // session_update once the git calls land (only when something changed).
+        this.refreshGitInfo(session, { broadcastUpdate: true, notifyPoller: true });
         this.broadcastToBrowsers(session, { type: "session_init", session: session.state });
         session.stateMachine.transition("ready", "system_init");
         this.persistSession(session);
@@ -467,7 +518,10 @@ export class WsBridge {
           ...(skills?.length ? { skills } : {}),
           backend_type: session.backendType,
         };
-        this.refreshGitInfo(session, { notifyPoller: true });
+        // broadcastUpdate: the refresh is async now, so fresh git info can no
+        // longer ride along in the snapshot broadcast below — it follows as a
+        // session_update once the git calls land (only when something changed).
+        this.refreshGitInfo(session, { broadcastUpdate: true, notifyPoller: true });
         this.persistSession(session);
         if (session.pendingMessages.length > 0 && adapter.isConnected()) {
           this.flushQueuedBrowserMessages(session, adapter, "backend_session_update");
@@ -1002,7 +1056,10 @@ export class WsBridge {
     this.stopIdleKillWatchdog(sessionId);
 
     // Refresh git state on browser connect so branch changes made mid-session are reflected.
-    this.refreshGitInfo(session, { notifyPoller: true });
+    // broadcastUpdate: the refresh is async now, so fresh git info can no
+        // longer ride along in the snapshot broadcast below — it follows as a
+        // session_update once the git calls land (only when something changed).
+        this.refreshGitInfo(session, { broadcastUpdate: true, notifyPoller: true });
 
     // Send current session state as snapshot
     const snapshot: BrowserIncomingMessage = {

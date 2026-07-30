@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import type { BackendType } from "./session-types.js";
 import { COMPANION_HOME } from "./paths.js";
-import { countFileLines } from "./fs-utils.js";
+import { countFileLines, countFileLinesCached, cachedFileLines, type FileLinesCacheEntry } from "./fs-utils.js";
 
 const DEFAULT_MAX_LINES = 1_000_000;
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -152,6 +152,13 @@ export class RecorderManager {
   private globalEnabled: boolean;
   private recordingsDir: string;
   private maxLines: number;
+  /** Stat-validated line-count cache: finished recordings are immutable, so
+   *  only actively-written files are ever re-read. Keeps the periodic scan of
+   *  a multi-hundred-MB recordings dir from stalling the event loop (which
+   *  starved live CLI stdio streams). */
+  private lineCountCache = new Map<string, FileLinesCacheEntry>();
+  /** Serializes cleanup passes so a slow scan cannot overlap the next tick. */
+  private cleanupInFlight: Promise<number> | null = null;
   private perSessionEnabled = new Set<string>();
   private perSessionDisabled = new Set<string>();
   private recorders = new Map<string, SessionRecorder>();
@@ -174,8 +181,8 @@ export class RecorderManager {
 
     if (this.globalEnabled) {
       // Run cleanup at startup (async, non-blocking) and periodically
-      this.cleanup();
-      this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS);
+      void this.cleanup();
+      this.cleanupTimer = setInterval(() => void this.cleanup(), CLEANUP_INTERVAL_MS);
       if (this.cleanupTimer.unref) this.cleanupTimer.unref();
     }
   }
@@ -279,8 +286,10 @@ export class RecorderManager {
           if (firstUnderscore === -1 || secondUnderscore === -1) {
             return { filename, sessionId: "", backendType: "", startedAt: "", lines: 0 };
           }
-          // Count lines — fast: just count newlines
-          const lines = countFileLines(join(this.recordingsDir, filename));
+          // Count lines — prefer counts warmed by the periodic async scan;
+          // fall back to a direct count for files the scan has not seen yet.
+          const fullPath = join(this.recordingsDir, filename);
+          const lines = cachedFileLines(fullPath, this.lineCountCache) ?? countFileLines(fullPath);
           return {
             filename,
             sessionId: withoutExt.substring(0, firstUnderscore),
@@ -309,7 +318,20 @@ export class RecorderManager {
    * Delete oldest recording files until total lines are under maxLines.
    * Skips files that belong to active (currently recording) sessions.
    */
-  cleanup(): number {
+  /**
+   * Async and cache-backed on purpose: the previous sync implementation
+   * re-read every byte of the recordings directory (385MB observed) on the
+   * event loop every 5 minutes. Overlapping passes are coalesced.
+   */
+  cleanup(): Promise<number> {
+    if (this.cleanupInFlight) return this.cleanupInFlight;
+    this.cleanupInFlight = this.runCleanup().finally(() => {
+      this.cleanupInFlight = null;
+    });
+    return this.cleanupInFlight;
+  }
+
+  private async runCleanup(): Promise<number> {
     try {
       this.ensureDir();
       const files = readdirSync(this.recordingsDir).filter((f) => f.endsWith(".jsonl"));
@@ -326,7 +348,7 @@ export class RecorderManager {
 
       for (const filename of files) {
         const fullPath = join(this.recordingsDir, filename);
-        const lines = countFileLines(fullPath);
+        const lines = await countFileLinesCached(fullPath, this.lineCountCache);
         let mtimeMs = 0;
         try {
           mtimeMs = statSync(fullPath).mtimeMs;
@@ -349,6 +371,7 @@ export class RecorderManager {
         if (activeFiles.has(entry.path)) continue;
         try {
           unlinkSync(entry.path);
+          this.lineCountCache.delete(entry.path);
           totalLines -= entry.lines;
           deleted++;
         } catch {

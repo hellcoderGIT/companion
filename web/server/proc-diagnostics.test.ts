@@ -7,6 +7,7 @@ import {
   hasLiveDescendants,
   countDescendants,
   findOrphanedMcpProcesses,
+  stdoutFdOpen,
 } from "./proc-diagnostics.js";
 
 /**
@@ -285,5 +286,48 @@ describe("findOrphanedMcpProcesses", () => {
     // comm is the executable name (truncated to 15 chars by the kernel), not
     // argv[0] — it is a label for the log line, not the match key.
     expect(typeof found?.comm).toBe("string");
+  });
+});
+
+describe("stdoutFdOpen", () => {
+  const spawned: ReturnType<typeof spawn>[] = [];
+
+  afterEach(() => {
+    for (const p of spawned.splice(0)) {
+      try { p.kill("SIGKILL"); } catch { /* already gone */ }
+    }
+  });
+
+  // This probe decides how a mid-stream stdout EOF is attributed: a pipe only
+  // EOFs at the read end when every write end has closed, so "our reader saw
+  // EOF but fd 1 is still open" proves a reader-side (server) stream failure
+  // rather than a CLI wedge. Production sampling showed every wedge-kill
+  // victim healthy — this is the field that finally distinguishes the cases.
+  it.runIf(isLinux)("returns true for a live process holding stdout open", async () => {
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    spawned.push(child);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(stdoutFdOpen(child.pid)).toBe(true);
+  });
+
+  it.runIf(isLinux)("returns false when the process closed its own stdout", async () => {
+    // exec 1>&- closes fd 1 in the shell itself, then keeps the process alive.
+    const child = spawn("/bin/bash", ["-c", "exec 1>&-; sleep 30"], { stdio: "ignore" });
+    spawned.push(child);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(stdoutFdOpen(child.pid)).toBe(false);
+  });
+
+  it.runIf(isLinux)("returns false for an exited process", async () => {
+    const child = spawn("true", [], { stdio: "ignore" });
+    spawned.push(child);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(stdoutFdOpen(child.pid)).toBe(false);
+  });
+
+  it("returns null for a missing pid and never throws", () => {
+    expect(stdoutFdOpen(undefined)).toBeNull();
+    expect(stdoutFdOpen(null)).toBeNull();
+    expect(stdoutFdOpen(0)).toBeNull();
   });
 });

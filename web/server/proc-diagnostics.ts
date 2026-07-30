@@ -8,7 +8,7 @@
 // Everything here is best-effort and must never throw: this runs on a recovery
 // path, and a diagnostic that breaks recovery is worse than no diagnostic.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, readlinkSync } from "node:fs";
 
 /** A point-in-time snapshot of kernel state for a process. */
 export interface ProcSnapshot {
@@ -280,4 +280,31 @@ export function captureProcState(pid: number | undefined): ProcSnapshot {
 
   if (!readAnything) snapshot.error = "process_gone_or_unreadable";
   return snapshot;
+}
+
+/**
+ * Does the process still hold its stdout (fd 1) open?
+ *
+ * The discriminating probe for a mid-stream stdout EOF. A pipe only EOFs at
+ * the read end once every write end is closed — so if OUR reader reported EOF
+ * while the CLI's fd 1 is still open, the "EOF" was synthetic on the reader
+ * (Bun stream) side, not the CLI closing its output. That distinction decides
+ * whether a "wedged" kill is recovering from a real CLI failure or destroying
+ * a healthy process because of our own stream handling. Production sampling
+ * showed every wedge-kill victim was healthy (S/ep_poll), which is what
+ * motivated recording this at kill time.
+ *
+ * Returns true if fd 1 is open, false if it is definitely gone (fd closed or
+ * process exited), and null when it cannot be determined (non-Linux,
+ * permissions).
+ */
+export function stdoutFdOpen(pid: number | undefined | null): boolean | null {
+  if (!pid || process.platform !== "linux") return null;
+  try {
+    readlinkSync(`/proc/${pid}/fd/1`);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    return code === "ENOENT" || code === "ESRCH" ? false : null;
+  }
 }

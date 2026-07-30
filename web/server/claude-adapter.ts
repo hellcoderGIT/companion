@@ -47,7 +47,7 @@ import type {
 import type { SocketData } from "./ws-bridge-types.js";
 import type { PendingControlRequest } from "./ws-bridge-types.js";
 import type { RecorderManager } from "./recorder.js";
-import { captureProcState, hasLiveDescendants, countDescendants, getDescendants, type ProcDescendant } from "./proc-diagnostics.js";
+import { captureProcState, hasLiveDescendants, countDescendants, getDescendants, stdoutFdOpen, type ProcDescendant } from "./proc-diagnostics.js";
 import { getSettings } from "./settings-manager.js";
 import { parseNDJSON, isDuplicateCLIMessage } from "./ws-bridge-cli-ingest.js";
 import type { CLIDedupState } from "./ws-bridge-cli-ingest.js";
@@ -499,6 +499,7 @@ export class ClaudeAdapter implements IBackendAdapter {
         log.info("claude-adapter", "stdout closed but wedge-kill is disabled; leaving process alone", {
           sessionId: this.sessionId,
           pid: proc.pid,
+          cliStdoutOpen: stdoutFdOpen(proc.pid),
           proc: captureProcState(proc.pid),
           stderrTail: this.stderrTailForLog(),
         });
@@ -533,9 +534,12 @@ export class ClaudeAdapter implements IBackendAdapter {
             // Capture kernel state BEFORE the kill: once we SIGTERM, the
             // evidence is gone. A wedged CLI writes nothing to stderr, so this
             // is the only signal about why it is still alive.
+            const cliStdoutOpen = stdoutFdOpen(proc.pid);
+            this.warnIfReaderSideEof(cliStdoutOpen, proc.pid);
             log.warn("claude-adapter", "stdout closed after result but process did not exit within grace; killing wedged process", {
               sessionId: this.sessionId,
               pid: proc.pid,
+              cliStdoutOpen,
               graceReason: this.lastInboundWasResult ? "result" : "descendants_alive",
               teardownOutcome: this.lastTeardownOutcome,
               proc: captureProcState(proc.pid),
@@ -560,9 +564,12 @@ export class ClaudeAdapter implements IBackendAdapter {
             // Reaching here now means a genuine wedge: stdout closed, no live
             // descendants to reap, and still not exited. Snapshot kernel state
             // before the kill destroys it.
+            const cliStdoutOpen = stdoutFdOpen(proc.pid);
+            this.warnIfReaderSideEof(cliStdoutOpen, proc.pid);
             log.warn("claude-adapter", "stdout closed mid-stream and process did not exit within grace; killing wedged process", {
               sessionId: this.sessionId,
               pid: proc.pid,
+              cliStdoutOpen,
               graceMs: STDOUT_CLOSE_GRACE_MS,
               graceReason: "no_descendants",
               proc: captureProcState(proc.pid),
@@ -635,6 +642,24 @@ export class ClaudeAdapter implements IBackendAdapter {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Called on the kill path when the stdout-fd probe says the CLI still holds
+   * its stdout open. A pipe cannot EOF at the read end while a write end is
+   * open, so this state proves the "EOF" was synthetic on OUR side (Bun
+   * subprocess-stream teardown), not the CLI closing its output. The process
+   * is still killed — the stream cannot be re-attached, and an unkilled live
+   * PID blocks `handleAutoRelaunch`'s liveness guard, wedging recovery — but
+   * the warning attributes the root cause so these events can be counted and
+   * the reader-side failure fixed where it lives.
+   */
+  private warnIfReaderSideEof(cliStdoutOpen: boolean | null, pid: number | undefined): void {
+    if (cliStdoutOpen !== true) return;
+    log.warn("claude-adapter", "CLI still holds its stdout open — EOF was reader-side (server stream failure), not a CLI wedge; killing anyway so --resume recovery can proceed", {
+      sessionId: this.sessionId,
+      pid,
+    });
   }
 
   private checkSilence(): void {
