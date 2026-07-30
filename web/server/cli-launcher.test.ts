@@ -2,7 +2,7 @@ import { vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { _resetForTest as resetSettings } from "./settings-manager.js";
+import { _resetForTest as resetSettings, updateSettings } from "./settings-manager.js";
 
 // ─── Hoisted mocks ──────────────────────────────────────────────────────────
 
@@ -1475,5 +1475,122 @@ describe("exit reason classification", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(events[0].reason).toBe("crash");
+  });
+});
+
+// ─── SDK transport (settings.claudeTransport === "sdk") ─────────────────────
+// The launcher must divert Claude spawns to SdkClaudeAdapter when the setting
+// is on, mirror the stdio lifecycle contract (adapter-created event,
+// session:exited on exit, resume-failure heuristic), route kill/relaunch
+// through the adapter's abort(), and keep containerized sessions on stdio.
+
+const sdkMockState = vi.hoisted(() => ({
+  instances: [] as Array<{
+    sessionId: string;
+    opts: Record<string, unknown> | undefined;
+    attachOptions: Record<string, unknown> | null;
+    exitCb: ((code: number | null) => void) | null;
+    abort: ReturnType<typeof vi.fn>;
+  }>,
+}));
+
+vi.mock("./claude-sdk-adapter.js", () => ({
+  SdkClaudeAdapter: class {
+    sessionId: string;
+    opts: Record<string, unknown> | undefined;
+    attachOptions: Record<string, unknown> | null = null;
+    exitCb: ((code: number | null) => void) | null = null;
+    abort = vi.fn();
+    constructor(sessionId: string, opts?: Record<string, unknown>) {
+      this.sessionId = sessionId;
+      this.opts = opts;
+      sdkMockState.instances.push(this as never);
+    }
+    onExit(cb: (code: number | null) => void) { this.exitCb = cb; }
+    attachSdk(options: Record<string, unknown>) { this.attachOptions = options; }
+    onBrowserMessage() {}
+    onSessionMeta() {}
+    onDisconnect() {}
+    isConnected() { return true; }
+  },
+}));
+
+describe("SDK transport spawn", () => {
+  beforeEach(() => {
+    sdkMockState.instances.length = 0;
+    updateSettings({ claudeTransport: "sdk" });
+  });
+
+  it("spawns via SdkClaudeAdapter instead of Bun.spawn and marks the session connected", () => {
+    const info = launcher.launch({ model: "claude-opus-5", permissionMode: "bypassPermissions", cwd: "/tmp" });
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(sdkMockState.instances).toHaveLength(1);
+    const inst = sdkMockState.instances[0];
+    expect(inst.sessionId).toBe("test-session-id");
+    expect(inst.attachOptions?.model).toBe("claude-opus-5");
+    expect(inst.attachOptions?.permissionMode).toBe("bypassPermissions");
+    // Resolved binary is handed to the SDK so it drives the same logged-in CLI.
+    expect(inst.attachOptions?.claudeBinary).toBe("/usr/bin/claude");
+    expect(info.state).toBe("connected");
+    expect(info.pid).toBeUndefined();
+  });
+
+  it("emits backend:claude-adapter-created with the SDK adapter", () => {
+    const created: Array<{ sessionId: string }> = [];
+    companionBus.on("backend:claude-adapter-created", (e) => created.push(e as never));
+    launcher.launch({ cwd: "/tmp" });
+    expect(created.some((c) => c.sessionId === "test-session-id")).toBe(true);
+  });
+
+  it("emits session:exited when the SDK adapter reports exit", async () => {
+    const events: Array<{ sessionId: string; exitCode: number }> = [];
+    companionBus.on("session:exited", (e) => events.push(e as never));
+    launcher.launch({ cwd: "/tmp" });
+    sdkMockState.instances[0].exitCb?.(143);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(events.some((e) => e.sessionId === "test-session-id" && e.exitCode === 143)).toBe(true);
+    expect(launcher.getSession("test-session-id")?.state).toBe("exited");
+  });
+
+  it("clears cliSessionId when the SDK session dies immediately after a resume", async () => {
+    launcher.launch({ cwd: "/tmp" });
+    launcher.setCLISessionId("test-session-id", "internal-abc");
+    await launcher.relaunch("test-session-id");
+    // Relaunch spawned a second adapter with --resume semantics…
+    expect(sdkMockState.instances).toHaveLength(2);
+    expect(sdkMockState.instances[1].attachOptions?.resume).toBe("internal-abc");
+    // …and an immediate death must clear the resume id so the next spawn is fresh.
+    sdkMockState.instances[1].exitCb?.(1);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(launcher.getSession("test-session-id")?.cliSessionId).toBeUndefined();
+  });
+
+  it("kill() aborts the SDK child and marks the session exited", async () => {
+    launcher.launch({ cwd: "/tmp" });
+    const killed = await launcher.kill("test-session-id");
+    expect(killed).toBe(true);
+    expect(sdkMockState.instances[0].abort).toHaveBeenCalledOnce();
+    expect(launcher.getSession("test-session-id")?.state).toBe("exited");
+  });
+
+  it("relaunch aborts the old SDK adapter before spawning the new one", async () => {
+    launcher.launch({ cwd: "/tmp" });
+    await launcher.relaunch("test-session-id");
+    expect(sdkMockState.instances).toHaveLength(2);
+    expect(sdkMockState.instances[0].abort).toHaveBeenCalledOnce();
+  });
+
+  it("containerized sessions stay on the stdio transport even with the SDK setting on", () => {
+    mockGetContainerById.mockReturnValue({ containerId: "c1", state: "running" });
+    launcher.launch({
+      cwd: "/tmp",
+      containerId: "c1",
+      containerName: "test",
+      containerImage: "img",
+      containerCwd: "/workspace",
+    });
+    // The SDK cannot docker-exec — spawn must go through Bun.spawn (docker exec -i).
+    expect(sdkMockState.instances).toHaveLength(0);
+    expect(mockSpawn).toHaveBeenCalled();
   });
 });
