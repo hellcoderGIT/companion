@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.114.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.4...companion-v0.114.0) (2026-07-30)
+
+
+### Features
+
+* **session:** switchable Agent SDK transport for Claude sessions ([#103](https://github.com/hellcoderGIT/companion/issues/103)) ([ecb60c9](https://github.com/hellcoderGIT/companion/commit/ecb60c92176994e0a21a24f225fd16dffbf98f4a))
+
 ## [0.113.4](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.3...companion-v0.113.4) (2026-07-30)
 
 
