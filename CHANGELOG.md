@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.115.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.114.0...companion-v0.115.0) (2026-08-07)
+
+
+### Features
+
+* **ui:** switchable standard/compact message density ([#106](https://github.com/hellcoderGIT/companion/issues/106)) ([18659af](https://github.com/hellcoderGIT/companion/commit/18659affaaedac6ee9e3162eb2e9339956d25e15))
+
+
+### Bug Fixes
+
+* **ui:** keep the compact activity line for whitespace-only thinking drafts ([#108](https://github.com/hellcoderGIT/companion/issues/108)) ([b3fa8b0](https://github.com/hellcoderGIT/companion/commit/b3fa8b0a7b5e89611a77857e47c376e4b32aaba9))
+
 ## [0.114.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.113.4...companion-v0.114.0) (2026-07-30)
 
 
