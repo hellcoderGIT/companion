@@ -34,6 +34,8 @@ interface MockStoreState {
   setUpdateInfo: ReturnType<typeof vi.fn>;
   setUpdateOverlayActive: ReturnType<typeof vi.fn>;
   setEditorTabEnabled: ReturnType<typeof vi.fn>;
+  density: "standard" | "compact";
+  toggleDensity: ReturnType<typeof vi.fn>;
 }
 
 let mockState: MockStoreState;
@@ -54,6 +56,8 @@ function createMockState(overrides: Partial<MockStoreState> = {}): MockStoreStat
     setUpdateInfo: vi.fn(),
     setUpdateOverlayActive: vi.fn(),
     setEditorTabEnabled: vi.fn(),
+    density: "standard",
+    toggleDensity: vi.fn(),
     ...overrides,
   };
 }
@@ -339,6 +343,28 @@ describe("SettingsPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Theme/i }));
     expect(mockState.toggleDarkMode).toHaveBeenCalledTimes(1);
+  });
+
+  // Message density is a browser-local preference (like theme), so it must be
+  // driven purely through the store — no server round-trip.
+  it("toggles message density from settings", async () => {
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    const toggle = screen.getByRole("button", { name: /Message density/i });
+    expect(toggle.textContent).toContain("Standard");
+
+    fireEvent.click(toggle);
+    expect(mockState.toggleDensity).toHaveBeenCalledTimes(1);
+    expect(mockApi.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("shows Compact as the current message density when the preference is set", async () => {
+    mockState = createMockState({ density: "compact" });
+    render(<SettingsPage />);
+    await screen.findByText("Anthropic key configured");
+
+    expect(screen.getByRole("button", { name: /Message density/i }).textContent).toContain("Compact");
   });
 
   it("toggles proactive keepalive relaunch and persists it via updateSettings", async () => {

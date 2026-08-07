@@ -2,6 +2,13 @@ import type { StateCreator } from "zustand";
 import type { AppState } from "./index.js";
 
 export type DiffBase = "last-commit" | "default-branch";
+/**
+ * Message feed density.
+ * - "standard": every command / diff / output block is rendered inline (the original layout).
+ * - "compact":  those blocks collapse to a single narrow line the user can expand on demand,
+ *               and empty thinking steps are hidden entirely.
+ */
+export type Density = "standard" | "compact";
 import { type TaskPanelConfig, getInitialTaskPanelConfig, getDefaultConfig, persistTaskPanelConfig } from "../components/task-panel-sections.js";
 
 function getInitialDarkMode(): boolean {
@@ -32,6 +39,17 @@ export function getInitialDiffBase(): DiffBase {
   return "last-commit";
 }
 
+/**
+ * Density is a per-browser preference (like dark mode), not a server setting —
+ * the same account may want compact on a laptop and standard on a big screen.
+ */
+export function getInitialDensity(): Density {
+  if (typeof window === "undefined") return "standard";
+  const stored = window.localStorage.getItem("cc-density");
+  if (stored === "standard" || stored === "compact") return stored;
+  return "standard";
+}
+
 export interface UiSlice {
   darkMode: boolean;
   notificationSound: boolean;
@@ -46,6 +64,7 @@ export interface UiSlice {
   chatTabReentryTickBySession: Map<string, number>;
   diffPanelSelectedFile: Map<string, string>;
   diffBase: DiffBase;
+  density: Density;
 
   setDarkMode: (v: boolean) => void;
   toggleDarkMode: () => void;
@@ -66,6 +85,8 @@ export interface UiSlice {
   markChatTabReentry: (sessionId: string) => void;
   setDiffPanelSelectedFile: (sessionId: string, filePath: string | null) => void;
   setDiffBase: (base: DiffBase) => void;
+  setDensity: (density: Density) => void;
+  toggleDensity: () => void;
 }
 
 export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set) => ({
@@ -82,6 +103,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set) => (
   chatTabReentryTickBySession: new Map(),
   diffPanelSelectedFile: new Map(),
   diffBase: getInitialDiffBase(),
+  density: getInitialDensity(),
 
   setDarkMode: (v) => {
     localStorage.setItem("cc-dark-mode", String(v));
@@ -183,4 +205,19 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set) => (
     }
     set({ diffBase: base });
   },
+
+  setDensity: (density) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("cc-density", density);
+    }
+    set({ density });
+  },
+  toggleDensity: () =>
+    set((s) => {
+      const next: Density = s.density === "compact" ? "standard" : "compact";
+      if (typeof window !== "undefined") {
+        localStorage.setItem("cc-density", next);
+      }
+      return { density: next };
+    }),
 });
