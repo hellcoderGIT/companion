@@ -83,4 +83,4 @@ export const useStore = create<AppState>((...args) => ({
 
 // Re-export types for backward compatibility
 export type { QuickTerminalTab, QuickTerminalPlacement } from "./terminal-slice.js";
-export type { DiffBase } from "./ui-slice.js";
+export type { DiffBase, Density } from "./ui-slice.js";

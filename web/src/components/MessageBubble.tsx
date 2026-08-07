@@ -5,6 +5,7 @@ import type { ChatMessage, ContentBlock } from "../types.js";
 import { ToolBlock, getToolIcon, getToolLabel, getPreview, ToolIcon } from "./ToolBlock.js";
 import { CopyButton } from "./CopyButton.js";
 import { MessageAttachment } from "./AttachmentChip.js";
+import { CompactDisclosure, useIsCompact } from "./density.js";
 
 /**
  * Flattens the React children passed to a ReactMarkdown `code` renderer into
@@ -118,11 +119,59 @@ function mapToolUsesById(blocks: ContentBlock[]): Map<string, ToolUseInfo> {
   return map;
 }
 
+/** A thinking block the model emitted with no readable text in it. */
+function isEmptyThinking(group: GroupedBlock): boolean {
+  return (
+    group.kind === "content" &&
+    group.block.type === "thinking" &&
+    !group.block.thinking.trim()
+  );
+}
+
+/**
+ * Compact mode drops the "No thinking text captured." placeholder — but a
+ * message whose *only* block was that empty thinking step would then render as
+ * a bare avatar and read as a stalled turn. This keeps one quiet line so the
+ * activity stays visible.
+ */
+function CompactActivityLine({ streaming }: { streaming?: boolean }) {
+  return (
+    <div
+      role="status"
+      className="flex items-center gap-1.5 py-0.5 text-[11px] text-cc-muted/50 italic"
+    >
+      <span
+        aria-hidden="true"
+        className={`w-1.5 h-1.5 rounded-full bg-cc-muted/40 shrink-0 ${streaming ? "animate-pulse" : ""}`}
+      />
+      <span>{streaming ? "Thinking…" : "Thought"}</span>
+    </div>
+  );
+}
+
 function AssistantMessage({ message }: { message: ChatMessage }) {
   const blocks = message.contentBlocks || [];
+  const compact = useIsCompact();
 
   const grouped = useMemo(() => groupContentBlocks(blocks), [blocks]);
   const toolUseById = useMemo(() => mapToolUsesById(blocks), [blocks]);
+  // In compact mode empty thinking steps are hidden; everything else renders
+  // exactly as it does in standard mode.
+  const visible = useMemo(
+    () => (compact ? grouped.filter((g) => !isEmptyThinking(g)) : grouped),
+    [grouped, compact],
+  );
+
+  if (compact && visible.length === 0 && !message.content) {
+    return (
+      <div className="flex items-start gap-3">
+        <AssistantAvatar />
+        <div className="flex-1 min-w-0">
+          <CompactActivityLine streaming={message.isStreaming} />
+        </div>
+      </div>
+    );
+  }
 
   if (blocks.length === 0 && message.content) {
     // During streaming thinking phase, render as faded italic inline text
@@ -144,8 +193,8 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   return (
     <div className="flex items-start gap-3">
       <AssistantAvatar />
-      <div className="flex-1 min-w-0 space-y-3">
-        {grouped.map((group, i) => {
+      <div className={`flex-1 min-w-0 ${compact ? "space-y-1.5" : "space-y-3"}`}>
+        {visible.map((group, i) => {
           if (group.kind === "content") {
             return <ContentBlockRenderer key={i} block={group.block} toolUseById={toolUseById} />;
           }
@@ -324,32 +373,26 @@ function ContentBlockRenderer({
     if (toolName === "Bash") {
       return <BashResultBlock text={content} isError={isError} />;
     }
-    return (
-      <div className="relative rounded-lg bg-cc-code-bg overflow-hidden">
-        <CopyButton
-          text={content}
-          label="Copy output"
-          className="absolute top-1 right-1 z-10 bg-cc-code-bg/80 backdrop-blur-sm"
-        />
-        <pre className={`text-[12px] font-mono-code px-3 py-2 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto ${
-          isError ? "text-cc-error" : "text-cc-code-fg/60"
-        }`}>
-          {content}
-        </pre>
-      </div>
-    );
+    return <GenericResultBlock content={content} isError={isError} />;
   }
 
   return null;
+}
+
+/** Shared count label for collapsed output rows: "34 lines" / "1 line". */
+function lineCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "line" : "lines"}`;
 }
 
 function BashResultBlock({ text, isError }: { text: string; isError: boolean }) {
   const lines = text.split(/\r?\n/);
   const hasMore = lines.length > 20;
   const [showFull, setShowFull] = useState(false);
+  const compact = useIsCompact();
+  const [compactOpen, setCompactOpen] = useState(false);
   const rendered = showFull || !hasMore ? text : lines.slice(-20).join("\n");
 
-  return (
+  const body = (
     <div className="relative rounded-lg bg-cc-code-bg overflow-hidden">
       {/* Copy always grabs the full output, not just the truncated tail. */}
       <CopyButton
@@ -377,6 +420,63 @@ function BashResultBlock({ text, isError }: { text: string; isError: boolean }) 
       )}
     </div>
   );
+
+  if (compact) {
+    return (
+      <div>
+        <CompactDisclosure
+          open={compactOpen}
+          onToggle={() => setCompactOpen(!compactOpen)}
+          marker="›"
+          label={isError ? "Error output" : "Output"}
+          meta={lineCountLabel(lines.length)}
+          labelClassName={isError ? "text-cc-error/70" : ""}
+        />
+        {compactOpen && <div className="mt-1">{body}</div>}
+      </div>
+    );
+  }
+
+  return body;
+}
+
+/** Non-Bash tool output — same compact collapse treatment as Bash output. */
+function GenericResultBlock({ content, isError }: { content: string; isError: boolean }) {
+  const compact = useIsCompact();
+  const [compactOpen, setCompactOpen] = useState(false);
+
+  const body = (
+    <div className="relative rounded-lg bg-cc-code-bg overflow-hidden">
+      <CopyButton
+        text={content}
+        label="Copy output"
+        className="absolute top-1 right-1 z-10 bg-cc-code-bg/80 backdrop-blur-sm"
+      />
+      <pre className={`text-[12px] font-mono-code px-3 py-2 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto ${
+        isError ? "text-cc-error" : "text-cc-code-fg/60"
+      }`}>
+        {content}
+      </pre>
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <div>
+        <CompactDisclosure
+          open={compactOpen}
+          onToggle={() => setCompactOpen(!compactOpen)}
+          marker="›"
+          label={isError ? "Error result" : "Result"}
+          meta={lineCountLabel(content.split(/\r?\n/).length)}
+          labelClassName={isError ? "text-cc-error/70" : ""}
+        />
+        {compactOpen && <div className="mt-1">{body}</div>}
+      </div>
+    );
+  }
+
+  return body;
 }
 
 function ToolGroupBlock({ name, items }: { name: string; items: ToolGroupItem[] }) {
@@ -423,12 +523,22 @@ function ToolGroupBlock({ name, items }: { name: string; items: ToolGroupItem[] 
 
 function ThinkingBlock({ text }: { text: string }) {
   const normalized = text.trim();
+  const compact = useIsCompact();
   const [expanded, setExpanded] = useState(false);
   const lines = normalized.split("\n");
-  const isLong = lines.length > 8 || normalized.length > 600;
+  // Compact clamps thinking to a two-line teaser; standard keeps the original
+  // eight-line preview.
+  const maxLines = compact ? 2 : 8;
+  const maxChars = compact ? 200 : 600;
+  const isLong = lines.length > maxLines || normalized.length > maxChars;
   const displayed = isLong && !expanded
-    ? lines.slice(0, 8).join("\n")
+    ? lines.slice(0, maxLines).join("\n")
     : normalized;
+
+  // Compact hides the "No thinking text captured." placeholder entirely.
+  // AssistantMessage keeps a visible activity line when that leaves a message
+  // with nothing else to show.
+  if (compact && !normalized) return null;
 
   return (
     <div>

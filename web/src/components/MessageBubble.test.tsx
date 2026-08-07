@@ -46,6 +46,7 @@ vi.mock("remark-gfm", () => ({
 }));
 
 import { MessageBubble } from "./MessageBubble.js";
+import { DensityProvider } from "./density.js";
 
 function makeMessage(overrides: Partial<ChatMessage> & { role: ChatMessage["role"] }): ChatMessage {
   return {
@@ -714,5 +715,191 @@ describe("MessageBubble - copy buttons on code/output surfaces", () => {
     });
     render(<MessageBubble message={msg} />);
     expect(screen.getByRole("button", { name: "Copy output" })).toBeTruthy();
+  });
+});
+
+// ─── Compact density ────────────────────────────────────────────────────────
+//
+// Compact mode hides the "No thinking text captured." placeholder and collapses
+// tool output to a single expandable row. The critical edge case: a message
+// whose only block was that empty thinking step must still show *something*,
+// otherwise a live turn reads as stuck.
+
+describe("MessageBubble - compact density", () => {
+  it("keeps 'No thinking text captured.' in standard density", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [{ type: "thinking", thinking: "   " }],
+    });
+    render(
+      <DensityProvider value="standard">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(screen.getByText("No thinking text captured.")).toBeTruthy();
+  });
+
+  it("hides the empty-thinking placeholder in compact density but keeps the tool call visible", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [
+        { type: "thinking", thinking: "" },
+        { type: "tool_use", id: "tu-c1", name: "Bash", input: { command: "ls", description: "List files" } },
+      ],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(screen.queryByText("No thinking text captured.")).toBeNull();
+    // Activity is still legible — the tool row carries the turn.
+    expect(screen.getByText("List files")).toBeTruthy();
+  });
+
+  it("shows a quiet activity line when an empty thinking block is the only content", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [{ type: "thinking", thinking: "  " }],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    // Placeholder text is gone, but the turn does not render as a bare avatar.
+    expect(screen.queryByText("No thinking text captured.")).toBeNull();
+    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.getByText("Thought")).toBeTruthy();
+  });
+
+  it("labels the activity line 'Thinking…' while the turn is still streaming", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      contentBlocks: [{ type: "thinking", thinking: "" }],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(screen.getByText("Thinking…")).toBeTruthy();
+  });
+
+  it("still renders non-empty thinking text in compact density", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [{ type: "thinking", thinking: "Weighing two migration orders." }],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(screen.getByText(/Weighing two migration orders/)).toBeTruthy();
+    // The activity fallback is only for the empty case.
+    expect(screen.queryByText("Thought")).toBeNull();
+  });
+
+  it("collapses Bash output to a single row with a line count, expanding on click", () => {
+    const output = Array.from({ length: 34 }, (_, i) => `line ${i + 1}`).join("\n");
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [
+        { type: "tool_use", id: "tu-c2", name: "Bash", input: { command: "cat log" } },
+        { type: "tool_result", tool_use_id: "tu-c2", content: output },
+      ],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(screen.getByText("Output")).toBeTruthy();
+    expect(screen.getByText("34 lines")).toBeTruthy();
+    // Output body (and therefore its copy button) is hidden until expanded.
+    expect(screen.queryByRole("button", { name: "Copy output" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Output/ }));
+    expect(screen.getByRole("button", { name: "Copy output" })).toBeTruthy();
+  });
+
+  it("labels collapsed error output distinctly", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [
+        { type: "tool_use", id: "tu-c3", name: "Bash", input: { command: "npm test" } },
+        { type: "tool_result", tool_use_id: "tu-c3", content: "boom", is_error: true },
+      ],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(screen.getByText("Error output")).toBeTruthy();
+  });
+
+  it("collapses non-Bash tool results too", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [
+        { type: "tool_use", id: "tu-c4", name: "Read", input: { file_path: "/x" } },
+        { type: "tool_result", tool_use_id: "tu-c4", content: "alpha\nbeta" },
+      ],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(screen.getByText("Result")).toBeTruthy();
+    expect(screen.getByText("2 lines")).toBeTruthy();
+    expect(screen.queryByText("alpha")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Result/ }));
+    expect(screen.getByText(/alpha/)).toBeTruthy();
+  });
+
+  it("leaves assistant text answers untouched in compact density", () => {
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [{ type: "text", text: "Both migrations applied cleanly." }],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(screen.getByText(/Both migrations applied cleanly/)).toBeTruthy();
+  });
+
+  it("passes axe accessibility scan in compact density", async () => {
+    const { axe } = await import("vitest-axe");
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [
+        { type: "thinking", thinking: "" },
+        { type: "tool_use", id: "tu-c5", name: "Bash", input: { command: "ls", description: "List files" } },
+        { type: "tool_result", tool_use_id: "tu-c5", content: "a\nb" },
+      ],
+    });
+    const { container } = render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

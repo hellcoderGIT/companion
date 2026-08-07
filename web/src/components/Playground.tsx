@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { PermissionBanner } from "./PermissionBanner.js";
 import { MessageBubble } from "./MessageBubble.js";
+import { DensityProvider } from "./density.js";
 import {
   ToolBlock,
   getToolIcon,
@@ -448,6 +449,45 @@ const MSG_TOOL_ERROR: ChatMessage = {
     { type: "text", text: "There's a test failure. Let me fix the issue." },
   ],
   timestamp: Date.now() - 20000,
+};
+
+// A turn where the model emitted a thinking block with no readable text plus a
+// tool call — the shape that renders "No thinking text captured." in standard
+// mode and hides that line entirely in compact mode.
+const MSG_EMPTY_THINKING_WITH_TOOL: ChatMessage = {
+  id: "msg-empty-thinking",
+  role: "assistant",
+  content: "",
+  contentBlocks: [
+    { type: "thinking", thinking: "  " },
+    {
+      type: "tool_use",
+      id: "tu-density-1",
+      name: "Bash",
+      input: {
+        command:
+          "PGPASSWORD=secret docker exec pg psql -U app -d app_db -tAc \"select version_num from alembic_version\"\necho '--- create scratch:'\ndocker exec pg psql -U app -d postgres -c \"CREATE DATABASE scratch\"",
+        description: "Check dev DB alembic state, create scratch DB",
+      },
+    },
+    {
+      type: "tool_result",
+      tool_use_id: "tu-density-1",
+      content: Array.from({ length: 24 }, (_, i) => `migration line ${i + 1}`).join("\n"),
+    },
+  ],
+  timestamp: Date.now() - 18000,
+};
+
+// The same turn while it is still streaming, with nothing but an empty thinking
+// block: compact must still show an activity line so it never reads as stuck.
+const MSG_EMPTY_THINKING_STREAMING: ChatMessage = {
+  id: "msg-empty-thinking-streaming",
+  role: "assistant",
+  content: "",
+  isStreaming: true,
+  contentBlocks: [{ type: "thinking", thinking: "" }],
+  timestamp: Date.now() - 17000,
 };
 
 // Tasks
@@ -1093,6 +1133,55 @@ export function Playground() {
             </Card>
             <Card label="System message">
               <MessageBubble message={MSG_SYSTEM} />
+            </Card>
+          </div>
+        </Section>
+
+        {/* ─── Message density ───────────────────────────────── */}
+        <Section
+          title="Message density"
+          description="Standard (default) vs compact — set in Settings → General. Compact collapses commands, diffs and output to one expandable line and hides empty thinking steps."
+        >
+          <div className="grid gap-4 lg:grid-cols-2 max-w-6xl">
+            <Card label="Standard — empty thinking + command + output">
+              <DensityProvider value="standard">
+                <MessageBubble message={MSG_EMPTY_THINKING_WITH_TOOL} />
+              </DensityProvider>
+            </Card>
+            <Card label="Compact — empty thinking + command + output">
+              <DensityProvider value="compact">
+                <MessageBubble message={MSG_EMPTY_THINKING_WITH_TOOL} />
+              </DensityProvider>
+            </Card>
+            <Card label="Standard — thinking block">
+              <DensityProvider value="standard">
+                <MessageBubble message={MSG_ASSISTANT_THINKING} />
+              </DensityProvider>
+            </Card>
+            <Card label="Compact — thinking clamped to two lines">
+              <DensityProvider value="compact">
+                <MessageBubble message={MSG_ASSISTANT_THINKING} />
+              </DensityProvider>
+            </Card>
+            <Card label="Standard — edit diff">
+              <DensityProvider value="standard">
+                <MessageBubble message={MSG_ASSISTANT_TOOLS} />
+              </DensityProvider>
+            </Card>
+            <Card label="Compact — edit diff collapsed">
+              <DensityProvider value="compact">
+                <MessageBubble message={MSG_ASSISTANT_TOOLS} />
+              </DensityProvider>
+            </Card>
+            <Card label="Compact — streaming with only an empty thinking block">
+              <DensityProvider value="compact">
+                <MessageBubble message={MSG_EMPTY_THINKING_STREAMING} />
+              </DensityProvider>
+            </Card>
+            <Card label="Compact — error output">
+              <DensityProvider value="compact">
+                <MessageBubble message={MSG_TOOL_ERROR} />
+              </DensityProvider>
             </Card>
           </div>
         </Section>

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import { ToolBlock, ToolIcon, getToolIcon, getToolLabel, getPreview } from "./ToolBlock.js";
+import { DensityProvider } from "./density.js";
 
 // ─── getToolIcon ─────────────────────────────────────────────────────────────
 
@@ -792,5 +794,109 @@ describe("ToolIcon - additional types", () => {
     const svg = container.querySelector("svg");
     expect(svg).toBeTruthy();
     expect(svg?.querySelector("rect")).toBeTruthy();
+  });
+});
+
+// ─── Compact density ────────────────────────────────────────────────────────
+//
+// Compact mode reduces the always-visible command / diff bodies to a single
+// narrow disclosure row. Standard mode (the default) must be untouched.
+
+describe("ToolBlock - compact density", () => {
+  it("shows the Bash command inline in standard density", () => {
+    render(
+      <DensityProvider value="standard">
+        <ToolBlock
+          name="Bash"
+          input={{ command: "psql -c 'show server_version'", description: "Check Postgres versions" }}
+          toolUseId="tb-std"
+        />
+      </DensityProvider>,
+    );
+    expect(screen.getByText("Check Postgres versions")).toBeTruthy();
+    expect(screen.getByText(/show server_version/)).toBeTruthy();
+    // No disclosure control in standard mode — the command is simply visible.
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("collapses a Bash command to its description only, expanding on click", () => {
+    render(
+      <DensityProvider value="compact">
+        <ToolBlock
+          name="Bash"
+          input={{ command: "psql -c 'show server_version'", description: "Check Postgres versions" }}
+          toolUseId="tb-compact"
+        />
+      </DensityProvider>,
+    );
+    // Collapsed: description visible, command hidden.
+    expect(screen.getByText("Check Postgres versions")).toBeTruthy();
+    expect(screen.queryByText(/show server_version/)).toBeNull();
+
+    const row = screen.getByRole("button");
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(row);
+
+    expect(screen.getByText(/show server_version/)).toBeTruthy();
+    expect(row).toHaveAttribute("aria-expanded", "true");
+
+    // Collapsing again re-hides the command.
+    fireEvent.click(row);
+    expect(screen.queryByText(/show server_version/)).toBeNull();
+  });
+
+  it("falls back to the command's first line when a Bash call has no description", () => {
+    render(
+      <DensityProvider value="compact">
+        <ToolBlock
+          name="Bash"
+          input={{ command: "git status\ngit diff --stat\ngit log -1" }}
+          toolUseId="tb-nodesc"
+        />
+      </DensityProvider>,
+    );
+    // The row is never anonymous: first line acts as the label, and the hidden
+    // remainder is advertised as "+2" so multi-line commands aren't misread as
+    // one-liners.
+    expect(screen.getByText("git status")).toBeTruthy();
+    expect(screen.getByText("+2")).toBeTruthy();
+  });
+
+  it("collapses the Edit diff behind a one-line header in compact density", () => {
+    const input = {
+      file_path: "/repo/src/purchase_order.py",
+      old_string: "sent_delivery_date: Mapped[date]",
+      new_string: "sent_delivery_date: Mapped[date | None]",
+    };
+    const { rerender } = render(
+      <DensityProvider value="standard">
+        <ToolBlock name="Edit" input={input} toolUseId="tb-edit" />
+      </DensityProvider>,
+    );
+    // Standard: diff is rendered immediately.
+    expect(screen.getAllByText(/sent_delivery_date/).length).toBeGreaterThan(0);
+
+    rerender(
+      <DensityProvider value="compact">
+        <ToolBlock name="Edit" input={input} toolUseId="tb-edit" />
+      </DensityProvider>,
+    );
+    expect(screen.getByText("Edit purchase_order.py")).toBeTruthy();
+    expect(screen.queryByText(/sent_delivery_date/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit purchase_order.py/ }));
+    expect(screen.getAllByText(/sent_delivery_date/).length).toBeGreaterThan(0);
+  });
+
+  it("passes axe accessibility scan for a collapsed compact Bash row", async () => {
+    const { axe } = await import("vitest-axe");
+    const { container } = render(
+      <DensityProvider value="compact">
+        <ToolBlock name="Bash" input={{ command: "ls", description: "List files" }} toolUseId="tb-axe" />
+      </DensityProvider>,
+    );
+    expect(await axe(container)).toHaveNoViolations();
+    fireEvent.click(screen.getByRole("button"));
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

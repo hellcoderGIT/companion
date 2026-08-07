@@ -36,6 +36,8 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const toggleDarkMode = useStore((s) => s.toggleDarkMode);
   const diffBase = useStore((s) => s.diffBase);
   const setDiffBase = useStore((s) => s.setDiffBase);
+  const density = useStore((s) => s.density);
+  const toggleDensity = useStore((s) => s.toggleDensity);
   const notificationSound = useStore((s) => s.notificationSound);
   const toggleNotificationSound = useStore((s) => s.toggleNotificationSound);
   const notificationDesktop = useStore((s) => s.notificationDesktop);
@@ -366,6 +368,22 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   <span>Theme</span>
                   <span className="text-xs text-cc-muted">{darkMode ? "Dark" : "Light"}</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={toggleDensity}
+                  className="w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg text-sm bg-cc-hover text-cc-fg hover:bg-cc-active transition-colors cursor-pointer"
+                >
+                  <span>Message density</span>
+                  <span className="text-xs text-cc-muted">
+                    {density === "compact" ? "Compact" : "Standard"}
+                  </span>
+                </button>
+                <p className="text-xs text-cc-muted px-1">
+                  Standard shows commands, diffs and tool output inline. Compact collapses each of
+                  them to a single line you can expand on demand, and hides empty thinking steps.
+                  This setting is stored in this browser only.
+                </p>
 
                 <button
                   type="button"

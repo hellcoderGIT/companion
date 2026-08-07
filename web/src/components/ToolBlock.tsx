@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { DiffViewer } from "./DiffViewer.js";
+import { CompactDisclosure, useIsCompact } from "./density.js";
 
 const TOOL_ICONS: Record<string, string> = {
   Bash: "terminal",
@@ -110,6 +111,10 @@ export function ToolBlock({
 
 /** Edit tool — inline diff, no card, no scroll, "show more" for long diffs */
 function EditBlock({ input, toolUseId }: { input: Record<string, unknown>; toolUseId: string }) {
+  const compact = useIsCompact();
+  // Compact mode collapses the diff behind the same one-line header; standard
+  // keeps the original always-visible diff.
+  const [compactOpen, setCompactOpen] = useState(false);
   const filePath = String(input.file_path || "");
   const fileName = filePath ? filePath.split("/").pop() || filePath : "";
   const oldStr = String(input.old_string || "");
@@ -131,19 +136,8 @@ function EditBlock({ input, toolUseId }: { input: Record<string, unknown>; toolU
   const diffLineCount = (oldStr + newStr).split("\n").length;
   const isTall = diffLineCount > 15;
 
-  return (
-    <div data-tool-use-id={toolUseId}>
-      {/* Single-line header: Edit fileName [all] */}
-      <div className="flex items-center gap-1.5 py-0.5">
-        <span className="text-[11px] font-medium text-emerald-600/70 dark:text-emerald-400/70">Edit</span>
-        {fileName && (
-          <span className="text-[11px] font-mono-code text-cc-fg/70">{fileName}</span>
-        )}
-        {replaceAll && (
-          <span className="text-[9px] uppercase tracking-wider font-semibold text-amber-600/70 dark:text-amber-400/70">all</span>
-        )}
-      </div>
-
+  const body = (
+    <>
       {/* Diff content — always visible, no toggle */}
       {hasDiff ? (
         <div className="relative mt-1">
@@ -186,6 +180,38 @@ function EditBlock({ input, toolUseId }: { input: Record<string, unknown>; toolU
           {JSON.stringify(input, null, 2)}
         </pre>
       )}
+    </>
+  );
+
+  if (compact) {
+    return (
+      <div data-tool-use-id={toolUseId}>
+        <CompactDisclosure
+          open={compactOpen}
+          onToggle={() => setCompactOpen(!compactOpen)}
+          marker="±"
+          label={`Edit ${fileName || "file"}${replaceAll ? " (all)" : ""}`}
+          meta={hasDiff ? `${diffLineCount} ${diffLineCount === 1 ? "line" : "lines"}` : undefined}
+          labelClassName="font-mono-code"
+        />
+        {compactOpen && <div className="mt-0.5">{body}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div data-tool-use-id={toolUseId}>
+      {/* Single-line header: Edit fileName [all] */}
+      <div className="flex items-center gap-1.5 py-0.5">
+        <span className="text-[11px] font-medium text-emerald-600/70 dark:text-emerald-400/70">Edit</span>
+        {fileName && (
+          <span className="text-[11px] font-mono-code text-cc-fg/70">{fileName}</span>
+        )}
+        {replaceAll && (
+          <span className="text-[9px] uppercase tracking-wider font-semibold text-amber-600/70 dark:text-amber-400/70">all</span>
+        )}
+      </div>
+      {body}
     </div>
   );
 }
@@ -194,6 +220,36 @@ function EditBlock({ input, toolUseId }: { input: Record<string, unknown>; toolU
 function BashBlock({ input, toolUseId }: { input: Record<string, unknown>; toolUseId: string }) {
   const command = typeof input.command === "string" ? input.command : "";
   const desc = typeof input.description === "string" ? input.description : "";
+  const compact = useIsCompact();
+  const [open, setOpen] = useState(false);
+
+  if (compact) {
+    // One narrow line — the description if we have one, otherwise the first
+    // line of the command so the row is never anonymous. The command block
+    // itself only renders once the user expands it.
+    const firstLine = command.split("\n")[0] || "";
+    const summary = desc || firstLine || "Command";
+    const extraLines = command ? command.split("\n").length - 1 : 0;
+    return (
+      <div data-tool-use-id={toolUseId}>
+        <CompactDisclosure
+          open={open}
+          onToggle={() => setOpen(!open)}
+          marker="$"
+          label={summary}
+          meta={!open && extraLines > 0 ? `+${extraLines}` : undefined}
+          labelClassName={desc ? "italic" : "font-mono-code"}
+        />
+        {open && (
+          <div className="rounded-lg bg-cc-code-bg px-3 py-2 mt-1 overflow-x-auto">
+            <pre className="text-[12px] font-mono-code text-cc-code-fg leading-relaxed whitespace-pre-wrap break-words">
+              <span className="text-cc-muted/40 select-none">$ </span>{command}
+            </pre>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div data-tool-use-id={toolUseId}>

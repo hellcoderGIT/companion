@@ -3,4 +3,4 @@
 export { useStore } from "./store/index.js";
 export type { AppState } from "./store/index.js";
 export type { QuickTerminalTab, QuickTerminalPlacement } from "./store/terminal-slice.js";
-export type { DiffBase } from "./store/ui-slice.js";
+export type { DiffBase, Density } from "./store/ui-slice.js";
