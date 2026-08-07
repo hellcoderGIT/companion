@@ -162,7 +162,10 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
     [grouped, compact],
   );
 
-  if (compact && visible.length === 0 && !message.content) {
+  // Trimmed, not just falsy: a streaming draft whose thinking text is only
+  // whitespace still has truthy `content`, and compact renders nothing for it —
+  // without this the turn would show as a bare avatar.
+  if (compact && visible.length === 0 && !message.content?.trim()) {
     return (
       <div className="flex items-start gap-3">
         <AssistantAvatar />

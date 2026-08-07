@@ -884,6 +884,54 @@ describe("MessageBubble - compact density", () => {
     expect(screen.getByText(/Both migrations applied cleanly/)).toBeTruthy();
   });
 
+  it("never renders an answer text block as collapsed in compact density", () => {
+    // The core guarantee: prose the model writes *for the user* arrives as a
+    // text block and must be fully visible, including any fenced code inside
+    // it. Only tool calls and tool output collapse.
+    const msg = makeMessage({
+      role: "assistant",
+      content: "",
+      contentBlocks: [
+        { type: "thinking", thinking: "" },
+        { type: "text", text: "Here is the migration you asked for:" },
+        { type: "tool_use", id: "tu-c6", name: "Bash", input: { command: "alembic upgrade head", description: "Run migrations" } },
+        { type: "tool_result", tool_use_id: "tu-c6", content: "ok" },
+        { type: "text", text: "Both migrations applied cleanly." },
+      ],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    // Both answer texts visible without any interaction...
+    expect(screen.getByText(/Here is the migration you asked for/)).toBeTruthy();
+    expect(screen.getByText(/Both migrations applied cleanly/)).toBeTruthy();
+    // ...while the command and its output stay behind disclosures.
+    expect(screen.queryByText(/alembic upgrade head/)).toBeNull();
+    expect(screen.getByText("Run migrations")).toBeTruthy();
+    expect(screen.getByText("Output")).toBeTruthy();
+  });
+
+  it("shows the activity line when a streaming thinking draft is whitespace-only", () => {
+    // Regression guard: `content` is truthy here ("\n") but has no readable
+    // text, so compact would otherwise render a bare avatar and read as stuck.
+    const msg = makeMessage({
+      role: "assistant",
+      content: "\n  ",
+      isStreaming: true,
+      streamingPhase: "thinking",
+      contentBlocks: [],
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.getByText("Thinking…")).toBeTruthy();
+  });
+
   it("passes axe accessibility scan in compact density", async () => {
     const { axe } = await import("vitest-axe");
     const msg = makeMessage({
