@@ -27,6 +27,10 @@ interface MockStoreState {
   sessions: Map<string, { cwd?: string; is_containerized?: boolean }>;
   sdkSessions: { sessionId: string; cwd?: string; containerId?: string; model?: string; backendType?: string }[];
   gitChangedFilesCount: Map<string, number>;
+  darkMode: boolean;
+  toggleDarkMode: ReturnType<typeof vi.fn>;
+  density: "standard" | "compact";
+  toggleDensity: ReturnType<typeof vi.fn>;
 }
 
 let storeState: MockStoreState;
@@ -47,6 +51,10 @@ function resetStore(overrides: Partial<MockStoreState> = {}) {
     sessions: new Map([["s1", { cwd: "/repo" }]]),
     sdkSessions: [],
     gitChangedFilesCount: new Map(),
+    darkMode: true,
+    toggleDarkMode: vi.fn(),
+    density: "standard",
+    toggleDensity: vi.fn(),
     ...overrides,
   };
 }
@@ -142,6 +150,35 @@ describe("TopBar", () => {
 
     fireEvent.keyDown(window, { key: "j", metaKey: true });
     expect(storeState.setActiveTab).toHaveBeenCalledWith("chat");
+  });
+
+  // Message density lives next to the other view preferences in the top bar,
+  // mirroring the Settings -> General control via the same store action.
+  it("toggles message density from the top bar", () => {
+    render(<TopBar />);
+
+    const button = screen.getByRole("button", { name: "Switch to compact density" });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(button);
+    expect(storeState.toggleDensity).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the density toggle active while compact is selected", () => {
+    // Active state must read as pressed for screen readers, not just via colour.
+    resetStore({ density: "compact" });
+    render(<TopBar />);
+
+    const button = screen.getByRole("button", { name: "Switch to standard density" });
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button.className).toContain("text-cc-primary");
+  });
+
+  it("hides the density toggle outside a session view", () => {
+    // Density only affects the message feed, so it is scoped to workspace controls.
+    resetStore({ currentSessionId: null });
+    render(<TopBar />);
+
+    expect(screen.queryByRole("button", { name: /density/ })).not.toBeInTheDocument();
   });
 
   it("passes axe accessibility checks", async () => {
