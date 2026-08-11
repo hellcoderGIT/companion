@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.116.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.115.0...companion-v0.116.0) (2026-08-10)
+
+
+### Features
+
+* **ui:** put message density in the top bar next to the theme toggle ([#109](https://github.com/hellcoderGIT/companion/issues/109)) ([26d89b3](https://github.com/hellcoderGIT/companion/commit/26d89b3875a0c28150fe700dcf690123643187de))
+
 ## [0.115.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.114.0...companion-v0.115.0) (2026-08-07)
 
 
