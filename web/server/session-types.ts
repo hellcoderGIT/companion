@@ -400,6 +400,8 @@ export type BrowserOutgoingMessage =
   | { type: "mcp_reconnect"; serverName: string; client_msg_id?: string }
   | { type: "mcp_set_servers"; servers: Record<string, McpServerConfig>; client_msg_id?: string }
   | { type: "set_ai_validation"; aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null; client_msg_id?: string }
+  | { type: "set_magic_ui"; magicUiActive?: boolean | null; client_msg_id?: string }
+  | { type: "magic_ui_sync"; client_msg_id?: string }
   | { type: "end_session"; reason?: string; client_msg_id?: string }
   | { type: "stop_task"; task_id: string; client_msg_id?: string }
   | { type: "update_environment_variables"; variables: Record<string, string>; client_msg_id?: string };
@@ -442,7 +444,12 @@ export type BrowserIncomingMessageBase =
   | { type: "session_phase"; phase: SessionPhase; previousPhase: SessionPhase }
   | { type: "prompt_suggestion"; suggestions: string[] }
   | { type: "streamlined_text"; text: string }
-  | { type: "streamlined_tool_use_summary"; tool_summary: string };
+  | { type: "streamlined_tool_use_summary"; tool_summary: string }
+  // MagicUI: the server always sends the full canonical dashboard state
+  // (small by construction — capped slots/logs). The iframe runtime diffs
+  // against its DOM via per-slot updatedAt, so no client-side reducer and no
+  // version-gap protocol is needed; late joiners are trivially correct.
+  | { type: "magic_ui_state"; state: import("./magic-ui-types.js").MagicUiDashboardState };
 
 export type BrowserIncomingMessage = BrowserIncomingMessageBase & { seq?: number };
 
@@ -508,6 +515,13 @@ export interface SessionState {
   aiValidationAutoApprove?: boolean | null;
   /** Per-session auto-deny override. null/undefined = use global default */
   aiValidationAutoDeny?: boolean | null;
+  /**
+   * Per-session MagicUI opt-in. null/undefined = use the global
+   * magicUiEnabled default. When effective-true (and the Claude CLI is
+   * available), browsers render the MagicUI dashboard view and the server
+   * runs a Haiku watcher for this session.
+   */
+  magicUiActive?: boolean | null;
   /** If this session is linked to a Linear agent session */
   linearSessionId?: string;
 }

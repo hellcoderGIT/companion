@@ -6,22 +6,7 @@ import { sendToSession } from "../ws.js";
 import type { PermissionRequest } from "../types.js";
 import type { PermissionUpdate, AiValidationInfo } from "../../server/session-types.js";
 import { DiffViewer } from "./DiffViewer.js";
-
-/** Human-readable label for a permission suggestion */
-function suggestionLabel(s: PermissionUpdate): string {
-  if (s.type === "setMode") return `Set mode to "${s.mode}"`;
-  const dest = s.destination;
-  const scope = dest === "session" ? "for session" : "always";
-  if (s.type === "addRules" || s.type === "replaceRules") {
-    const rule = s.rules[0];
-    if (rule?.ruleContent) return `Allow "${rule.ruleContent}" ${scope}`;
-    if (rule?.toolName) return `Allow ${rule.toolName} ${scope}`;
-  }
-  if (s.type === "addDirectories") {
-    return `Trust ${s.directories[0] || "directory"} ${scope}`;
-  }
-  return `Allow ${scope}`;
-}
+import { suggestionLabel, toAnswersByQuestionText } from "../lib/permission-utils.js";
 
 export function PermissionBanner({
   permission,
@@ -263,17 +248,10 @@ function AskUserQuestionDisplay({
   // The CLI's AskUserQuestion handler looks up each question's answer by the
   // question's *text*, not by its position. Internally we key UI state by index
   // (questions can share text / be empty), but the wire payload must be keyed by
-  // `question`. Keying by index made the answer invisible to the model — it
-  // received "User has answered your questions: ." with an empty body and just
-  // guessed. Map index-keyed state to question-text keys before sending.
+  // `question`. See toAnswersByQuestionText (shared with the MagicUI decision
+  // controls so the two surfaces can never drift apart).
   function toAnswers(indexed: Record<string, string>): Record<string, string> {
-    const out: Record<string, string> = {};
-    for (const [idx, value] of Object.entries(indexed)) {
-      const q = questions[Number(idx)] as Record<string, unknown> | undefined;
-      const key = typeof q?.question === "string" && q.question ? q.question : idx;
-      out[key] = value;
-    }
-    return out;
+    return toAnswersByQuestionText(questions, indexed);
   }
 
   function handleOptionClick(questionIdx: number, label: string) {

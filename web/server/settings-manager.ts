@@ -20,6 +20,12 @@ export const DASHBOARD_MODEL_OPTIONS = [
   "claude-sonnet-5",
 ] as const;
 export const DEFAULT_DASHBOARD_RUN_HOUR = 3;
+
+/**
+ * The MagicUI watcher streams many small turns per session, so it defaults to
+ * the cheapest capable model. Shares the dashboard model option list.
+ */
+export const DEFAULT_MAGIC_UI_MODEL = DEFAULT_DASHBOARD_MODEL;
 export const DEFAULT_DASHBOARD_MAX_SESSIONS_PER_RUN = 30;
 
 export type UpdateChannel = "stable" | "prerelease";
@@ -83,6 +89,14 @@ export interface CompanionSettings {
   dashboardRunHour: number;
   /** Cost safety valve: max sessions summarized per run. */
   dashboardMaxSessionsPerRun: number;
+  /**
+   * Makes the MagicUI session view available to users (default off). Users
+   * still opt in per session; see SessionState.magicUiActive. Requires the
+   * Claude CLI login — the watcher runs on the subscription, never an API key.
+   */
+  magicUiEnabled: boolean;
+  /** Model used by the MagicUI watcher. Cheap-by-default (Haiku). */
+  magicUiModel: string;
   publicUrl: string;
   updateChannel: UpdateChannel;
   dockerAutoUpdate: boolean;
@@ -176,6 +190,8 @@ let settings: CompanionSettings = {
   dashboardModel: DEFAULT_DASHBOARD_MODEL,
   dashboardRunHour: DEFAULT_DASHBOARD_RUN_HOUR,
   dashboardMaxSessionsPerRun: DEFAULT_DASHBOARD_MAX_SESSIONS_PER_RUN,
+  magicUiEnabled: false,
+  magicUiModel: DEFAULT_MAGIC_UI_MODEL,
   publicUrl: "",
   updateChannel: "stable",
   dockerAutoUpdate: false,
@@ -231,6 +247,11 @@ function normalize(raw: Partial<CompanionSettings> | null | undefined): Companio
         && raw.dashboardMaxSessionsPerRun >= 1 && raw.dashboardMaxSessionsPerRun <= 200
         ? raw.dashboardMaxSessionsPerRun
         : DEFAULT_DASHBOARD_MAX_SESSIONS_PER_RUN,
+    magicUiEnabled: typeof raw?.magicUiEnabled === "boolean" ? raw.magicUiEnabled : false,
+    magicUiModel:
+      typeof raw?.magicUiModel === "string" && raw.magicUiModel.trim()
+        ? raw.magicUiModel.trim()
+        : DEFAULT_MAGIC_UI_MODEL,
     publicUrl: typeof raw?.publicUrl === "string" ? raw.publicUrl.trim().replace(/\/+$/, "") : "",
     updateChannel: raw?.updateChannel === "prerelease" ? "prerelease" : "stable",
     dockerAutoUpdate: typeof raw?.dockerAutoUpdate === "boolean" ? raw.dockerAutoUpdate : false,
@@ -272,7 +293,7 @@ export function getSettings(): CompanionSettings {
 }
 
 export function updateSettings(
-  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "keepaliveDetachedSessions" | "wedgeKillEnabled" | "silenceProbeEnabled" | "claudeTransport" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
+  patch: Partial<Pick<CompanionSettings, "anthropicApiKey" | "anthropicModel" | "claudeCodeOAuthToken" | "openaiApiKey" | "onboardingCompleted" | "linearApiKey" | "linearAutoTransition" | "linearAutoTransitionStateId" | "linearAutoTransitionStateName" | "linearArchiveTransition" | "linearArchiveTransitionStateId" | "linearArchiveTransitionStateName" | "linearOAuthClientId" | "linearOAuthClientSecret" | "linearOAuthWebhookSecret" | "linearOAuthAccessToken" | "linearOAuthRefreshToken" | "aiValidationEnabled" | "aiValidationAutoApprove" | "aiValidationAutoDeny" | "dashboardEnabled" | "dashboardModel" | "dashboardRunHour" | "dashboardMaxSessionsPerRun" | "magicUiEnabled" | "magicUiModel" | "publicUrl" | "updateChannel" | "dockerAutoUpdate" | "proactiveKeepaliveEnabled" | "keepaliveDetachedSessions" | "wedgeKillEnabled" | "silenceProbeEnabled" | "claudeTransport" | "cliBridgeMode" | "claudeBridgeMode" | "claudeBridgeIngressUrl" | "claudeCompatBannerDismissedVersion">>,
 ): CompanionSettings {
   ensureLoaded();
   settings = normalize({
@@ -300,6 +321,8 @@ export function updateSettings(
     dashboardModel: patch.dashboardModel ?? settings.dashboardModel,
     dashboardRunHour: patch.dashboardRunHour ?? settings.dashboardRunHour,
     dashboardMaxSessionsPerRun: patch.dashboardMaxSessionsPerRun ?? settings.dashboardMaxSessionsPerRun,
+    magicUiEnabled: patch.magicUiEnabled ?? settings.magicUiEnabled,
+    magicUiModel: patch.magicUiModel ?? settings.magicUiModel,
     publicUrl: patch.publicUrl ?? settings.publicUrl,
     updateChannel: patch.updateChannel ?? settings.updateChannel,
     dockerAutoUpdate: patch.dockerAutoUpdate ?? settings.dockerAutoUpdate,

@@ -17,6 +17,7 @@ const CATEGORIES = [
   { id: "anthropic", label: "Anthropic" },
   { id: "ai-validation", label: "AI Validation" },
   { id: "dashboard", label: "Dashboard" },
+  { id: "magic-ui", label: "Magic UI" },
   { id: "updates", label: "Updates" },
   { id: "telemetry", label: "Telemetry" },
   { id: "environments", label: "Environments" },
@@ -65,6 +66,9 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
   const [dashboardModel, setDashboardModel] = useState("claude-haiku-4-5");
   const [dashboardRunHour, setDashboardRunHour] = useState(3);
   const [dashboardMaxSessionsPerRun, setDashboardMaxSessionsPerRun] = useState(30);
+  const [magicUiEnabled, setMagicUiEnabled] = useState(false);
+  const [magicUiModel, setMagicUiModel] = useState("claude-haiku-4-5");
+  const [claudeCliAvailable, setClaudeCliAvailable] = useState(true);
   const [publicUrl, setPublicUrl] = useState("");
   const [activeSection, setActiveSection] = useState<CategoryId>("general");
   const [apiKeyFocused, setApiKeyFocused] = useState(false);
@@ -152,6 +156,9 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
         if (typeof s.dashboardModel === "string" && s.dashboardModel) setDashboardModel(s.dashboardModel);
         if (typeof s.dashboardRunHour === "number") setDashboardRunHour(s.dashboardRunHour);
         if (typeof s.dashboardMaxSessionsPerRun === "number") setDashboardMaxSessionsPerRun(s.dashboardMaxSessionsPerRun);
+        if (typeof s.magicUiEnabled === "boolean") setMagicUiEnabled(s.magicUiEnabled);
+        if (typeof s.magicUiModel === "string" && s.magicUiModel) setMagicUiModel(s.magicUiModel);
+        if (typeof s.claudeCliAvailable === "boolean") setClaudeCliAvailable(s.claudeCliAvailable);
         if (s.updateChannel === "stable" || s.updateChannel === "prerelease") setUpdateChannel(s.updateChannel);
         if (typeof s.dockerAutoUpdate === "boolean") setDockerAutoUpdate(s.dockerAutoUpdate);
         if (typeof s.proactiveKeepaliveEnabled === "boolean") setProactiveKeepaliveEnabled(s.proactiveKeepaliveEnabled);
@@ -224,6 +231,27 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
       await api.updateSettings({ dashboardEnabled: !current });
     } catch {
       setDashboardEnabled(current);
+    }
+  }
+
+  async function toggleMagicUiEnabled() {
+    const current = magicUiEnabled;
+    setMagicUiEnabled(!current);
+    try {
+      const s = await api.updateSettings({ magicUiEnabled: !current });
+      // Keep the store's availability flag in sync so the TopBar toggle
+      // appears/disappears without a reload.
+      useStore.getState().setMagicUiAvailable(!!s.magicUiEnabled && !!s.claudeCliAvailable);
+    } catch {
+      setMagicUiEnabled(current);
+    }
+  }
+
+  async function saveMagicUiModel(model: string, revert: () => void) {
+    try {
+      await api.updateSettings({ magicUiModel: model });
+    } catch {
+      revert();
     }
   }
 
@@ -1157,6 +1185,67 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                       ))}
                     </select>
                   </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Magic UI */}
+            <section id="magic-ui" ref={setSectionRef("magic-ui")}>
+              <h2 className="text-sm font-semibold text-cc-fg mb-4">Magic UI</h2>
+              <div className="space-y-3">
+                <p className="text-xs text-cc-muted leading-relaxed">
+                  An experimental session view: a cheap watcher model follows the
+                  session and paints a live, full-width dashboard — condensed
+                  progress, charts, open points, and decisions — instead of the
+                  classic chat column. Turning this on only makes the view{" "}
+                  <em>available</em>; each user still enables it per session from
+                  the top bar, and the watcher only runs for sessions that opted
+                  in. Uses the Claude Code CLI login — no separate API key.
+                </p>
+
+                {!claudeCliAvailable && (
+                  <p className="text-xs text-cc-warning">
+                    Requires the Claude Code CLI login — no Claude CLI was found
+                    on this server, so Magic UI stays unavailable.
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={toggleMagicUiEnabled}
+                  disabled={!claudeCliAvailable}
+                  className={`w-full flex items-center justify-between px-3 py-3 min-h-[44px] rounded-lg bg-cc-hover text-cc-fg transition-colors ${
+                    claudeCliAvailable ? "hover:bg-cc-active cursor-pointer" : "opacity-50 cursor-not-allowed"
+                  }`}
+                >
+                  <span className="text-sm">Magic UI available to users</span>
+                  <span className={`text-xs font-medium ${magicUiEnabled && claudeCliAvailable ? "text-cc-success" : "text-cc-muted"}`}>
+                    {magicUiEnabled && claudeCliAvailable ? "On" : "Off"}
+                  </span>
+                </button>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" htmlFor="magic-ui-model">
+                    Watcher model
+                  </label>
+                  <select
+                    id="magic-ui-model"
+                    value={magicUiModel}
+                    disabled={!claudeCliAvailable}
+                    onChange={(e) => {
+                      const prev = magicUiModel;
+                      setMagicUiModel(e.target.value);
+                      saveMagicUiModel(e.target.value, () => setMagicUiModel(prev));
+                    }}
+                    className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow disabled:opacity-50"
+                  >
+                    <option value="claude-haiku-4-5">Claude Haiku 4.5 — cheapest, recommended</option>
+                    <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                    <option value="claude-sonnet-5">Claude Sonnet 5</option>
+                  </select>
+                  <p className="mt-1.5 text-xs text-cc-muted">
+                    The watcher runs many small turns per session — Haiku keeps it fast and cheap.
+                  </p>
                 </div>
               </div>
             </section>

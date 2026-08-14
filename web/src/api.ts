@@ -457,6 +457,11 @@ export interface AppSettings {
   dashboardModel: string;
   dashboardRunHour: number;
   dashboardMaxSessionsPerRun: number;
+  /** MagicUI dashboard view available (global default; users opt in per session). */
+  magicUiEnabled: boolean;
+  magicUiModel: string;
+  /** Whether the server can run Claude CLI-backed features (MagicUI watcher). */
+  claudeCliAvailable: boolean;
   publicUrl: string;
   updateChannel: "stable" | "prerelease";
   dockerAutoUpdate: boolean;
@@ -1084,6 +1089,8 @@ export const api = {
     dashboardModel?: string;
     dashboardRunHour?: number;
     dashboardMaxSessionsPerRun?: number;
+    magicUiEnabled?: boolean;
+    magicUiModel?: string;
     publicUrl?: string;
     updateChannel?: "stable" | "prerelease";
     dockerAutoUpdate?: boolean;

@@ -47,6 +47,9 @@ import { PlaygroundDockerUpdateDialog } from "./DockerUpdateDialog.js";
 import { SessionItem } from "./SessionItem.js";
 import type { CreationProgressEvent } from "../types.js";
 import type { SessionItem as SessionItemType } from "../utils/project-grouping.js";
+import { MagicUIDashboard } from "./MagicUIDashboard.js";
+import type { MagicUiDashboardState } from "../../server/magic-ui-types.js";
+import type { DecisionModel } from "../magic-ui/bridge.js";
 
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 
@@ -966,6 +969,14 @@ export function Playground() {
               sessionId={MOCK_SESSION_ID}
             />
           </div>
+        </Section>
+
+        {/* ─── MagicUI Dashboard ──────────────────────────────── */}
+        <Section
+          title="MagicUI Dashboard"
+          description="Sandboxed iframe runtime fed a canned dashboard snapshot + a live decision prompt (fully interactive in-browser)"
+        >
+          <MagicUIPlaygroundHarness />
         </Section>
 
         {/* ─── Real Chat Stack ──────────────────────────────── */}
@@ -3248,6 +3259,129 @@ function PlaygroundSessionItems() {
 }
 
 // ─── Shared Layout Helpers ──────────────────────────────────────────────────
+
+// ─── MagicUI playground harness ─────────────────────────────────────────────
+// Seeds the magic-ui store slice with a canned dashboard snapshot and mounts
+// the real sandboxed iframe runtime, plus one live decision prompt — the
+// full magic path minus the server watcher. Interactive in a real browser.
+
+const MAGIC_MOCK_SESSION_ID = "playground-magic";
+
+const MAGIC_MOCK_STATE: MagicUiDashboardState = {
+  version: 7,
+  status: "live",
+  updatedAt: 1,
+  sessionSummary: "",
+  slots: {
+    hero: {
+      title: "Now",
+      html: "<h2>Refactoring the auth middleware</h2><p>Extracted token validation into <code>src/auth/validate.ts</code>; all call sites migrated. <mark>2 tests still failing</mark> in the session-expiry suite.</p>",
+      updatedAt: 5,
+    },
+    tests: {
+      chart: {
+        kind: "bar",
+        title: "Test runs",
+        labels: ["run 1", "run 2", "run 3", "run 4"],
+        series: [
+          { label: "passed", data: [21, 28, 31, 34] },
+          { label: "failed", data: [9, 5, 3, 2] },
+        ],
+      },
+      title: "Test runs",
+      updatedAt: 4,
+    },
+    files: { stat: { label: "Files changed", value: "12", trend: "up" }, updatedAt: 3 },
+    duration: { stat: { label: "Session time", value: "38m", trend: "flat" }, updatedAt: 3 },
+    migrate: {
+      title: "Run the migration",
+      snippet: { title: "Run the migration", language: "bash", code: "bun run db:migrate\nbun run db:seed --env dev" },
+      updatedAt: 2,
+    },
+    log: {
+      title: "Earlier",
+      html: "<ul><li>Bootstrapped OAuth config</li><li>Fixed CI flake in <code>ws-bridge.test.ts</code></li><li>Upgraded Hono to 4.x</li></ul>",
+      updatedAt: 1,
+    },
+  },
+  layout: [
+    { slot: "hero", area: "hero", span: 2 },
+    { slot: "tests", area: "main", span: 2 },
+    { slot: "files", area: "main" },
+    { slot: "duration", area: "main" },
+    { slot: "migrate", area: "main", span: 2 },
+    { slot: "log", area: "main" },
+  ],
+  openItems: [
+    { id: "q-db", ts: 3, text: "Waiting for you to run the DB migration locally", kind: "action" },
+    { id: "q-choice", ts: 2, text: "Agent asked which token TTL to use", kind: "question" },
+  ],
+  decisionLog: [
+    { id: "d3", ts: 3, source: "user", title: "Bash", detail: "Allowed: bun test --watch=false", behavior: "allow" },
+    { id: "d2", ts: 2, source: "ai_auto", title: "Read", detail: "Allowed (read-only tool)", behavior: "allow" },
+    { id: "d1", ts: 1, source: "agent", title: "Chose middleware refactor", detail: "Extracting validation beats patching call sites for rollback safety" },
+  ],
+};
+
+const MAGIC_MOCK_DECISION: DecisionModel = {
+  requestId: "playground-magic-req",
+  kind: "ask_user_question",
+  title: "The agent has a question",
+  questions: [{
+    question: "Which token TTL should the new middleware use?",
+    options: [
+      { label: "15 minutes", description: "Most secure, more refreshes" },
+      { label: "1 hour", description: "Current behavior" },
+      { label: "24 hours", description: "Convenient, least secure" },
+    ],
+  }],
+};
+
+function MagicUIPlaygroundHarness() {
+  const [decisions, setDecisions] = useState<DecisionModel[]>([MAGIC_MOCK_DECISION]);
+  const [lastResponse, setLastResponse] = useState<string>("");
+
+  useEffect(() => {
+    useStore.getState().setMagicUiState(MAGIC_MOCK_SESSION_ID, MAGIC_MOCK_STATE);
+    // The playground's Dark Mode button toggles a local class, not the store
+    // (unlike the app's ThemeToggle). Mirror it into the store so the
+    // dashboard iframe re-themes here exactly like in the real app.
+    const sync = () => {
+      const dark = document.documentElement.classList.contains("dark");
+      if (useStore.getState().darkMode !== dark) {
+        useStore.getState().setDarkMode(dark);
+      }
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div className="space-y-2">
+      <div className="border border-cc-border rounded-xl overflow-hidden bg-cc-card relative" style={{ height: 560 }}>
+        <MagicUIDashboard
+          sessionId={MAGIC_MOCK_SESSION_ID}
+          decisions={decisions}
+          onDecisionResponse={(requestId, response) => {
+            setLastResponse(JSON.stringify({ requestId, response }));
+            setDecisions([]);
+          }}
+        />
+      </div>
+      <div className="flex items-center gap-3 text-xs text-cc-muted">
+        <button
+          onClick={() => setDecisions([MAGIC_MOCK_DECISION])}
+          className="px-2 py-1 rounded-md bg-cc-hover hover:bg-cc-active text-cc-fg transition-colors cursor-pointer"
+        >
+          Re-show decision
+        </button>
+        {lastResponse && <span className="font-mono-code truncate">answered: {lastResponse}</span>}
+      </div>
+    </div>
+  );
+}
 
 function Section({
   title,

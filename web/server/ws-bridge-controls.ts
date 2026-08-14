@@ -1,5 +1,14 @@
 import type { Session } from "./ws-bridge-types.js";
 
+export function handleSetMagicUi(
+  session: Session,
+  msg: { magicUiActive?: boolean | null },
+): void {
+  if (msg.magicUiActive !== undefined) {
+    session.state.magicUiActive = msg.magicUiActive;
+  }
+}
+
 export function handleSetAiValidation(
   session: Session,
   msg: {
