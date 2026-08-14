@@ -1,24 +1,36 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store.js";
+import { sendToSession } from "../ws.js";
 import { MessageFeed } from "./MessageFeed.js";
 import { Composer } from "./Composer.js";
 import { PermissionBanner } from "./PermissionBanner.js";
 import { DensityProvider } from "./density.js";
 import { MagicUIDashboard } from "./MagicUIDashboard.js";
+import {
+  decisionResponseToWire,
+  toDecisionModel,
+  type DecisionRuntimeResponse,
+} from "../magic-ui/bridge.js";
+
+/** How long the dashboard runtime gets to ACK that it rendered a decision's
+ *  controls before the classic PermissionBanner appears as fallback. */
+const DECISION_ACK_TIMEOUT_MS = 4_000;
 
 /**
  * MagicUI session view: a full-width, AI-generated live dashboard of the
  * session, with a small always-visible strip of the raw session output on
  * top so activity stays legible, and the Composer at the bottom.
  *
- * The dashboard itself (sandboxed iframe runtime driven by the server-side
- * Haiku watcher) mounts in the center area. Decisions are rendered by the
- * dashboard runtime from real pending-permission data; the classic
- * PermissionBanner stays wired underneath as the guaranteed fallback so a
- * decision can never be lost — even if the generated UI misbehaves.
+ * Decision safety contract: interactive decision controls on the dashboard
+ * are built from REAL pending-permission data (never watcher output). Every
+ * pending decision starts a timer when handed to the iframe; if the runtime
+ * doesn't ACK rendering within DECISION_ACK_TIMEOUT_MS — or reports an
+ * error — the classic PermissionBanner appears for that request and stays
+ * (sticky, no flicker). A decision can never be lost.
  */
 export function MagicUIView({ sessionId }: { sessionId: string }) {
   const sessionPerms = useStore((s) => s.pendingPermissions.get(sessionId));
+  const removePermission = useStore((s) => s.removePermission);
   const connStatus = useStore(
     (s) => s.connectionStatus.get(sessionId) ?? "disconnected",
   );
@@ -27,6 +39,77 @@ export function MagicUIView({ sessionId }: { sessionId: string }) {
   const perms = useMemo(
     () => (sessionPerms ? Array.from(sessionPerms.values()) : []),
     [sessionPerms],
+  );
+
+  // ── Decision fallback machinery ──────────────────────────────────────
+  const [fallbackIds, setFallbackIds] = useState<ReadonlySet<string>>(new Set());
+  const ackedRef = useRef<Set<string>>(new Set());
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    for (const p of perms) {
+      const id = p.request_id;
+      if (ackedRef.current.has(id) || fallbackIds.has(id) || timersRef.current.has(id)) continue;
+      timersRef.current.set(id, setTimeout(() => {
+        timersRef.current.delete(id);
+        if (!ackedRef.current.has(id)) {
+          setFallbackIds((prev) => new Set(prev).add(id));
+        }
+      }, DECISION_ACK_TIMEOUT_MS));
+    }
+    // Drop timers for requests that resolved/cancelled meanwhile.
+    for (const [id, timer] of timersRef.current) {
+      if (!perms.some((p) => p.request_id === id)) {
+        clearTimeout(timer);
+        timersRef.current.delete(id);
+      }
+    }
+  }, [perms, fallbackIds]);
+
+  useEffect(() => () => {
+    for (const timer of timersRef.current.values()) clearTimeout(timer);
+    timersRef.current.clear();
+  }, []);
+
+  const handleDecisionAck = useCallback((requestId: string) => {
+    ackedRef.current.add(requestId);
+    const timer = timersRef.current.get(requestId);
+    if (timer) {
+      clearTimeout(timer);
+      timersRef.current.delete(requestId);
+    }
+  }, []);
+
+  const handleDecisionResponse = useCallback(
+    (requestId: string, response: DecisionRuntimeResponse) => {
+      const perm = useStore.getState().pendingPermissions.get(sessionId)?.get(requestId);
+      if (!perm) return;
+      sendToSession(sessionId, decisionResponseToWire(perm, response));
+      removePermission(sessionId, requestId);
+    },
+    [sessionId, removePermission],
+  );
+
+  const handleRuntimeError = useCallback(() => {
+    // The generated UI is misbehaving — arm the fallback for everything
+    // currently pending. New requests still try the magic path first.
+    setFallbackIds((prev) => {
+      const next = new Set(prev);
+      for (const p of useStore.getState().pendingPermissions.get(sessionId)?.values() ?? []) {
+        next.add(p.request_id);
+      }
+      return next;
+    });
+  }, [sessionId]);
+
+  // Decisions handed to the dashboard = pending minus fallback-armed ones.
+  const decisions = useMemo(
+    () => perms.filter((p) => !fallbackIds.has(p.request_id)).map(toDecisionModel),
+    [perms, fallbackIds],
+  );
+  const fallbackPerms = useMemo(
+    () => perms.filter((p) => fallbackIds.has(p.request_id)),
+    [perms, fallbackIds],
   );
 
   const showCliBanner = connStatus === "connected" && !cliConnected;
@@ -55,13 +138,20 @@ export function MagicUIView({ sessionId }: { sessionId: string }) {
 
       {/* Dashboard area: full width, no max-w constraint */}
       <div className="flex-1 min-h-0 relative bg-cc-bg">
-        <MagicUIDashboard sessionId={sessionId} />
+        <MagicUIDashboard
+          sessionId={sessionId}
+          decisions={decisions}
+          onDecisionAck={handleDecisionAck}
+          onDecisionResponse={handleDecisionResponse}
+          onRuntimeError={handleRuntimeError}
+        />
       </div>
 
-      {/* Fallback decision popups — never lose a decision */}
-      {perms.length > 0 && (
+      {/* Fallback decision popups — only for requests the dashboard failed
+          to render in time. Sticky per request; a decision is never lost. */}
+      {fallbackPerms.length > 0 && (
         <div className="shrink-0 max-h-[50dvh] overflow-y-auto border-t border-cc-border bg-cc-card">
-          {perms.map((p) => (
+          {fallbackPerms.map((p) => (
             <PermissionBanner key={p.request_id} permission={p} sessionId={sessionId} />
           ))}
         </div>
@@ -71,4 +161,3 @@ export function MagicUIView({ sessionId }: { sessionId: string }) {
     </div>
   );
 }
-

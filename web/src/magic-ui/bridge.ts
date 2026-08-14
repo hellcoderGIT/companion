@@ -92,8 +92,10 @@ export function buildMagicUiSrcdoc(theme: "light" | "dark"): string {
 // ── PermissionRequest → DecisionModel ───────────────────────────────────────
 
 export function toDecisionModel(perm: PermissionRequest): DecisionModel {
+  // Defensive: replayed/foreign permissions may miss fields.
+  const input: Record<string, unknown> = perm.input ?? {};
   if (perm.tool_name === "AskUserQuestion") {
-    const rawQuestions = Array.isArray(perm.input.questions) ? perm.input.questions : [];
+    const rawQuestions = Array.isArray(input.questions) ? input.questions : [];
     const questions: DecisionQuestionModel[] = rawQuestions.map((raw) => {
       const q = (raw ?? {}) as Record<string, unknown>;
       const options = Array.isArray(q.options)
@@ -122,7 +124,7 @@ export function toDecisionModel(perm: PermissionRequest): DecisionModel {
   }
 
   if (perm.tool_name === "ExitPlanMode") {
-    const plan = typeof perm.input.plan === "string" ? perm.input.plan : "";
+    const plan = typeof input.plan === "string" ? input.plan : "";
     return {
       requestId: perm.request_id,
       kind: "exit_plan_mode",
@@ -133,10 +135,10 @@ export function toDecisionModel(perm: PermissionRequest): DecisionModel {
 
   const detailParts: string[] = [];
   if (perm.description) detailParts.push(perm.description);
-  if (perm.tool_name === "Bash" && typeof perm.input.command === "string") {
-    detailParts.push(`$ ${perm.input.command}`);
-  } else if (typeof perm.input.file_path === "string") {
-    detailParts.push(perm.input.file_path);
+  if (perm.tool_name === "Bash" && typeof input.command === "string") {
+    detailParts.push(`$ ${input.command}`);
+  } else if (typeof input.file_path === "string") {
+    detailParts.push(input.file_path);
   }
   return {
     requestId: perm.request_id,
@@ -168,7 +170,7 @@ export function decisionResponseToWire(
     };
   }
   if (response.action === "answers") {
-    const questions = Array.isArray(perm.input.questions) ? perm.input.questions : [];
+    const questions = Array.isArray(perm.input?.questions) ? perm.input.questions : [];
     const indexed: Record<string, string> = {};
     response.answers.forEach((a, i) => {
       indexed[String(a.index ?? i)] = a.answer;
