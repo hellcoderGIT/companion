@@ -89,6 +89,13 @@
   }
   function closeOverlay() {
     document.getElementById("overlay").classList.remove("open");
+    // Destroy chart instances that live only inside the overlay.
+    charts.forEach(function (chart, key) {
+      if (key.indexOf("overlay:") === 0) {
+        chart.destroy();
+        charts.delete(key);
+      }
+    });
   }
 
   function copyButton(getText) {
@@ -122,7 +129,9 @@
   }
 
   // ── Slot cards ───────────────────────────────────────────────────────
-  function buildCard(name, slot) {
+  // chartKey lets overlay renders (archived topics) keep their Chart.js
+  // instances separate from the live board's.
+  function buildCard(name, slot, chartKey) {
     var card = el("div", "card");
     card.dataset.slot = name;
     var actions = el("div", "card-actions");
@@ -141,7 +150,7 @@
       canvas.setAttribute("role", "img");
       canvas.setAttribute("aria-label", slot.title || slot.chart.title || "chart");
       wrap.appendChild(canvas);
-      renderChart(name, canvas, slot.chart);
+      renderChart(chartKey || name, canvas, slot.chart);
     } else if (slot.stat) {
       var statBox = el("div");
       var valueRow = el("div");
@@ -375,6 +384,46 @@
     }
   }
 
+  // ── Archived topics (chips in the status strip) ──────────────────────
+  function openTopicOverlay(topic) {
+    openOverlay(topic.title, function (target) {
+      var grid = el("div", "overlay-grid");
+      target.appendChild(grid);
+      var names = Object.keys(topic.slots || {});
+      // Respect the topic's layout order where available.
+      names.sort(function (a, b) {
+        var la = (topic.layout || []).findIndex(function (l) { return l.slot === a; });
+        var lb = (topic.layout || []).findIndex(function (l) { return l.slot === b; });
+        if (la !== -1 && lb !== -1) return la - lb;
+        if (la !== -1) return -1;
+        if (lb !== -1) return 1;
+        return 0;
+      });
+      names.forEach(function (name) {
+        var card = buildCard(name, topic.slots[name], "overlay:" + topic.id + ":" + name);
+        grid.appendChild(card);
+      });
+      if (names.length === 0) {
+        target.appendChild(el("div", "panel-empty", "This topic had no content."));
+      }
+    });
+  }
+
+  function renderTopics(state) {
+    var host = document.getElementById("topic-chips");
+    clear(host);
+    var topics = state.topics || [];
+    if (state.currentTopicTitle && (topics.length > 0 || state.currentTopicTitle !== "Session")) {
+      host.appendChild(el("span", "topic-current", state.currentTopicTitle));
+    }
+    topics.forEach(function (topic) {
+      var chip = el("button", "topic-chip", topic.title);
+      chip.title = "Reopen archived topic: " + topic.title;
+      chip.addEventListener("click", function () { openTopicOverlay(topic); });
+      host.appendChild(chip);
+    });
+  }
+
   var SRC_LABEL = { user: "You", ai_auto: "AI", agent: "Agent" };
 
   function decisionRow(entry) {
@@ -590,6 +639,7 @@
 
     renderOpenItems(state.openItems || []);
     renderDecisionLog(state.decisionLog || []);
+    renderTopics(state);
 
     var dot = document.getElementById("status-dot");
     dot.className = "status-dot" + (state.status !== "live" ? " " + state.status : "");
@@ -651,7 +701,8 @@
       "</div>" +
       '<div id="footer">' +
       '<div id="decisions-live" aria-live="assertive"></div>' +
-      '<div id="status-strip"><span class="status-dot" id="status-dot"></span><span id="status-text">Connecting…</span></div>' +
+      '<div id="status-strip"><span class="status-dot" id="status-dot"></span><span id="status-text">Connecting…</span>' +
+      '<span id="topic-chips" aria-label="Archived topics"></span></div>' +
       "</div>";
     document.body.appendChild(root);
 

@@ -3316,6 +3316,32 @@ const MAGIC_MOCK_STATE: MagicUiDashboardState = {
     { id: "q-db", ts: 3, text: "Waiting for you to run the DB migration locally", kind: "action" },
     { id: "q-choice", ts: 2, text: "Agent asked which token TTL to use", kind: "question" },
   ],
+  currentTopicTitle: "Auth refactor",
+  topics: [
+    {
+      id: "topic-1",
+      title: "Server health",
+      ts: 1,
+      slots: {
+        cpu: { stat: { label: "CPU (avg)", value: "1.9%", trend: "flat" }, updatedAt: 1 },
+        mem: {
+          chart: {
+            kind: "donut",
+            labels: ["used", "cache", "free"],
+            series: [{ label: "GB", data: [2.4, 6.7, 22.9] }],
+          },
+          title: "Memory",
+          updatedAt: 1,
+        },
+        verdict: { title: "Verdict", html: "<p>Box is coasting — CPU ~2%, RAM 8% used, zero swap.</p>", updatedAt: 1 },
+      },
+      layout: [
+        { slot: "verdict", area: "hero", span: 2 },
+        { slot: "mem", area: "main" },
+        { slot: "cpu", area: "main" },
+      ],
+    },
+  ],
   decisionLog: [
     { id: "d3", ts: 3, source: "user", title: "Bash", detail: "Allowed: bun test --watch=false", behavior: "allow" },
     { id: "d2", ts: 2, source: "ai_auto", title: "Read", detail: "Allowed (read-only tool)", behavior: "allow" },
