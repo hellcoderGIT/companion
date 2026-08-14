@@ -87,11 +87,14 @@ body {
   grid-area: main;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-rows: minmax(90px, 1fr);
+  grid-auto-rows: minmax(100px, 1fr);
   gap: 10px;
   min-height: 0;
   overflow: hidden;
 }
+
+/* Charts need headroom for their legend row; stat tiles don't. */
+.card:has(.chart-wrap) { min-height: 150px; }
 
 #side {
   grid-area: side;

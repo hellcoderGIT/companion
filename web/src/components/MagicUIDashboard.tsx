@@ -93,9 +93,18 @@ export function MagicUIDashboard({
   }, []);
 
   // Ask the server for the current snapshot on mount / session switch.
+  // NOTE: readiness is monotonic per iframe — the runtime posts `ready`
+  // exactly once, at boot. Never reset readyRef here: on a session switch
+  // the iframe does NOT reload, so a reset would wedge the bridge (no
+  // state/theme would ever be pushed again).
   useEffect(() => {
-    readyRef.current = false;
     sendMagicUiSync(sessionId);
+    // If the handshake is already done (session switch without remount),
+    // push whatever snapshot we hold for the new session immediately.
+    const current = useStore.getState().magicUiState.get(sessionId);
+    if (readyRef.current && current) {
+      postRef.current({ type: "state", state: current });
+    }
   }, [sessionId]);
 
   // Push state / theme / decisions as they change.
