@@ -4,6 +4,7 @@ import { MessageFeed } from "./MessageFeed.js";
 import { Composer } from "./Composer.js";
 import { PermissionBanner } from "./PermissionBanner.js";
 import { DensityProvider } from "./density.js";
+import { MagicUIDashboard } from "./MagicUIDashboard.js";
 
 /**
  * MagicUI session view: a full-width, AI-generated live dashboard of the
@@ -54,7 +55,7 @@ export function MagicUIView({ sessionId }: { sessionId: string }) {
 
       {/* Dashboard area: full width, no max-w constraint */}
       <div className="flex-1 min-h-0 relative bg-cc-bg">
-        <MagicUIDashboardPlaceholder />
+        <MagicUIDashboard sessionId={sessionId} />
       </div>
 
       {/* Fallback decision popups — never lose a decision */}
@@ -71,16 +72,3 @@ export function MagicUIView({ sessionId }: { sessionId: string }) {
   );
 }
 
-/** Temporary placeholder until the iframe runtime lands (Phase 2). */
-function MagicUIDashboardPlaceholder() {
-  return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-cc-muted select-none">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8 opacity-60" aria-hidden="true">
-        <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" />
-        <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
-      </svg>
-      <div className="text-sm font-medium">Magic dashboard warming up…</div>
-      <div className="text-xs">The session watcher will paint this area as work happens.</div>
-    </div>
-  );
-}

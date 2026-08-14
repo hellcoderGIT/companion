@@ -1411,6 +1411,13 @@ function handleParsedMessage(
       break;
     }
 
+    case "magic_ui_state": {
+      // Full dashboard snapshot from the MagicUI watcher (server never sends
+      // partial patches — the iframe runtime diffs snapshots against its DOM).
+      store.setMagicUiState(sessionId, data.state);
+      break;
+    }
+
     default: {
       console.debug("[ws] Unhandled message type:", (data as { type: string }).type);
       break;
@@ -1585,6 +1592,11 @@ export function sendMcpSetServers(sessionId: string, servers: Record<string, Mcp
 
 export function sendSetMagicUi(sessionId: string, magicUiActive: boolean | null) {
   sendToSession(sessionId, { type: "set_magic_ui", magicUiActive });
+}
+
+/** Ask the server to (re)broadcast the current MagicUI dashboard snapshot. */
+export function sendMagicUiSync(sessionId: string) {
+  sendToSession(sessionId, { type: "magic_ui_sync" });
 }
 
 export function sendSetAiValidation(

@@ -1344,6 +1344,12 @@ export class WsBridge {
       return;
     }
 
+    // -- magic_ui_sync: bridge-level snapshot request ---------------------
+    if (msg.type === "magic_ui_sync") {
+      companionBus.emit("magic-ui:sync-requested", { sessionId: session.id });
+      return;
+    }
+
     // -- user_message: store in history before delegating to adapter ------
     if (msg.type === "user_message") {
       // Validate attachments before doing any work; reject the whole message

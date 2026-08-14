@@ -38,6 +38,11 @@ vi.mock("./PermissionBanner.js", () => ({
     <div data-testid={`permission-${permission.request_id}`} />
   ),
 }));
+vi.mock("./MagicUIDashboard.js", () => ({
+  MagicUIDashboard: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="magic-dashboard">{sessionId}</div>
+  ),
+}));
 
 import { MagicUIView } from "./MagicUIView.js";
 
@@ -65,7 +70,7 @@ describe("MagicUIView", () => {
   it("renders the mini output strip, dashboard area and composer", () => {
     render(<MagicUIView sessionId="sess-1" />);
     expect(screen.getByTestId("message-feed")).toHaveTextContent("sess-1");
-    expect(screen.getByText(/magic dashboard warming up/i)).toBeInTheDocument();
+    expect(screen.getByTestId("magic-dashboard")).toHaveTextContent("sess-1");
     expect(screen.getByTestId("composer")).toHaveTextContent("sess-1");
   });
 

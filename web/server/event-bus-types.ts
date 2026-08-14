@@ -104,4 +104,7 @@ export interface CompanionEventMap {
     sessionId: string;
     magicUiActive: boolean | null | undefined;
   };
+
+  /** A browser asked for the current dashboard snapshot (join/resync). */
+  "magic-ui:sync-requested": { sessionId: string };
 }
