@@ -51,6 +51,20 @@ import {
 import { validatePermission } from "./ai-validator.js";
 import { getEffectiveAiValidation } from "./ai-validation-settings.js";
 import { companionBus } from "./event-bus.js";
+
+/** Pull AskUserQuestion answers (keyed by question text) out of a
+ *  permission_response's updated_input, if present. */
+function extractAskUserAnswers(
+  updatedInput?: Record<string, unknown>,
+): Record<string, string> | undefined {
+  const answers = updatedInput?.answers;
+  if (!answers || typeof answers !== "object") return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(answers as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 import { SessionStateMachine } from "./session-state-machine.js";
 import { metricsCollector } from "./metrics-collector.js";
 import { log } from "./logger.js";
@@ -688,6 +702,7 @@ export class WsBridge {
         session.pendingPermissions.set(perm.request_id, perm);
         session.stateMachine.transition("awaiting_permission", "permission_requested");
         this.persistSession(session);
+        companionBus.emit("permission:requested", { sessionId: session.id, request: perm });
       }
 
       // -- permission_cancelled: remove from pending -----------------------
@@ -699,6 +714,7 @@ export class WsBridge {
           session.stateMachine.transition("streaming", "permission_cancelled");
         }
         this.persistSession(session);
+        companionBus.emit("permission:cancelled", { sessionId: session.id, requestId: reqId });
       }
 
       // -- system_event: append to history (except hook_progress) ----------
@@ -904,6 +920,14 @@ export class WsBridge {
         behavior: "allow",
         updated_input: perm.input,
       });
+      companionBus.emit("permission:resolved", {
+        sessionId: session.id,
+        requestId: perm.request_id,
+        behavior: "allow",
+        resolvedBy: "ai",
+        toolName: perm.tool_name,
+        reason: result.reason,
+      });
       return;
     }
 
@@ -921,6 +945,14 @@ export class WsBridge {
         request_id: perm.request_id,
         behavior: "deny",
       });
+      companionBus.emit("permission:resolved", {
+        sessionId: session.id,
+        requestId: perm.request_id,
+        behavior: "deny",
+        resolvedBy: "ai",
+        toolName: perm.tool_name,
+        reason: result.reason,
+      });
       return;
     }
 
@@ -932,6 +964,7 @@ export class WsBridge {
       type: "permission_request",
       request: perm,
     });
+    companionBus.emit("permission:requested", { sessionId: session.id, request: perm });
   }
 
   /** Cancel a pending disconnect debounce timer for a session, if any. */
@@ -1429,6 +1462,14 @@ export class WsBridge {
       session.pendingPermissions.delete(msg.request_id);
       session.stateMachine.transition("streaming", "permission_resolved");
       this.persistSession(session);
+      companionBus.emit("permission:resolved", {
+        sessionId: session.id,
+        requestId: msg.request_id,
+        behavior: msg.behavior as "allow" | "deny",
+        resolvedBy: "user",
+        toolName: pending?.tool_name,
+        answers: extractAskUserAnswers(msg.updated_input),
+      });
     }
 
     // Delegate to the backend adapter if connected; otherwise queue for later flush.

@@ -38,6 +38,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { ClaudeAdapter } from "./claude-adapter.js";
 import { log } from "./logger.js";
+import { AsyncMessageQueue } from "./async-message-queue.js";
 
 export interface SdkAttachOptions {
   model?: string;
@@ -55,42 +56,6 @@ export interface SdkAttachOptions {
   /** Path to the installed `claude` binary, so the SDK drives the same
    *  logged-in CLI (and the same subscription auth) as the stdio transport. */
   claudeBinary?: string;
-}
-
-/** Minimal async queue that adapts push-style sends to the SDK's
- *  pull-style AsyncIterable input. */
-class AsyncMessageQueue<T> implements AsyncIterable<T> {
-  private buffer: T[] = [];
-  private waiters: Array<(r: IteratorResult<T>) => void> = [];
-  private closed = false;
-
-  push(item: T): void {
-    if (this.closed) return;
-    const waiter = this.waiters.shift();
-    if (waiter) waiter({ value: item, done: false });
-    else this.buffer.push(item);
-  }
-
-  close(): void {
-    this.closed = true;
-    for (const waiter of this.waiters.splice(0)) {
-      waiter({ value: undefined as never, done: true });
-    }
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: (): Promise<IteratorResult<T>> => {
-        if (this.buffer.length > 0) {
-          return Promise.resolve({ value: this.buffer.shift() as T, done: false });
-        }
-        if (this.closed) {
-          return Promise.resolve({ value: undefined as never, done: true });
-        }
-        return new Promise((resolve) => this.waiters.push(resolve));
-      },
-    };
-  }
 }
 
 export class SdkClaudeAdapter extends ClaudeAdapter {

@@ -32,6 +32,7 @@ import { migrateCronJobsToAgents } from "./agent-cron-migrator.js";
 import { migrateLinearCredentialsToAgents } from "./linear-credential-migration.js";
 import { authenticateManagedWebSocket } from "./ws-auth.js";
 import { LinearAgentBridge } from "./linear-agent-bridge.js";
+import { MagicUiWatcherManager } from "./magic-ui-watcher.js";
 import { NoVncProxy } from "./novnc-proxy.js";
 
 import { startPeriodicCheck, setServiceMode, getCurrentVersion } from "./update-checker.js";
@@ -72,6 +73,12 @@ const recorder = new RecorderManager();
 const cronScheduler = new CronScheduler(launcher, wsBridge);
 const agentExecutor = new AgentExecutor(launcher, wsBridge);
 const linearAgentBridge = new LinearAgentBridge(agentExecutor, wsBridge);
+// MagicUI watcher fleet: one Haiku session per opted-in companion session.
+const magicUiManager = new MagicUiWatcherManager({
+  broadcast: (sessionId, msg) => wsBridge.broadcastToSession(sessionId, msg),
+  getSessionState: (sessionId) => wsBridge.getSession(sessionId)?.state,
+});
+void magicUiManager; // owned for process lifetime; bus-driven
 
 const orchestrator = new SessionOrchestrator({
   launcher, wsBridge, sessionStore, worktreeTracker,
