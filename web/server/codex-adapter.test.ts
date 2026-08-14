@@ -2157,6 +2157,62 @@ describe("CodexAdapter", () => {
     expect(response.result.answers.q_beta).toEqual({ answers: ["No"] });
   });
 
+  // The shared AskUserQuestion UI has keyed answers by question TEXT since
+  // ecc9d07 (the CLI-side contract); the index-keyed test above covers the
+  // legacy fallback. This is the wire format actually sent by today's
+  // PermissionBanner and MagicUI decision controls — before the fix these
+  // answers were silently dropped (all lookups by index came back undefined).
+  it("maps question-TEXT-keyed browser answers to Codex question IDs", async () => {
+    const messages: BrowserIncomingMessage[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "o4-mini" });
+    adapter.onBrowserMessage((msg) => messages.push(msg));
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    stdout.push(JSON.stringify({
+      method: "item/tool/requestUserInput",
+      id: 702,
+      params: {
+        threadId: "thr_123",
+        turnId: "turn_1",
+        itemId: "item_2",
+        questions: [
+          { id: "q_alpha", header: "Q1", question: "Pick one", isOther: false, isSecret: false, options: [{ label: "Yes", description: "" }] },
+          // Empty question text: the UI falls back to index keys for this one
+          { id: "q_beta", header: "Q2", question: "", isOther: false, isSecret: false, options: [{ label: "No", description: "" }] },
+        ],
+      },
+    }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const permReq = messages.find((m) => m.type === "permission_request") as unknown as {
+      request: { request_id: string };
+    };
+    expect(permReq).toBeDefined();
+
+    adapter.sendBrowserMessage({
+      type: "permission_response",
+      request_id: permReq.request.request_id,
+      behavior: "allow",
+      // Exactly what toAnswersByQuestionText produces: text key for the
+      // first question, index fallback for the empty-text one.
+      updated_input: { answers: { "Pick one": "Yes", "1": "No" } },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const allWritten = stdin.chunks.join("");
+    const responseLine = allWritten.split("\n").find((l) => l.includes('"id":702'));
+    expect(responseLine).toBeDefined();
+
+    const response = JSON.parse(responseLine!);
+    expect(response.result.answers.q_alpha).toEqual({ answers: ["Yes"] });
+    expect(response.result.answers.q_beta).toEqual({ answers: ["No"] });
+  });
+
   // ── applyPatchApproval tests ──────────────────────────────────────────
 
   it("forwards applyPatchApproval as Edit permission_request", async () => {
