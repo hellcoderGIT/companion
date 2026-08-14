@@ -400,6 +400,7 @@ export type BrowserOutgoingMessage =
   | { type: "mcp_reconnect"; serverName: string; client_msg_id?: string }
   | { type: "mcp_set_servers"; servers: Record<string, McpServerConfig>; client_msg_id?: string }
   | { type: "set_ai_validation"; aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null; client_msg_id?: string }
+  | { type: "set_magic_ui"; magicUiActive?: boolean | null; client_msg_id?: string }
   | { type: "end_session"; reason?: string; client_msg_id?: string }
   | { type: "stop_task"; task_id: string; client_msg_id?: string }
   | { type: "update_environment_variables"; variables: Record<string, string>; client_msg_id?: string };
@@ -508,6 +509,13 @@ export interface SessionState {
   aiValidationAutoApprove?: boolean | null;
   /** Per-session auto-deny override. null/undefined = use global default */
   aiValidationAutoDeny?: boolean | null;
+  /**
+   * Per-session MagicUI opt-in. null/undefined = use the global
+   * magicUiEnabled default. When effective-true (and the Claude CLI is
+   * available), browsers render the MagicUI dashboard view and the server
+   * runs a Haiku watcher for this session.
+   */
+  magicUiActive?: boolean | null;
   /** If this session is linked to a Linear agent session */
   linearSessionId?: string;
 }

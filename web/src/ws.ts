@@ -550,6 +550,7 @@ const IDEMPOTENT_OUTGOING_TYPES = new Set<BrowserOutgoingMessage["type"]>([
   "mcp_reconnect",
   "mcp_set_servers",
   "set_ai_validation",
+  "set_magic_ui",
 ]);
 
 function getWsUrl(sessionId: string): string {
@@ -1548,6 +1549,7 @@ export function sendToSession(sessionId: string, msg: BrowserOutgoingMessage) {
       case "mcp_reconnect":
       case "mcp_set_servers":
       case "set_ai_validation":
+      case "set_magic_ui":
         if (!msg.client_msg_id) {
           outgoing = { ...msg, client_msg_id: nextClientMsgId() };
         }
@@ -1579,6 +1581,10 @@ export function sendMcpReconnect(sessionId: string, serverName: string) {
 
 export function sendMcpSetServers(sessionId: string, servers: Record<string, McpServerConfig>) {
   sendToSession(sessionId, { type: "mcp_set_servers", servers });
+}
+
+export function sendSetMagicUi(sessionId: string, magicUiActive: boolean | null) {
+  sendToSession(sessionId, { type: "set_magic_ui", magicUiActive });
 }
 
 export function sendSetAiValidation(

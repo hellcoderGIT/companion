@@ -3,6 +3,7 @@ import { useStore } from "../store.js";
 import { parseHash } from "../utils/routing.js";
 import { AiValidationToggle } from "./AiValidationToggle.js";
 import { ExportMenu } from "./ExportMenu.js";
+import { ViewModeToggle } from "./ViewModeToggle.js";
 
 type WorkspaceTab = "chat" | "diff";
 
@@ -134,7 +135,7 @@ export function TopBar() {
           {showWorkspaceControls && currentSessionId && (
             <ExportMenu sessionId={currentSessionId} />
           )}
-          {showWorkspaceControls && <DensityToggle />}
+          {showWorkspaceControls && <ViewModeToggle sessionId={currentSessionId ?? null} />}
           <ThemeToggle />
           {showContextToggle && (
             <button
@@ -157,44 +158,6 @@ export function TopBar() {
       </div>
 
     </header>
-  );
-}
-
-/**
- * Message density switch, sitting with the other view preferences (theme,
- * context panel) on the right of the top bar. Same store action the Settings
- * page uses, so the two surfaces can never drift apart.
- */
-function DensityToggle() {
-  const density = useStore((s) => s.density);
-  const toggle = useCallback(() => useStore.getState().toggleDensity(), []);
-  const isCompact = density === "compact";
-  const label = isCompact ? "Switch to standard density" : "Switch to compact density";
-
-  return (
-    <button
-      onClick={toggle}
-      className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors cursor-pointer ${
-        isCompact
-          ? "text-cc-primary bg-cc-active"
-          : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
-      }`}
-      title={label}
-      aria-label={label}
-      aria-pressed={isCompact}
-    >
-      {isCompact ? (
-        // Compact: four tightly stacked rules.
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-[15px] h-[15px]">
-          <path d="M4 7h16M4 11h16M4 15h16M4 19h16" />
-        </svg>
-      ) : (
-        // Standard: three rules with room to breathe.
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-[15px] h-[15px]">
-          <path d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      )}
-    </button>
   );
 }
 

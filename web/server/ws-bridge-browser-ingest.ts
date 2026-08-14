@@ -66,6 +66,7 @@ export const IDEMPOTENT_BROWSER_MESSAGE_TYPES: ReadonlySet<string> = new Set([
   "mcp_reconnect",
   "mcp_set_servers",
   "set_ai_validation",
+  "set_magic_ui",
 ]);
 
 /**

@@ -17,6 +17,7 @@ import { UpdateOverlay } from "./components/UpdateOverlay.js";
 import { DockerUpdateDialog } from "./components/DockerUpdateDialog.js";
 import { isSandboxEnabled } from "./feature-flags.js";
 import { OnboardingModal } from "./components/OnboardingModal.js";
+import { useMagicUiActive } from "./magic-ui/useMagicUiActive.js";
 
 // Lazy-loaded route-level pages (not needed for initial render)
 const Playground = lazy(() => import("./components/Playground.js").then((m) => ({ default: m.Playground })));
@@ -32,6 +33,8 @@ const CronManager = lazy(() => import("./components/CronManager.js").then((m) =>
 const AgentsPage = lazy(() => import("./components/AgentsPage.js").then((m) => ({ default: m.AgentsPage })));
 const RunsPage = lazy(() => import("./components/RunsPage.js").then((m) => ({ default: m.RunsPage })));
 const DashboardPage = lazy(() => import("./components/DashboardPage.js").then((m) => ({ default: m.DashboardPage })));
+// MagicUI is default-off; keep it off the critical bundle path.
+const MagicUIView = lazy(() => import("./components/MagicUIView.js").then((m) => ({ default: m.MagicUIView })));
 
 
 function LazyFallback() {
@@ -57,6 +60,7 @@ export default function App() {
   const taskPanelOpen = useStore((s) => s.taskPanelOpen);
   const homeResetKey = useStore((s) => s.homeResetKey);
   const activeTab = useStore((s) => s.activeTab);
+  const magicUiActive = useMagicUiActive(currentSessionId);
   const sessionCreating = useStore((s) => s.sessionCreating);
   const sessionCreatingBackend = useStore((s) => s.sessionCreatingBackend);
   const creationProgress = useStore((s) => s.creationProgress);
@@ -173,6 +177,7 @@ export default function App() {
     if (!isAuthenticated) return;
     api.getSettings().then((s) => {
       if (s.publicUrl) useStore.getState().setPublicUrl(s.publicUrl);
+      useStore.getState().setMagicUiAvailable(!!s.magicUiEnabled && !!s.claudeCliAvailable);
       if (!s.onboardingCompleted) {
         setShowOnboarding(true);
       }
@@ -305,7 +310,9 @@ export default function App() {
                 {currentSessionId ? (
                   activeTab === "diff"
                     ? <DiffPanel sessionId={currentSessionId} />
-                    : <ChatView sessionId={currentSessionId} />
+                    : magicUiActive
+                      ? <Suspense fallback={<LazyFallback />}><MagicUIView sessionId={currentSessionId} /></Suspense>
+                      : <ChatView sessionId={currentSessionId} />
                 ) : (
                   <HomePage key={homeResetKey} />
                 )}

@@ -1,7 +1,7 @@
 // Typed event map for the Companion internal event bus.
 // Each key is a namespaced event name; values are the payload passed to handlers.
 
-import type { BrowserIncomingMessage } from "./session-types.js";
+import type { BrowserIncomingMessage, PermissionRequest } from "./session-types.js";
 import type { CodexAdapter } from "./codex-adapter.js";
 import type { ClaudeAdapter } from "./claude-adapter.js";
 import type { SessionPhase } from "./session-state-machine.js";
@@ -76,4 +76,32 @@ export interface CompanionEventMap {
 
   /** A result (turn completion) was processed and broadcast to browsers. */
   "message:result": { sessionId: string; message: BrowserIncomingMessage };
+
+  // ── Permission flow (transport-agnostic; emitted at bridge level) ───
+
+  /** A permission request was stored and broadcast to browsers. */
+  "permission:requested": { sessionId: string; request: PermissionRequest };
+
+  /** A permission request was resolved — by the user or by AI validation. */
+  "permission:resolved": {
+    sessionId: string;
+    requestId: string;
+    behavior: "allow" | "deny";
+    resolvedBy: "user" | "ai";
+    toolName?: string;
+    /** For AskUserQuestion allows: the answers keyed by question text. */
+    answers?: Record<string, string>;
+    reason?: string;
+  };
+
+  /** A permission request was cancelled by the CLI (e.g. interrupt). */
+  "permission:cancelled": { sessionId: string; requestId: string };
+
+  // ── MagicUI ────────────────────────────────────────────────────────
+
+  /** Per-session MagicUI opt-in changed via set_magic_ui. */
+  "magic-ui:setting-changed": {
+    sessionId: string;
+    magicUiActive: boolean | null | undefined;
+  };
 }

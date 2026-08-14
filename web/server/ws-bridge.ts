@@ -42,6 +42,7 @@ import {
 } from "./ws-bridge-publish.js";
 import {
   handleSetAiValidation,
+  handleSetMagicUi,
 } from "./ws-bridge-controls.js";
 import {
   handleSessionSubscribe,
@@ -1322,6 +1323,23 @@ export class WsBridge {
           aiValidationAutoApprove: session.state.aiValidationAutoApprove,
           aiValidationAutoDeny: session.state.aiValidationAutoDeny,
         },
+      });
+      return;
+    }
+
+    // -- set_magic_ui: bridge-level, not forwarded to backend -------------
+    if (msg.type === "set_magic_ui") {
+      handleSetMagicUi(session, msg);
+      this.persistSession(session);
+      this.broadcastToBrowsers(session, {
+        type: "session_update",
+        session: {
+          magicUiActive: session.state.magicUiActive,
+        },
+      });
+      companionBus.emit("magic-ui:setting-changed", {
+        sessionId: session.id,
+        magicUiActive: session.state.magicUiActive,
       });
       return;
     }

@@ -64,6 +64,7 @@ export interface SessionsSlice {
   setRateLimit: (sessionId: string, info: RateLimitInfo) => void;
   toggleProjectCollapse: (projectKey: string) => void;
   setSessionAiValidation: (sessionId: string, settings: { aiValidationEnabled?: boolean | null; aiValidationAutoApprove?: boolean | null; aiValidationAutoDeny?: boolean | null }) => void;
+  setSessionMagicUi: (sessionId: string, magicUiActive: boolean | null) => void;
 }
 
 export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> = (set) => ({
@@ -268,6 +269,17 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
       const existing = sessions.get(sessionId);
       if (!existing) return {};
       sessions.set(sessionId, { ...existing, ...settings });
+      return { sessions };
+    }),
+
+  // Optimistic local write for the per-session MagicUI opt-in; the server
+  // echoes a session_update which converges all connected browsers.
+  setSessionMagicUi: (sessionId, magicUiActive) =>
+    set((s) => {
+      const sessions = new Map(s.sessions);
+      const existing = sessions.get(sessionId);
+      if (!existing) return {};
+      sessions.set(sessionId, { ...existing, magicUiActive });
       return { sessions };
     }),
 });

@@ -3,6 +3,7 @@ import { DASHBOARD_MODEL_OPTIONS, DEFAULT_ANTHROPIC_MODEL, getSettings, updateSe
 import { linearCache } from "../linear-cache.js";
 import { listConnections } from "../linear-connections.js";
 import { hasContainerCodexAuth } from "../codex-container-auth.js";
+import { isClaudeCliAvailable } from "../claude-cli-runner.js";
 
 export function registerSettingsRoutes(api: Hono): void {
   api.get("/settings", (c) => {
@@ -30,6 +31,9 @@ export function registerSettingsRoutes(api: Hono): void {
       dashboardModel: settings.dashboardModel,
       dashboardRunHour: settings.dashboardRunHour,
       dashboardMaxSessionsPerRun: settings.dashboardMaxSessionsPerRun,
+      magicUiEnabled: settings.magicUiEnabled,
+      magicUiModel: settings.magicUiModel,
+      claudeCliAvailable: isClaudeCliAvailable(),
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
@@ -100,6 +104,12 @@ export function registerSettingsRoutes(api: Hono): void {
     ) {
       return c.json({ error: "dashboardMaxSessionsPerRun must be an integer between 1 and 200" }, 400);
     }
+    if (body.magicUiEnabled !== undefined && typeof body.magicUiEnabled !== "boolean") {
+      return c.json({ error: "magicUiEnabled must be a boolean" }, 400);
+    }
+    if (body.magicUiModel !== undefined && !DASHBOARD_MODEL_OPTIONS.includes(body.magicUiModel)) {
+      return c.json({ error: `magicUiModel must be one of: ${DASHBOARD_MODEL_OPTIONS.join(", ")}` }, 400);
+    }
     if (body.publicUrl !== undefined) {
       if (typeof body.publicUrl !== "string") {
         return c.json({ error: "publicUrl must be a string" }, 400);
@@ -164,6 +174,7 @@ export function registerSettingsRoutes(api: Hono): void {
       || body.aiValidationAutoDeny !== undefined
       || body.dashboardEnabled !== undefined || body.dashboardModel !== undefined
       || body.dashboardRunHour !== undefined || body.dashboardMaxSessionsPerRun !== undefined
+      || body.magicUiEnabled !== undefined || body.magicUiModel !== undefined
       || body.publicUrl !== undefined
       || body.updateChannel !== undefined
       || body.dockerAutoUpdate !== undefined
@@ -270,6 +281,14 @@ export function registerSettingsRoutes(api: Hono): void {
         typeof body.dashboardMaxSessionsPerRun === "number"
           ? body.dashboardMaxSessionsPerRun
           : undefined,
+      magicUiEnabled:
+        typeof body.magicUiEnabled === "boolean"
+          ? body.magicUiEnabled
+          : undefined,
+      magicUiModel:
+        typeof body.magicUiModel === "string"
+          ? body.magicUiModel
+          : undefined,
       publicUrl:
         typeof body.publicUrl === "string"
           ? body.publicUrl.trim().replace(/\/+$/, "")
@@ -331,6 +350,9 @@ export function registerSettingsRoutes(api: Hono): void {
       dashboardModel: settings.dashboardModel,
       dashboardRunHour: settings.dashboardRunHour,
       dashboardMaxSessionsPerRun: settings.dashboardMaxSessionsPerRun,
+      magicUiEnabled: settings.magicUiEnabled,
+      magicUiModel: settings.magicUiModel,
+      claudeCliAvailable: isClaudeCliAvailable(),
       publicUrl: settings.publicUrl,
       updateChannel: settings.updateChannel,
       dockerAutoUpdate: settings.dockerAutoUpdate,
