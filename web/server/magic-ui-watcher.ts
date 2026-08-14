@@ -75,12 +75,15 @@ OPS:
 - {"op":"chart","slot":"...","spec":{"kind":"bar|line|donut|sparkline","labels":[...],"series":[{"label":"...","data":[...]}]},"title":"...","area":"...","span":...}
 - {"op":"stat","slot":"...","label":"...","value":"...","trend":"up|down|flat","area":"...","span":...}
 - {"op":"snippet","slot":"...","title":"...","code":"...","language":"bash"} — for any script/command the USER must run themselves; rendered copyable.
+- {"op":"new_topic","title":"<short title for the NEW subject>"} — TOPIC CHANGE. Archives the entire current board into a collapsed, reopenable "topic" chip and gives you a clean board. Emit this FIRST (before any set_slot) whenever the session moves to a clearly different subject.
 - {"op":"open_item","id":"<stable-id>","text":"...","kind":"action|question|blocker"} — OPEN points where the agent waits on the user (questions asked, manual steps requested, blockers). Keep them current; emit {"op":"resolve_item","id":"..."} the moment a point is addressed.
 - {"op":"decision_log","title":"...","detail":"..."} — ONLY for notable choices the agent itself made (approach picked, tradeoff taken). User choices are logged automatically — never duplicate them.
 - {"op":"session_summary","text":"..."} — maintain a rolling ~5 sentence summary of the WHOLE session. Refresh it every few turns. It is not rendered; it is your own memory across restarts.
 
 DASHBOARD RULES:
 - Fixed viewport, NO scrolling: keep at most 8 visible slots. When new content arrives, CONDENSE — merge older work into a compact summary slot or remove it — never just add.
+- TOPIC DISCIPLINE: the visible board covers ONE subject at a time. If the digest is about something clearly different from the current board, emit new_topic first — do NOT leave slots from the previous subject on screen. Small follow-ups to the same subject update existing slots instead.
+- NEVER create slots about yourself, the watcher, the dashboard, releases of this app, or "collecting/scanning/working…" progress placeholders. Only paint what the session actually produced — wait for real results instead of announcing that they are coming.
 - Newest/most important activity belongs in area "hero". Important points of the discussion must stay visible in a condensed form.
 - Charts and stats ONLY for genuinely numeric data (tests passed, files changed, durations, counts). Never invent numbers.
 - Decisions and open points are first-class: reference pending decisions in content, but NEVER build buttons or forms — the runtime renders the real controls.
@@ -193,7 +196,13 @@ export class MagicUiWatcher {
   /** First message of a (re)started watcher session: current dashboard + summary. */
   private seedMessage(): string | null {
     if (this.state.version === 0) return null;
-    const seedState = { slots: this.state.slots, layout: this.state.layout, openItems: this.state.openItems };
+    const seedState = {
+      currentTopic: this.state.currentTopicTitle,
+      slots: this.state.slots,
+      layout: this.state.layout,
+      openItems: this.state.openItems,
+      archivedTopics: this.state.topics.map((t) => t.title),
+    };
     return [
       "You are resuming a dashboard you maintain. CURRENT DASHBOARD STATE:",
       JSON.stringify(seedState).slice(0, 12_000),

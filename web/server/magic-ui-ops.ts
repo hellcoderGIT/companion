@@ -19,6 +19,7 @@ import {
   MAGIC_UI_MAX_OPS_PER_TURN,
   MAGIC_UI_MAX_SLOTS,
   MAGIC_UI_MAX_SNIPPET_CHARS,
+  MAGIC_UI_MAX_TOPICS,
   type MagicChartSpec,
   type MagicUiArea,
   type MagicUiDashboardState,
@@ -207,6 +208,10 @@ export function validateOps(raw: unknown[]): MagicUiOp[] {
         });
         break;
       }
+      case "new_topic": {
+        if (isNonEmptyString(o.title, 80)) ops.push({ op: "new_topic", title: o.title });
+        break;
+      }
       case "open_item": {
         if (!isNonEmptyString(o.id, 80) || !isNonEmptyString(o.text, 500)) break;
         ops.push({
@@ -240,6 +245,7 @@ export function validateOps(raw: unknown[]): MagicUiOp[] {
 }
 
 let decisionCounter = 0;
+let topicCounter = 0;
 
 /** Server-generated decision entry (user choices, AI auto-resolutions). */
 export function makeDecisionEntry(
@@ -286,10 +292,33 @@ export function applyOps(
     layout: [...state.layout],
     decisionLog: [...state.decisionLog],
     openItems: [...state.openItems],
+    topics: [...state.topics],
   };
 
   for (const op of ops) {
     switch (op.op) {
+      case "new_topic": {
+        // Subject change: archive the ENTIRE current board as a collapsed
+        // topic and hand the model a clean slate. Server-enforced so stale
+        // content always leaves the screen even if the model forgets to
+        // remove slots itself.
+        if (Object.keys(next.slots).length > 0) {
+          next.topics = [
+            {
+              id: `topic-${now}-${topicCounter++}`,
+              title: next.currentTopicTitle || "Earlier",
+              ts: now,
+              slots: next.slots,
+              layout: next.layout,
+            },
+            ...next.topics,
+          ].slice(0, MAGIC_UI_MAX_TOPICS);
+        }
+        next.slots = {};
+        next.layout = [];
+        next.currentTopicTitle = op.title;
+        break;
+      }
       case "set_slot":
         next.slots[op.slot] = { title: op.title, html: op.html, updatedAt: now };
         next.layout = upsertLayout(next.layout, op.slot, op.area, op.span);

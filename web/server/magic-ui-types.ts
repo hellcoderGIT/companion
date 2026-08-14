@@ -78,6 +78,20 @@ export interface MagicUiLayoutEntry {
 
 export type MagicUiStatus = "live" | "degraded" | "stopped";
 
+/**
+ * An archived board: when the session changes subject the watcher emits
+ * new_topic and the server moves the entire current board here. Topics are
+ * rendered as collapsed chips the user can reopen — the visible dashboard
+ * always shows only the current subject.
+ */
+export interface MagicUiTopic {
+  id: string;
+  title: string;
+  ts: number;
+  slots: Record<string, MagicUiSlot>;
+  layout: MagicUiLayoutEntry[];
+}
+
 /** Patch operations the watcher model may emit (one JSON array per turn). */
 export type MagicUiOp =
   | { op: "set_slot"; slot: string; html: string; title?: string; area?: MagicUiArea; span?: 1 | 2 | 3 }
@@ -86,6 +100,7 @@ export type MagicUiOp =
   | { op: "chart"; slot: string; spec: MagicChartSpec; title?: string; area?: MagicUiArea; span?: 1 | 2 | 3 }
   | { op: "stat"; slot: string; label: string; value: string; trend?: MagicUiTrend; area?: MagicUiArea; span?: 1 | 2 | 3 }
   | { op: "snippet"; slot: string; title: string; code: string; language?: string; area?: MagicUiArea; span?: 1 | 2 | 3 }
+  | { op: "new_topic"; title: string }
   | { op: "open_item"; id: string; text: string; kind?: "action" | "question" | "blocker" }
   | { op: "resolve_item"; id: string }
   | { op: "decision_log"; title: string; detail: string }
@@ -100,6 +115,10 @@ export interface MagicUiDashboardState {
   decisionLog: MagicUiDecisionEntry[];
   /** Unresolved user-facing points, newest first. */
   openItems: MagicUiOpenItem[];
+  /** Archived boards from earlier subjects, newest first. */
+  topics: MagicUiTopic[];
+  /** Title of the subject the current board covers. */
+  currentTopicTitle: string;
   /** Rolling watcher-maintained summary; the seed for watcher restarts. Not rendered. */
   sessionSummary: string;
   status: MagicUiStatus;
@@ -113,6 +132,8 @@ export function emptyMagicUiState(now: number): MagicUiDashboardState {
     layout: [],
     decisionLog: [],
     openItems: [],
+    topics: [],
+    currentTopicTitle: "Session",
     sessionSummary: "",
     status: "live",
     updatedAt: now,
@@ -121,8 +142,11 @@ export function emptyMagicUiState(now: number): MagicUiDashboardState {
 
 // ── Budgets (enforced server-side in magic-ui-ops.ts) ────────────────────────
 
-/** Hard cap on named slots; the prompt asks the model to stay well under. */
-export const MAGIC_UI_MAX_SLOTS = 24;
+/** Hard cap on named slots; the prompt asks the model to stay well under.
+ *  Kept close to the one-screen budget — beyond it the oldest slots evict. */
+export const MAGIC_UI_MAX_SLOTS = 12;
+/** Archived-topic retention (newest first). */
+export const MAGIC_UI_MAX_TOPICS = 8;
 /** Per-slot sanitized HTML budget (chars). */
 export const MAGIC_UI_MAX_HTML_CHARS = 8_192;
 /** Per-snippet code budget (chars). */

@@ -381,6 +381,41 @@ body[data-theme="light"] .behavior.allow { color: #006300; }
 .dp-question { margin-bottom: 8px; }
 .dp-question .q-text { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
 
+/* ── Topic chips (archived boards) ────────────────────────────────────── */
+
+#topic-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  overflow: hidden;
+}
+.topic-current {
+  font-weight: 650;
+  color: var(--ink-2);
+}
+.topic-current::before { content: "· "; color: var(--muted); font-weight: 400; }
+.topic-chip {
+  border: 1px solid var(--ring);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--ink-2);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.topic-chip:hover { color: var(--ink); border-color: var(--accent); }
+
+.overlay-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.overlay-grid .card { min-height: 110px; max-height: 320px; }
+.overlay-grid .card .chart-wrap { position: relative; height: 180px; }
+
 /* ── Overlay (expander target) ────────────────────────────────────────── */
 
 #overlay {

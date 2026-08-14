@@ -223,6 +223,65 @@ describe("applyOps", () => {
   });
 });
 
+describe("new_topic (subject change)", () => {
+  it("archives the whole current board and clears it for the new subject", () => {
+    let state = applyOps(
+      emptyMagicUiState(NOW),
+      validateOps([
+        { op: "set_slot", slot: "cpu", html: "<p>CPU 2%</p>", area: "hero" },
+        { op: "chart", slot: "load", spec: { kind: "line", series: [{ label: "load", data: [1, 2] }] } },
+      ]),
+      NOW,
+    );
+    state = { ...state, currentTopicTitle: "Server health" };
+
+    state = applyOps(state, validateOps([
+      { op: "new_topic", title: "Project overview" },
+      { op: "set_slot", slot: "projects", html: "<p>84 commits</p>", area: "hero" },
+    ]), NOW + 10);
+
+    // Old board is gone from the visible slots...
+    expect(state.slots.cpu).toBeUndefined();
+    expect(state.slots.load).toBeUndefined();
+    expect(state.slots.projects).toBeDefined();
+    expect(state.currentTopicTitle).toBe("Project overview");
+    // ...and preserved as an archived topic under the PREVIOUS title.
+    expect(state.topics).toHaveLength(1);
+    expect(state.topics[0].title).toBe("Server health");
+    expect(state.topics[0].slots.cpu?.html).toContain("CPU 2%");
+    expect(state.topics[0].slots.load?.chart?.kind).toBe("line");
+    expect(state.topics[0].layout.length).toBeGreaterThan(0);
+  });
+
+  it("does not archive an empty board, just retitles", () => {
+    const state = applyOps(
+      emptyMagicUiState(NOW),
+      validateOps([{ op: "new_topic", title: "First subject" }]),
+      NOW,
+    );
+    expect(state.topics).toHaveLength(0);
+    expect(state.currentTopicTitle).toBe("First subject");
+  });
+
+  it("caps archived topics at the retention limit", () => {
+    let state = emptyMagicUiState(NOW);
+    for (let i = 0; i < 12; i++) {
+      state = applyOps(state, validateOps([
+        { op: "set_slot", slot: `s${i}`, html: `<p>${i}</p>` },
+        { op: "new_topic", title: `topic-${i}` },
+      ]), NOW + i);
+    }
+    // set_slot runs before new_topic in each batch, so every round archives.
+    expect(state.topics.length).toBeLessThanOrEqual(8);
+    // Newest first
+    expect(state.topics[0].slots[`s11`]).toBeDefined();
+  });
+
+  it("rejects a new_topic without a title", () => {
+    expect(validateOps([{ op: "new_topic" }, { op: "new_topic", title: "" }])).toEqual([]);
+  });
+});
+
 describe("appendDecision", () => {
   it("prepends server-generated entries and bumps the version", () => {
     const state = emptyMagicUiState(NOW);
