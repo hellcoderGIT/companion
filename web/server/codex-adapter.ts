@@ -485,7 +485,10 @@ export class CodexAdapter implements IBackendAdapter {
   private pendingApprovals = new Map<string, number>(); // request_id -> JSON-RPC id
 
   // Track request types that need different response formats
-  private pendingUserInputQuestionIds = new Map<string, string[]>(); // request_id -> ordered Codex question IDs
+  // request_id -> ordered Codex questions (id + text). The shared browser UI
+  // keys AskUserQuestion answers by question TEXT (index only as fallback for
+  // empty texts) — we need both to map answers back to Codex question IDs.
+  private pendingUserInputQuestions = new Map<string, Array<{ id: string; question: string }>>();
   private pendingReviewDecisions = new Set<string>(); // request_ids that need ReviewDecision format
   private pendingExitPlanModeRequests = new Set<string>(); // request_ids for ExitPlanMode approvals
   private pendingDynamicToolCalls = new Map<string, {
@@ -652,7 +655,7 @@ export class CodexAdapter implements IBackendAdapter {
       this.emit({ type: "permission_cancelled", request_id: requestId });
     }
     this.pendingApprovals.clear();
-    this.pendingUserInputQuestionIds.clear();
+    this.pendingUserInputQuestions.clear();
     this.pendingReviewDecisions.clear();
 
     // If an agentMessage was actively streaming, emit a synthetic
@@ -775,7 +778,7 @@ export class CodexAdapter implements IBackendAdapter {
       this.emit({ type: "permission_cancelled", request_id: requestId });
     }
     this.pendingApprovals.clear();
-    this.pendingUserInputQuestionIds.clear();
+    this.pendingUserInputQuestions.clear();
     this.pendingReviewDecisions.clear();
     this.emittedToolUseIds.clear();
     this.commandStartTimes.clear();
@@ -1361,9 +1364,9 @@ export class CodexAdapter implements IBackendAdapter {
       this.pendingApprovals.delete(msg.request_id);
 
       // User input requests (item/tool/requestUserInput) need ToolRequestUserInputResponse
-      const questionIds = this.pendingUserInputQuestionIds.get(msg.request_id);
-      if (questionIds) {
-        this.pendingUserInputQuestionIds.delete(msg.request_id);
+      const pendingQuestions = this.pendingUserInputQuestions.get(msg.request_id);
+      if (pendingQuestions) {
+        this.pendingUserInputQuestions.delete(msg.request_id);
 
         if (msg.behavior === "deny") {
           // Respond with empty answers on deny
@@ -1371,13 +1374,20 @@ export class CodexAdapter implements IBackendAdapter {
           return;
         }
 
-        // Convert browser answers (keyed by index "0","1",...) to Codex format (keyed by question ID)
+        // Convert browser answers to Codex format (keyed by question ID).
+        // The shared AskUserQuestion UI keys answers by question TEXT — the
+        // CLI-side contract since ecc9d07 — with the index as fallback for
+        // questions with empty text. Accept BOTH keyings so older clients
+        // (and queued index-keyed responses) keep working.
         const browserAnswers = msg.updated_input?.answers as Record<string, string> || {};
         const codexAnswers: Record<string, { answers: string[] }> = {};
-        for (let i = 0; i < questionIds.length; i++) {
-          const answer = browserAnswers[String(i)];
+        for (let i = 0; i < pendingQuestions.length; i++) {
+          const { id, question } = pendingQuestions[i];
+          const answer = question && browserAnswers[question] !== undefined
+            ? browserAnswers[question]
+            : browserAnswers[String(i)];
           if (answer !== undefined) {
-            codexAnswers[questionIds[i]] = { answers: [answer] };
+            codexAnswers[id] = { answers: [answer] };
           }
         }
 
@@ -1995,8 +2005,12 @@ export class CodexAdapter implements IBackendAdapter {
       options: Array<{ label: string; description: string }> | null;
     }> || [];
 
-    // Store question IDs so we can map browser indices back to Codex IDs in the response
-    this.pendingUserInputQuestionIds.set(requestId, questions.map((q) => q.id));
+    // Store question IDs + texts so we can map the browser's text-keyed
+    // (or index-keyed fallback) answers back to Codex IDs in the response.
+    this.pendingUserInputQuestions.set(
+      requestId,
+      questions.map((q) => ({ id: q.id, question: q.question })),
+    );
 
     // Convert to our AskUserQuestion format (matches AskUserQuestionDisplay component)
     const perm: PermissionRequest = {
