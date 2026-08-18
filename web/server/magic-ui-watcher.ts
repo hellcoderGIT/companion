@@ -33,7 +33,6 @@ import {
   validateOps,
 } from "./magic-ui-ops.js";
 import {
-  emptyMagicUiState,
   type MagicUiDashboardState,
   type MagicUiStatus,
 } from "./magic-ui-types.js";

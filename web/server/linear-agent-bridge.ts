@@ -10,7 +10,6 @@
 
 import type { AgentExecutor } from "./agent-executor.js";
 import type { WsBridge } from "./ws-bridge.js";
-import type { BrowserIncomingMessage } from "./session-types.js";
 import type { AgentConfig } from "./agent-types.js";
 import * as agentStore from "./agent-store.js";
 import * as linearAgent from "./linear-agent.js";
