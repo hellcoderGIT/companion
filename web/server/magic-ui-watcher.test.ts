@@ -286,3 +286,88 @@ describe("MagicUiWatcherManager", () => {
     manager.shutdown();
   });
 });
+
+// The watcher's query can die at any time (SDK error, auth failure, killed
+// subprocess). handleCrash retries it with exponential backoff and gives up
+// into a "degraded" status after MAX_CRASH_RETRIES, so a permanently broken
+// watcher stops burning tokens instead of hot-looping forever.
+describe("MagicUiWatcher crash handling", () => {
+  /** A query that always throws, counting how many times it was started. */
+  function makeCrashingQuery() {
+    let calls = 0;
+    const fn = (() => {
+      calls += 1;
+      // eslint-disable-next-line require-yield
+      async function* gen(): AsyncGenerator<never> {
+        throw new Error("query exploded");
+      }
+      return gen();
+    }) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query;
+    return { fn, calls: () => calls };
+  }
+
+  function makeCrashWatcher() {
+    const { fn, calls } = makeCrashingQuery();
+    const watcher = new MagicUiWatcher("sess-1", {
+      broadcast: (sessionId, msg) => broadcasts.push({ sessionId, msg }),
+      store: store as unknown as MagicUiStore,
+      model: "claude-haiku-4-5",
+      queryFn: fn,
+    });
+    return { watcher, calls };
+  }
+
+  it("retries a crashed query with exponential backoff, then degrades", async () => {
+    vi.useFakeTimers();
+    try {
+      const { watcher, calls } = makeCrashWatcher();
+      watcher.start();
+
+      // First attempt crashes almost immediately.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls()).toBe(1);
+
+      // Backoff is 2s, then 4s, then 8s — capped at 30s. Nothing should
+      // restart before the delay elapses.
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(calls()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls()).toBe(2);
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(calls()).toBe(3);
+
+      await vi.advanceTimersByTimeAsync(8_000);
+      expect(calls()).toBe(4);
+
+      // The 4th crash exceeds MAX_CRASH_RETRIES (3): give up rather than
+      // retry a 5th time, and surface the failure to the browser.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(calls()).toBe(4);
+
+      const last = broadcasts.at(-1);
+      expect((last?.msg as { state: MagicUiDashboardState }).state.status).toBe("degraded");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry after the watcher has been stopped", async () => {
+    vi.useFakeTimers();
+    try {
+      const { watcher, calls } = makeCrashWatcher();
+      watcher.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls()).toBe(1);
+
+      // A stop() racing a pending backoff must win — otherwise a stopped
+      // session keeps spawning Haiku queries in the background.
+      watcher.stop();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(calls()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
