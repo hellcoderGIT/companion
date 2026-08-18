@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.117.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.116.0...companion-v0.117.0) (2026-08-18)
+
+
+### Features
+
+* **magic-ui:** AI-generated live dashboard session view ([#111](https://github.com/hellcoderGIT/companion/issues/111)) ([d191f06](https://github.com/hellcoderGIT/companion/commit/d191f06b38535c2e45ae91e91f5fb885d447f939))
+* **magic-ui:** archive the board into reopenable topic chips on subject change ([#114](https://github.com/hellcoderGIT/companion/issues/114)) ([93fba26](https://github.com/hellcoderGIT/companion/commit/93fba265166ef8b7acede4d5976b684aae061039))
+* **task-panel:** add server disk and swap meters ([#115](https://github.com/hellcoderGIT/companion/issues/115)) ([a7d2ff7](https://github.com/hellcoderGIT/companion/commit/a7d2ff7b25067942d4f51f22af4781e6d4b05317))
+
+
+### Bug Fixes
+
+* **codex:** accept question-text-keyed AskUserQuestion answers ([#113](https://github.com/hellcoderGIT/companion/issues/113)) ([2d329a2](https://github.com/hellcoderGIT/companion/commit/2d329a23f8e272fbbbbe51494da7386c195a8159))
+
 ## [0.116.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.115.0...companion-v0.116.0) (2026-08-10)
 
 
