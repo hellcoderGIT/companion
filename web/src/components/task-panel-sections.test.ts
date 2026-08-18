@@ -32,10 +32,13 @@ describe("getInitialTaskPanelConfig", () => {
   it("restores a valid saved config from localStorage", () => {
     // Save a config with a custom order and one section disabled
     const saved = {
-      order: ["tasks", "git-branch", "usage-limits", "server-memory", "github-pr", "linear-issue", "mcp-servers"],
+      // Must list every current section ID — this test asserts the order is
+      // preserved verbatim, which only holds when nothing needs appending.
+      order: ["tasks", "git-branch", "usage-limits", "server-memory", "server-disk", "github-pr", "linear-issue", "mcp-servers"],
       enabled: {
         "usage-limits": true,
         "server-memory": true,
+        "server-disk": true,
         "git-branch": true,
         "github-pr": false,
         "linear-issue": true,
@@ -68,13 +71,15 @@ describe("getInitialTaskPanelConfig", () => {
 
     const config = getInitialTaskPanelConfig();
     // The missing sections should be appended at the end, in definition order
-    // (server-memory comes before mcp-servers/tasks in SECTION_DEFINITIONS).
+    // (server-memory/server-disk come before mcp-servers/tasks in
+    // SECTION_DEFINITIONS).
     expect(config.order).toEqual([
       "usage-limits", "git-branch", "github-pr", "linear-issue",
-      "server-memory", "mcp-servers", "tasks",
+      "server-memory", "server-disk", "mcp-servers", "tasks",
     ]);
     // New sections should be enabled by default
     expect(config.enabled["server-memory"]).toBe(true);
+    expect(config.enabled["server-disk"]).toBe(true);
     expect(config.enabled["mcp-servers"]).toBe(true);
     expect(config.enabled["tasks"]).toBe(true);
     // Existing disabled state should be preserved
@@ -84,10 +89,11 @@ describe("getInitialTaskPanelConfig", () => {
   it("filters out removed sections that no longer exist in SECTION_DEFINITIONS", () => {
     // Simulate a saved config that includes a section ID that no longer exists
     const saved = {
-      order: ["usage-limits", "server-memory", "old-removed-section", "git-branch", "github-pr", "linear-issue", "mcp-servers", "tasks"],
+      order: ["usage-limits", "server-memory", "server-disk", "old-removed-section", "git-branch", "github-pr", "linear-issue", "mcp-servers", "tasks"],
       enabled: {
         "usage-limits": true,
         "server-memory": true,
+        "server-disk": true,
         "old-removed-section": true,
         "git-branch": true,
         "github-pr": true,
@@ -103,7 +109,7 @@ describe("getInitialTaskPanelConfig", () => {
     expect(config.order).not.toContain("old-removed-section");
     // All valid sections should remain in their saved order
     expect(config.order).toEqual([
-      "usage-limits", "server-memory", "git-branch", "github-pr", "linear-issue", "mcp-servers", "tasks",
+      "usage-limits", "server-memory", "server-disk", "git-branch", "github-pr", "linear-issue", "mcp-servers", "tasks",
     ]);
   });
 
@@ -130,7 +136,12 @@ describe("getInitialTaskPanelConfig", () => {
     expect(config.order).toContain("linear-issue");
     expect(config.order).toContain("mcp-servers");
     expect(config.order).toContain("tasks");
-    expect(config.order.length).toBe(7);
+    expect(config.order).toContain("server-disk");
+    // Derived from SECTION_DEFINITIONS rather than hardcoded: the invariant
+    // under test is "every valid section present exactly once, nothing else",
+    // not the specific number of sections that happen to exist today.
+    expect(config.order.length).toBe(SECTION_DEFINITIONS.length);
+    expect(new Set(config.order).size).toBe(config.order.length);
   });
 
   it("returns defaults when localStorage contains corrupted JSON", () => {

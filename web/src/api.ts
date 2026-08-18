@@ -394,6 +394,19 @@ export interface SystemMemoryInfo {
   used_bytes: number;
   available_bytes: number;
   used_percent: number;
+  /** 0 when no swap is configured or the host does not report it. */
+  swap_total_bytes: number;
+  swap_used_bytes: number;
+  swap_used_percent: number;
+}
+
+export interface SystemDiskInfo {
+  total_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
+  used_percent: number;
+  /** Filesystem path the figures were measured for (the Companion data dir). */
+  path: string;
 }
 
 export interface UsageLimits {
@@ -1306,6 +1319,8 @@ export const api = {
   getSessionUsageLimits: (sessionId: string) =>
     get<UsageLimits>(`/sessions/${encodeURIComponent(sessionId)}/usage-limits`),
   getSystemMemory: () => get<SystemMemoryInfo>("/system/memory"),
+  /** Resolves null when statfs is unavailable on the host. */
+  getSystemDisk: () => get<SystemDiskInfo | null>("/system/disk"),
 
   // Terminal
   spawnTerminal: (cwd: string, cols?: number, rows?: number, opts?: { containerId?: string }) =>

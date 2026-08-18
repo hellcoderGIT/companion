@@ -7,6 +7,7 @@ vi.mock("../api.js", () => ({
   api: {
     getSessionUsageLimits: vi.fn().mockRejectedValue(new Error("skip")),
     getSystemMemory: vi.fn().mockRejectedValue(new Error("skip")),
+    getSystemDisk: vi.fn().mockRejectedValue(new Error("skip")),
     getPRStatus: vi.fn().mockRejectedValue(new Error("skip")),
     getLinkedLinearIssue: vi.fn().mockResolvedValue({ issue: null }),
     gitPull: vi.fn().mockResolvedValue({ success: true, git_ahead: 0, git_behind: 0, output: "" }),
@@ -1584,6 +1585,10 @@ describe("ServerMemorySection", () => {
       used_bytes: 4 * 1024 ** 3, // 4 GB
       available_bytes: 4 * 1024 ** 3,
       used_percent: 50,
+      // No swap configured on this host — the swap meter must stay hidden.
+      swap_total_bytes: 0,
+      swap_used_bytes: 0,
+      swap_used_percent: 0,
     });
     resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
     render(<TaskPanel sessionId="s1" />);
@@ -1592,6 +1597,30 @@ describe("ServerMemorySection", () => {
     expect(screen.getByText("50%")).toBeInTheDocument();
     // Detail shows human-readable used / total.
     expect(screen.getByText(/4\.0 GB \/ 8\.0 GB/)).toBeInTheDocument();
+    // swap_total_bytes === 0 means "no swap on this host" — showing a 0% bar
+    // would read as reassuring headroom rather than "not applicable".
+    expect(screen.queryByText("Swap")).not.toBeInTheDocument();
+  });
+
+  it("renders a swap meter beneath memory when the host has swap", async () => {
+    mockApi.getSystemMemory.mockResolvedValueOnce({
+      total_bytes: 8 * 1024 ** 3,
+      used_bytes: 7 * 1024 ** 3,
+      available_bytes: 1 * 1024 ** 3,
+      used_percent: 87.5,
+      swap_total_bytes: 4 * 1024 ** 3, // 4 GB swap
+      swap_used_bytes: 3 * 1024 ** 3, // 3 GB used — thrashing territory
+      swap_used_percent: 75,
+    });
+    resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
+    render(<TaskPanel sessionId="s1" />);
+
+    // Both meters visible together: swap pressure is only interpretable
+    // alongside the RAM figure it accompanies.
+    expect(await screen.findByText("Memory")).toBeInTheDocument();
+    expect(screen.getByText("Swap")).toBeInTheDocument();
+    expect(screen.getByText("75%")).toBeInTheDocument();
+    expect(screen.getByText(/3\.0 GB \/ 4\.0 GB/)).toBeInTheDocument();
   });
 
   it("renders nothing until memory data resolves (silent on failure)", () => {
@@ -1599,6 +1628,59 @@ describe("ServerMemorySection", () => {
     resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
     render(<TaskPanel sessionId="s1" />);
     expect(screen.queryByText("Memory")).not.toBeInTheDocument();
+  });
+});
+
+// The server-disk section polls api.getSystemDisk and renders a meter for the
+// volume holding the Companion data dir (sessions/recordings/logs). The detail
+// deliberately shows FREE space rather than used/total — free is the number an
+// operator acts on when deciding whether to clean up.
+describe("ServerDiskSection", () => {
+  it("renders the disk meter with percentage and free-space detail", async () => {
+    mockApi.getSystemDisk.mockResolvedValueOnce({
+      total_bytes: 100 * 1024 ** 3, // 100 GB
+      used_bytes: 75 * 1024 ** 3,
+      available_bytes: 25 * 1024 ** 3, // 25 GB free
+      used_percent: 75,
+      path: "/root/.companion",
+    });
+    resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
+    render(<TaskPanel sessionId="s1" />);
+
+    expect(await screen.findByText("Disk")).toBeInTheDocument();
+    expect(screen.getByText("75%")).toBeInTheDocument();
+    expect(screen.getByText(/25\.0 GB free/)).toBeInTheDocument();
+  });
+
+  it("formats terabyte-scale volumes with a TB unit", async () => {
+    // Guards the TB branch of formatDisk — a 4 TB array must not render as
+    // "4096.0 GB free".
+    mockApi.getSystemDisk.mockResolvedValueOnce({
+      total_bytes: 8 * 1024 ** 4,
+      used_bytes: 4 * 1024 ** 4,
+      available_bytes: 4 * 1024 ** 4,
+      used_percent: 50,
+      path: "/data/companion",
+    });
+    resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
+    render(<TaskPanel sessionId="s1" />);
+
+    expect(await screen.findByText(/4\.0 TB free/)).toBeInTheDocument();
+  });
+
+  it("renders nothing when the server reports null (statfs unavailable)", async () => {
+    // The server sends JSON null rather than 204 so the client's res.json()
+    // never throws; the section must treat that as "no meter".
+    mockApi.getSystemDisk.mockResolvedValueOnce(null);
+    resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
+    render(<TaskPanel sessionId="s1" />);
+    expect(screen.queryByText("Disk")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing until disk data resolves (silent on failure)", () => {
+    resetStore({ sessions: new Map([["s1", { backend_type: "claude" }]]) });
+    render(<TaskPanel sessionId="s1" />);
+    expect(screen.queryByText("Disk")).not.toBeInTheDocument();
   });
 });
 

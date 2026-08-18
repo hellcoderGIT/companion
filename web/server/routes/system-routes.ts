@@ -4,6 +4,7 @@ import type { WsBridge } from "../ws-bridge.js";
 import type { TerminalManager } from "../terminal-manager.js";
 import { getUsageLimits } from "../usage-limits.js";
 import { getSystemMemory } from "../system-memory.js";
+import { getSystemDisk } from "../system-disk.js";
 import {
   getUpdateState,
   checkForUpdate,
@@ -47,6 +48,15 @@ export function registerSystemRoutes(
 
   api.get("/system/memory", (c) => {
     return c.json(getSystemMemory());
+  });
+
+  // Free space on the volume holding COMPANION_HOME. Backed by a single
+  // statfs(2) call, so it is cheap enough to poll without caching.
+  api.get("/system/disk", (c) => {
+    // JSON null rather than 204: the browser client calls res.json()
+    // unconditionally, and an empty body would throw and register a spurious
+    // API failure on every poll.
+    return c.json(getSystemDisk());
   });
 
   api.get("/sessions/:id/usage-limits", async (c) => {
