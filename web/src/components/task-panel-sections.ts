@@ -38,6 +38,12 @@ export const SECTION_DEFINITIONS: TaskPanelSectionDef[] = [
     backends: null,
   },
   {
+    id: "server-disk",
+    label: "Server Disk",
+    description: "Free space on the Companion data volume",
+    backends: null,
+  },
+  {
     id: "git-branch",
     label: "Git Branch",
     description: "Current branch, ahead/behind, and line changes",

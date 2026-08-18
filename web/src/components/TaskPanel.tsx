@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, type ComponentType, type ReactNode } from "react";
 import { useStore } from "../store.js";
-import { api, type UsageLimits, type SystemMemoryInfo, type GitHubPRInfo, type LinearIssue, type LinearComment } from "../api.js";
+import { api, type UsageLimits, type SystemMemoryInfo, type SystemDiskInfo, type GitHubPRInfo, type LinearIssue, type LinearComment } from "../api.js";
 import type { TaskItem, SdkSessionInfo } from "../types.js";
 import { McpSection } from "./McpPanel.js";
 import { LinearLogo } from "./LinearLogo.js";
@@ -15,6 +15,8 @@ const EMPTY_TASKS: TaskItem[] = [];
 const COUNTDOWN_REFRESH_MS = 30_000;
 // Server memory is slow-moving and cheap to read; a 1-minute poll is plenty.
 const MEMORY_REFRESH_MS = 60_000;
+// Disk moves slower still, and the read is one statfs syscall. Five minutes.
+const DISK_REFRESH_MS = 5 * 60_000;
 
 /** Shared SDK session Map — rebuilt only when the sdkSessions array reference changes. */
 let _cachedSdkArr: unknown = null;
@@ -334,11 +336,75 @@ function ServerMemorySection(_: { sessionId: string }) {
   if (!mem) return null;
 
   return (
-    <div className="shrink-0 px-4 py-2.5">
+    <div className="shrink-0 px-4 py-2.5 space-y-2">
       <ProgressMeter
         label="Memory"
         pct={mem.used_percent}
         detail={`${formatMemory(mem.used_bytes)} / ${formatMemory(mem.total_bytes)}`}
+      />
+      {/*
+        Swap sits directly under RAM because the two are only meaningful
+        together: heavy swap use alongside high RAM use is the thrashing state
+        that precedes the OOM killer. Hidden entirely on hosts with no swap
+        configured (swap_total_bytes === 0), where an empty bar would read as
+        "0% used — plenty of headroom" rather than "not applicable".
+      */}
+      {mem.swap_total_bytes > 0 && (
+        <ProgressMeter
+          label="Swap"
+          pct={mem.swap_used_percent}
+          detail={`${formatMemory(mem.swap_used_bytes)} / ${formatMemory(mem.swap_total_bytes)}`}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Format a byte count for disk scale — like formatMemory but with a TB step. */
+function formatDisk(bytes: number): string {
+  const tb = bytes / 1024 ** 4;
+  if (tb >= 1) return `${tb.toFixed(1)} TB`;
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${Math.round(bytes / 1024 ** 2)} MB`;
+}
+
+/**
+ * Free-space meter for the volume holding the Companion data directory
+ * (sessions, recordings, logs). Polled on a slow interval — the backend read
+ * is a single statfs syscall, never a `du`-style tree walk, so this stays
+ * cheap even on a box with thousands of session files.
+ */
+function ServerDiskSection(_: { sessionId: string }) {
+  const [disk, setDisk] = useState<SystemDiskInfo | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchDisk = async () => {
+      try {
+        const data = await api.getSystemDisk();
+        if (!cancelled) setDisk(data);
+      } catch {
+        // silent — the disk bar is best-effort
+      }
+    };
+    fetchDisk();
+    const id = setInterval(fetchDisk, DISK_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // null also covers hosts where statfs is unavailable (server sends JSON null).
+  if (!disk) return null;
+
+  return (
+    <div className="shrink-0 px-4 py-2.5">
+      <ProgressMeter
+        label="Disk"
+        pct={disk.used_percent}
+        detail={`${formatDisk(disk.available_bytes)} free`}
       />
     </div>
   );
@@ -1093,6 +1159,7 @@ function TasksSection({ sessionId }: { sessionId: string }) {
 const SECTION_COMPONENTS: Record<string, ComponentType<{ sessionId: string }>> = {
   "usage-limits": UsageLimitsRenderer,
   "server-memory": ServerMemorySection,
+  "server-disk": ServerDiskSection,
   "git-branch": GitBranchSection,
   "github-pr": GitHubPRSection,
   "linear-issue": LinearIssueSection,

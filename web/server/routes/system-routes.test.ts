@@ -30,6 +30,55 @@ vi.mock("../service.js", () => ({
   refreshServiceDefinition: vi.fn(),
 }));
 
+// ─── Mock claude-compat checker ────────────────────────────────────────────
+// The compat routes gate the post-2.1.121 --sdk-url lockdown workarounds.
+// Everything here touches the real Claude binary on disk, so it is mocked
+// wholesale — these tests exercise the route logic, never the filesystem.
+vi.mock("../claude-compat-checker.js", () => ({
+  checkCompat: vi.fn(async () => {}),
+  getCompatState: vi.fn(() => ({
+    installedVersion: "2.1.130",
+    installedPath: "/usr/local/bin/claude",
+    isIncompatible: true,
+    isPatched: false,
+    availableKnownGood: ["2.1.119", "2.1.120"],
+    suggestedPinTarget: "2.1.120",
+    lastChecked: 0,
+    error: null,
+  })),
+}));
+
+// ─── Mock claude-patcher ───────────────────────────────────────────────────
+vi.mock("../claude-patcher.js", () => ({
+  pinToVersion: vi.fn(async () => ({ ok: true })),
+  patchBinary: vi.fn(async () => ({
+    ok: true,
+    patchedPath: "/usr/local/bin/claude",
+    replacements: 3,
+  })),
+  unpatch: vi.fn(async () => ({ ok: true, target: "2.1.130" })),
+}));
+
+// ─── Mock settings-manager ─────────────────────────────────────────────────
+vi.mock("../settings-manager.js", () => ({
+  getSettings: vi.fn(() => ({
+    claudeBridgeMode: "none",
+    claudeBridgeIngressUrl: "",
+    claudeCompatBannerDismissedVersion: "",
+    dockerAutoUpdate: false,
+  })),
+  updateSettings: vi.fn(),
+}));
+
+// ─── Mock cli-ingress-server ───────────────────────────────────────────────
+// Starting the real one binds a TLS listener.
+vi.mock("../cli-ingress-server.js", () => ({
+  startCliIngressServer: vi.fn(async () => ({
+    urlPrefix: "wss://[::1]:8443",
+    stop: vi.fn(),
+  })),
+}));
+
 import { Hono } from "hono";
 import { getUsageLimits } from "../usage-limits.js";
 import {
@@ -39,6 +88,9 @@ import {
   setUpdateInProgress,
 } from "../update-checker.js";
 import { registerSystemRoutes } from "./system-routes.js";
+import { checkCompat, getCompatState } from "../claude-compat-checker.js";
+import { pinToVersion, patchBinary, unpatch } from "../claude-patcher.js";
+import { getSettings, updateSettings } from "../settings-manager.js";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -75,8 +127,39 @@ let launcher: ReturnType<typeof createMockLauncher>;
 let wsBridge: ReturnType<typeof createMockWsBridge>;
 let terminalManager: ReturnType<typeof createMockTerminalManager>;
 
+/** Default compat state: an incompatible CLI with a known-good pin target. */
+function defaultCompatState() {
+  return {
+    installedVersion: "2.1.130",
+    installedPath: "/usr/local/bin/claude",
+    isIncompatible: true,
+    isPatched: false,
+    availableKnownGood: ["2.1.119", "2.1.120"],
+    suggestedPinTarget: "2.1.120",
+    lastChecked: 0,
+    error: null,
+  };
+}
+
 beforeEach(() => {
+  // clearAllMocks() resets call history but NOT implementations, so a
+  // mockReturnValue set inside one test leaks into every later one. Restoring
+  // the defaults here keeps the suite order-independent.
   vi.clearAllMocks();
+  vi.mocked(getCompatState).mockReturnValue(defaultCompatState() as any);
+  vi.mocked(pinToVersion).mockResolvedValue({ ok: true } as any);
+  vi.mocked(patchBinary).mockResolvedValue({
+    ok: true,
+    patchedPath: "/usr/local/bin/claude",
+    replacements: 3,
+  } as any);
+  vi.mocked(unpatch).mockResolvedValue({ ok: true, target: "2.1.130" } as any);
+  vi.mocked(getSettings).mockReturnValue({
+    claudeBridgeMode: "none",
+    claudeBridgeIngressUrl: "",
+    claudeCompatBannerDismissedVersion: "",
+    dockerAutoUpdate: false,
+  } as any);
 
   launcher = createMockLauncher();
   wsBridge = createMockWsBridge();
@@ -633,5 +716,323 @@ describe("POST /api/sessions/:id/message", () => {
     expect(res2.status).toBe(400);
     const json2 = await res2.json();
     expect(json2.error).toMatch(/content/i);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /api/system/memory  and  GET /api/system/disk
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("GET /api/system/memory", () => {
+  it("returns a memory snapshot including swap fields", async () => {
+    const res = await app.request("/api/system/memory");
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(json.total_bytes).toBeGreaterThan(0);
+    expect(json.used_bytes).toBeLessThanOrEqual(json.total_bytes);
+    // Swap must always be present, even on a host with none configured —
+    // the UI keys off swap_total_bytes === 0 to hide the meter.
+    expect(typeof json.swap_total_bytes).toBe("number");
+    expect(typeof json.swap_used_bytes).toBe("number");
+    expect(typeof json.swap_used_percent).toBe("number");
+  });
+});
+
+describe("GET /api/system/disk", () => {
+  it("returns a disk snapshot for the Companion data volume", async () => {
+    const res = await app.request("/api/system/disk");
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    // getSystemDisk returns null when statfs is unavailable; the route passes
+    // that through as JSON null rather than an empty 204 body.
+    if (json === null) return;
+
+    expect(json.total_bytes).toBeGreaterThan(0);
+    expect(json.used_bytes).toBe(json.total_bytes - json.available_bytes);
+    expect(json.used_percent).toBeGreaterThanOrEqual(0);
+    expect(json.used_percent).toBeLessThanOrEqual(100);
+    expect(typeof json.path).toBe("string");
+  });
+
+  it("always responds 200 with a JSON body, never an empty 204", async () => {
+    // The browser client calls res.json() unconditionally — an empty body
+    // would throw and log a spurious API failure on every poll.
+    const res = await app.request("/api/system/disk");
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.not.toThrow();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POST /api/update — guard branches only
+// ═══════════════════════════════════════════════════════════════════════════
+
+// The success path spawns `bun install -g` and calls process.exit(), so these
+// tests deliberately cover only the three refusal branches.
+describe("POST /api/update (guards)", () => {
+  it("returns 400 when not running as a service", async () => {
+    vi.mocked(getUpdateState).mockReturnValue({
+      currentVersion: "1.0.0", latestVersion: "1.1.0", lastChecked: 0,
+      isServiceMode: false, checking: false, updateInProgress: false, channel: "stable",
+    } as any);
+
+    const res = await app.request("/api/update", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/service mode/i);
+    expect(setUpdateInProgress).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when no update is available", async () => {
+    vi.mocked(getUpdateState).mockReturnValue({
+      currentVersion: "1.0.0", latestVersion: "1.0.0", lastChecked: 0,
+      isServiceMode: true, checking: false, updateInProgress: false, channel: "stable",
+    } as any);
+    vi.mocked(isUpdateAvailable).mockReturnValue(false);
+
+    const res = await app.request("/api/update", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/no update/i);
+  });
+
+  it("returns 409 when an update is already in progress", async () => {
+    vi.mocked(getUpdateState).mockReturnValue({
+      currentVersion: "1.0.0", latestVersion: "1.1.0", lastChecked: 0,
+      isServiceMode: true, checking: false, updateInProgress: true, channel: "stable",
+    } as any);
+    vi.mocked(isUpdateAvailable).mockReturnValue(true);
+
+    const res = await app.request("/api/update", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/already in progress/i);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Terminal routes
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("terminal routes", () => {
+  it("GET /api/terminal reports inactive when no terminal exists", async () => {
+    terminalManager.getInfo.mockReturnValue(null);
+    const res = await app.request("/api/terminal");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ active: false });
+  });
+
+  it("GET /api/terminal returns the terminal id and cwd when active", async () => {
+    terminalManager.getInfo.mockReturnValue({ id: "t-1", cwd: "/repo" });
+    const res = await app.request("/api/terminal?terminalId=t-1");
+    expect(await res.json()).toEqual({ active: true, terminalId: "t-1", cwd: "/repo" });
+    expect(terminalManager.getInfo).toHaveBeenCalledWith("t-1");
+  });
+
+  it("POST /api/terminal/spawn requires a cwd", async () => {
+    const res = await app.request("/api/terminal/spawn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/cwd/i);
+    expect(terminalManager.spawn).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/terminal/spawn passes dimensions and container through", async () => {
+    const res = await app.request("/api/terminal/spawn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/repo", cols: 120, rows: 40, containerId: "c-1" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ terminalId: "terminal-123" });
+    expect(terminalManager.spawn).toHaveBeenCalledWith("/repo", 120, 40, { containerId: "c-1" });
+  });
+
+  it("POST /api/terminal/kill requires a terminalId", async () => {
+    // Covers both a missing body and a whitespace-only id.
+    const res1 = await app.request("/api/terminal/kill", { method: "POST" });
+    expect(res1.status).toBe(400);
+
+    const res2 = await app.request("/api/terminal/kill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ terminalId: "  " }),
+    });
+    expect(res2.status).toBe(400);
+    expect(terminalManager.kill).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/terminal/kill kills the named terminal", async () => {
+    const res = await app.request("/api/terminal/kill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ terminalId: "t-1" }),
+    });
+    expect(res.status).toBe(200);
+    expect(terminalManager.kill).toHaveBeenCalledWith("t-1");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Claude compatibility routes (--sdk-url lockdown workarounds)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("GET /api/claude-compat", () => {
+  it("refreshes when the cached state is stale, then returns the payload", async () => {
+    // lastChecked === 0 means "never checked" — must trigger a refresh.
+    const res = await app.request("/api/claude-compat");
+    expect(res.status).toBe(200);
+    expect(checkCompat).toHaveBeenCalled();
+
+    const json = await res.json();
+    expect(json.installedVersion).toBe("2.1.130");
+    expect(json.isIncompatible).toBe(true);
+    expect(json.suggestedPinTarget).toBe("2.1.120");
+    // Settings-derived fields are merged into the same payload.
+    expect(json.bridgeMode).toBe("none");
+    expect(json.bannerDismissedVersion).toBe("");
+  });
+
+  it("skips the refresh when the cached state is fresh", async () => {
+    vi.mocked(getCompatState).mockReturnValue({
+      installedVersion: "2.1.130", installedPath: "/usr/local/bin/claude",
+      isIncompatible: false, isPatched: false, availableKnownGood: [],
+      suggestedPinTarget: "", lastChecked: Date.now(), error: null,
+    } as any);
+
+    await app.request("/api/claude-compat");
+    expect(checkCompat).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/claude-compat/refresh", () => {
+  it("always re-checks and returns the fresh payload", async () => {
+    const res = await app.request("/api/claude-compat/refresh", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(checkCompat).toHaveBeenCalled();
+    expect((await res.json()).installedVersion).toBe("2.1.130");
+  });
+});
+
+describe("POST /api/claude-compat/pin", () => {
+  it("pins to the suggested target and disables patched bridge mode", async () => {
+    const res = await app.request("/api/claude-compat/pin", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(pinToVersion).toHaveBeenCalledWith("2.1.120");
+
+    // Pinning returns to a non-validator binary, so the bridge must be turned
+    // off — otherwise the CLI keeps being pointed at wss://[::1].
+    expect(updateSettings).toHaveBeenCalledWith({
+      claudeBridgeMode: "none",
+      claudeBridgeIngressUrl: "",
+    });
+    expect((await res.json()).pinnedTo).toBe("2.1.120");
+  });
+
+  it("honours an explicit version from the body", async () => {
+    await app.request("/api/claude-compat/pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: "2.1.119" }),
+    });
+    expect(pinToVersion).toHaveBeenCalledWith("2.1.119");
+  });
+
+  it("returns 400 when no known-good version is available to pin to", async () => {
+    vi.mocked(getCompatState).mockReturnValue({
+      installedVersion: "2.1.130", installedPath: "/usr/local/bin/claude",
+      isIncompatible: true, isPatched: false, availableKnownGood: [],
+      suggestedPinTarget: "", lastChecked: 0, error: null,
+    } as any);
+
+    const res = await app.request("/api/claude-compat/pin", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/known-good/i);
+    expect(pinToVersion).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a pin failure as 400", async () => {
+    vi.mocked(pinToVersion).mockResolvedValue({ ok: false, error: "download failed" } as any);
+    const res = await app.request("/api/claude-compat/pin", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("download failed");
+  });
+});
+
+describe("POST /api/claude-compat/patch", () => {
+  it("patches the binary, starts the ingress listener and persists the URL", async () => {
+    const res = await app.request("/api/claude-compat/patch", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(patchBinary).toHaveBeenCalled();
+
+    const json = await res.json();
+    expect(json.replacements).toBe(3);
+    expect(updateSettings).toHaveBeenCalledWith({
+      claudeBridgeMode: "patched",
+      claudeBridgeIngressUrl: "wss://[::1]:8443",
+    });
+  });
+
+  it("returns 400 when the binary cannot be patched", async () => {
+    vi.mocked(patchBinary).mockResolvedValue({ ok: false, error: "unknown layout" } as any);
+    const res = await app.request("/api/claude-compat/patch", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("unknown layout");
+  });
+});
+
+describe("POST /api/claude-compat/unpatch", () => {
+  it("restores the binary and clears bridge settings", async () => {
+    const res = await app.request("/api/claude-compat/unpatch", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(unpatch).toHaveBeenCalled();
+    expect(updateSettings).toHaveBeenCalledWith({
+      claudeBridgeMode: "none",
+      claudeBridgeIngressUrl: "",
+    });
+    expect((await res.json()).target).toBe("2.1.130");
+  });
+
+  it("returns 400 when unpatching fails", async () => {
+    vi.mocked(unpatch).mockResolvedValue({ ok: false, error: "no backup" } as any);
+    const res = await app.request("/api/claude-compat/unpatch", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("no backup");
+  });
+});
+
+describe("POST /api/claude-compat/dismiss-banner", () => {
+  it("records the explicitly supplied version", async () => {
+    const res = await app.request("/api/claude-compat/dismiss-banner", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: "2.1.131" }),
+    });
+    expect(res.status).toBe(200);
+    expect(updateSettings).toHaveBeenCalledWith({
+      claudeCompatBannerDismissedVersion: "2.1.131",
+    });
+  });
+
+  it("falls back to the currently installed version", async () => {
+    const res = await app.request("/api/claude-compat/dismiss-banner", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(updateSettings).toHaveBeenCalledWith({
+      claudeCompatBannerDismissedVersion: "2.1.130",
+    });
+  });
+
+  it("returns 400 when there is no version to record", async () => {
+    vi.mocked(getCompatState).mockReturnValue({
+      installedVersion: null, installedPath: null, isIncompatible: false,
+      isPatched: false, availableKnownGood: [], suggestedPinTarget: "",
+      lastChecked: 0, error: null,
+    } as any);
+
+    const res = await app.request("/api/claude-compat/dismiss-banner", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/version/i);
   });
 });
