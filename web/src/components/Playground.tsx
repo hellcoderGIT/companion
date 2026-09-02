@@ -318,7 +318,7 @@ const MSG_ASSISTANT: ChatMessage = {
   contentBlocks: [
     {
       type: "text",
-      text: "I'll help you refactor the authentication module. Let me first look at the current implementation.\n\nHere's what I found:\n- The current auth uses **session cookies** via `express-session`\n- Sessions are stored in a `MemoryStore` (not production-ready)\n- The middleware checks `req.session.userId`\n\n```typescript\n// Current implementation\napp.use(session({\n  secret: process.env.SESSION_SECRET,\n  resave: false,\n  saveUninitialized: false,\n}));\n```\n\n| Feature | Cookies | JWT |\n|---------|---------|-----|\n| Stateless | No | Yes |\n| Scalable | Limited | Excellent |\n| Revocation | Easy | Needs blocklist |\n",
+      text: "I'll help you refactor the authentication module. Let me first look at the current implementation.\n\nHere's what I found:\n- The current auth uses **session cookies** via `express-session`\n- Sessions are stored in a `MemoryStore` (not production-ready)\n- The middleware checks `req.session.userId`\n\n```typescript\n// Current implementation\napp.use(session({\n  secret: process.env.SESSION_SECRET,\n  resave: false,\n  saveUninitialized: false,\n}));\n```\n\n| Feature | Cookies | JWT |\n|---------|---------|-----|\n| Stateless | No | Yes |\n| Scalable | Limited | Excellent |\n| Revocation | Easy | Needs blocklist |\n\nInline code spans carry a copy button and linkify any URL they contain:\n\nFaktura PR: `https://bitbucket.example.local/projects/MCDEV/repos/defaultcollection/pull-requests/6517`\n\nMCAccess PR: `https://dev.azure.com/MediaConcept/MC.Headquarters/_git/MC.HQ.MCAccess/pullrequest/2522`\n\nShort spans get the same treatment: `--resume`, `package.json`.\n",
     },
   ],
   timestamp: Date.now() - 50000,

@@ -6,6 +6,7 @@ import { sendToSession } from "../ws.js";
 import type { PermissionRequest } from "../types.js";
 import type { PermissionUpdate, AiValidationInfo } from "../../server/session-types.js";
 import { DiffViewer } from "./DiffViewer.js";
+import { InlineCode } from "./InlineCode.js";
 import { suggestionLabel, toAnswersByQuestionText } from "../lib/permission-utils.js";
 
 export function PermissionBanner({
@@ -542,11 +543,7 @@ function ExitPlanModeDisplay({ input }: { input: Record<string, unknown> }) {
                     );
                   }
 
-                  return (
-                    <code className="px-1.5 py-0.5 rounded-md bg-cc-fg/[0.06] text-cc-code-fg font-mono-code text-[12px]">
-                      {children}
-                    </code>
-                  );
+                  return <InlineCode textClassName="text-[12px] text-cc-code-fg">{children}</InlineCode>;
                 },
                 pre: ({ children }) => <>{children}</>,
                 blockquote: ({ children }) => (
