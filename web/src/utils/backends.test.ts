@@ -236,6 +236,26 @@ describe("static model/mode lists", () => {
     expect(slugs).toContain("claude-fable-5");
   });
 
+  // Fable 5.1 is the newest Mythos-class model (Claude Code CLI 2.1.258 ships
+  // it alongside Bedrock/Vertex region mappings). It is opt-in for the same
+  // reason Fable 5 is — it must never displace Opus 5 as CLAUDE_MODELS[0],
+  // which is what getDefaultModel() returns.
+  it("includes claude-fable-5-1 in Claude models without making it the default", () => {
+    const slugs = CLAUDE_MODELS.map((m) => m.value);
+    expect(slugs).toContain("claude-fable-5-1");
+    expect(getDefaultModel("claude")).toBe("claude-opus-5");
+    expect(getDefaultModel("claude")).not.toBe("claude-fable-5-1");
+  });
+
+  // The two Fable entries are distinct slugs — a prefix-matching bug that
+  // collapsed "claude-fable-5-1" into "claude-fable-5" would silently route
+  // 5.1 sessions to the older model.
+  it("keeps Fable 5 and Fable 5.1 as separate options with distinct labels", () => {
+    const fable = CLAUDE_MODELS.filter((m) => m.value.startsWith("claude-fable-5"));
+    expect(fable.map((m) => m.value)).toEqual(["claude-fable-5-1", "claude-fable-5"]);
+    expect(fable.map((m) => m.label)).toEqual(["Fable 5.1", "Fable 5"]);
+  });
+
   // Sonnet 5 — the Claude 5-family Sonnet — is selectable alongside the Opus
   // and Haiku options.
   it("includes claude-sonnet-5 in Claude models", () => {
