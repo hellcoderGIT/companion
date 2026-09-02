@@ -4,27 +4,10 @@ import remarkGfm from "remark-gfm";
 import type { ChatMessage, ContentBlock } from "../types.js";
 import { ToolBlock, getToolIcon, getToolLabel, getPreview, ToolIcon } from "./ToolBlock.js";
 import { CopyButton } from "./CopyButton.js";
+import { InlineCode } from "./InlineCode.js";
 import { MessageAttachment } from "./AttachmentChip.js";
+import { childrenToPlainText } from "../utils/children-text.js";
 import { CompactDisclosure, useIsCompact } from "./density.js";
-
-/**
- * Flattens the React children passed to a ReactMarkdown `code` renderer into
- * a plain string so the copy button has a stable payload. ReactMarkdown gives
- * us either a raw string (fenced block) or an array containing a single
- * string, so this walker handles both without pulling in a full React->text
- * helper.
- */
-function childrenToPlainText(node: unknown): string {
-  if (node == null || typeof node === "boolean") return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(childrenToPlainText).join("");
-  if (typeof node === "object" && node !== null && "props" in node) {
-    // ReactElement — recurse into its children prop
-    const el = node as { props?: { children?: unknown } };
-    return childrenToPlainText(el.props?.children);
-  }
-  return "";
-}
 
 export function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === "system") {
@@ -308,11 +291,7 @@ function MarkdownContent({ text, showCursor = false }: { text: string; showCurso
               );
             }
 
-            return (
-              <code className="px-1.5 py-0.5 rounded-md bg-cc-fg/[0.06] text-[12.5px] font-mono-code text-cc-fg/80 border border-cc-border/40">
-                {children}
-              </code>
-            );
+            return <InlineCode>{children}</InlineCode>;
           },
           pre: ({ children }) => <>{children}</>,
           table: ({ children }) => (
