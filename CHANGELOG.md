@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.118.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.117.0...companion-v0.118.0) (2026-09-02)
+
+
+### Features
+
+* **messages:** add copy button and clickable URLs to inline code spans ([#118](https://github.com/hellcoderGIT/companion/issues/118)) ([a54d967](https://github.com/hellcoderGIT/companion/commit/a54d96765910e41b21bb345d1d558785e7ba4105))
+* **models:** add Claude Fable 5.1 to the model picker ([#117](https://github.com/hellcoderGIT/companion/issues/117)) ([7fad357](https://github.com/hellcoderGIT/companion/commit/7fad357e9d703d3e6f9ccdce17b01b9de8deff82))
+
 ## [0.117.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.116.0...companion-v0.117.0) (2026-08-18)
 
 
