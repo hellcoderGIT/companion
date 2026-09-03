@@ -2845,6 +2845,36 @@ describe("Browser message routing", () => {
     expect(sent.request.model).toBe("claude-opus-4-5-20250929");
   });
 
+  it("set_model: persists the new model so it survives relaunch", () => {
+    // Regression: previously set_model only reached the live CLI; the persisted
+    // session.state.model was never updated, so any relaunch (--resume, wedge
+    // recovery, server restart) rebuilt argv with the OLD model and reverted the
+    // switch. The bridge must write the new model into session state.
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "set_model",
+      model: "claude-opus-4-5-20250929",
+    }));
+
+    const session = bridge.getSession("s1")!;
+    expect(session.state.model).toBe("claude-opus-4-5-20250929");
+  });
+
+  it("set_model: broadcasts a session_update carrying the new model", () => {
+    // Other browser clients (and the ModelSwitcher's runtime view) rely on a
+    // session_update to reflect the switch authoritatively.
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "set_model",
+      model: "claude-opus-4-5-20250929",
+    }));
+
+    const updates = browser.send.mock.calls
+      .map((c: unknown[]) => JSON.parse(c[0] as string))
+      .filter((m: { type: string; session?: { model?: string } }) =>
+        m.type === "session_update" && m.session?.model);
+    expect(updates.length).toBeGreaterThanOrEqual(1);
+    expect(updates.at(-1).session.model).toBe("claude-opus-4-5-20250929");
+  });
+
   it("set_permission_mode: sends control_request with set_permission_mode subtype to CLI", () => {
     bridge.handleBrowserMessage(browser, JSON.stringify({
       type: "set_permission_mode",

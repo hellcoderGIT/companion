@@ -137,15 +137,39 @@ describe("ModelSwitcher", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
-  it("is hidden when backend is Codex", () => {
-    // Codex does not support runtime model switching
+  it("renders for Codex and shows Codex models", () => {
+    // Codex now supports runtime model switching (applied on the next turn via
+    // collaborationMode.settings.model — see codex-adapter handleOutgoingSetModel).
     resetStore({
       sdkSessions: [
         { sessionId: "s1", model: "gpt-5.3-codex", backendType: "codex", cwd: "/repo" },
       ],
+      sessions: new Map([["s1", { model: "gpt-5.3-codex", backend_type: "codex" }]]),
     });
-    const { container } = render(<ModelSwitcher sessionId="s1" />);
-    expect(container.innerHTML).toBe("");
+    render(<ModelSwitcher sessionId="s1" />);
+    // Switcher is visible and labelled by the current Codex model.
+    expect(screen.getByLabelText("Switch model")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Switch model"));
+    // Codex model list (not Claude) is shown.
+    expect(screen.getByRole("option", { name: /GPT-5\.5/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Opus/ })).not.toBeInTheDocument();
+  });
+
+  it("sends set_model via WebSocket for Codex on selection", () => {
+    resetStore({
+      sdkSessions: [
+        { sessionId: "s1", model: "gpt-5.3-codex", backendType: "codex", cwd: "/repo" },
+      ],
+      sessions: new Map([["s1", { model: "gpt-5.3-codex", backend_type: "codex" }]]),
+    });
+    render(<ModelSwitcher sessionId="s1" />);
+    fireEvent.click(screen.getByLabelText("Switch model"));
+    fireEvent.click(screen.getByRole("option", { name: /GPT-5\.5/ }));
+
+    expect(mockSendToSession).toHaveBeenCalledWith("s1", {
+      type: "set_model",
+      model: "gpt-5.5",
+    });
   });
 
   it("is hidden when CLI is not connected", () => {

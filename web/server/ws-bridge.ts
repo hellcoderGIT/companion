@@ -1472,6 +1472,22 @@ export class WsBridge {
       });
     }
 
+    // -- set_model: persist the new model so it survives relaunch, then fall
+    // through to forward it to the adapter (switches the live process). ------
+    // Without persisting here, a switch takes effect on the running CLI but
+    // reverts on the next relaunch (wedge recovery, --resume, server restart),
+    // because cli-launcher rebuilds argv from the persisted session.state.model.
+    // This is backend-agnostic: it fixes Claude and is required for Codex too.
+    // We deliberately do NOT return — the message must still reach the adapter.
+    if (msg.type === "set_model" && msg.model) {
+      session.state.model = msg.model;
+      this.persistSession(session);
+      this.broadcastToBrowsers(session, {
+        type: "session_update",
+        session: { model: msg.model },
+      });
+    }
+
     // Delegate to the backend adapter if connected; otherwise queue for later flush.
     // For Claude: adapter may exist but WS is disconnected (CLI cycling). Queue at
     // bridge level so handleCLIOpen flushes via adapter.send() after reconnect.
