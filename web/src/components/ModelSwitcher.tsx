@@ -72,8 +72,10 @@ export function ModelSwitcher({ sessionId }: ModelSwitcherProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  // Hide for Codex (set_model not supported) or when CLI disconnected
-  if (backendType === "codex" || !cliConnected || !currentOption) {
+  // Hide only when the CLI is disconnected or the current model is unknown.
+  // Both Claude and Codex support switching model mid-session (Codex applies it
+  // on the next turn; see codex-adapter handleOutgoingSetModel).
+  if (!cliConnected || !currentOption) {
     return null;
   }
 

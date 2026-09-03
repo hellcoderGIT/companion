@@ -971,9 +971,48 @@ describe("CodexAdapter", () => {
     stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(adapter.sendBrowserMessage({ type: "set_model", model: "gpt-5.3-codex" })).toBe(false);
     // set_permission_mode IS supported for Codex (runtime Auto↔Plan toggle)
     expect(adapter.sendBrowserMessage({ type: "set_permission_mode", mode: "plan" })).toBe(true);
+  });
+
+  it("accepts set_model and applies the new model on the next turn", async () => {
+    // Codex has no dedicated "set model" RPC; the model rides on
+    // collaborationMode.settings.model, which is only sent when the
+    // collaboration-mode kind changes. set_model must reset that gate so the new
+    // model is re-sent on the next turn/start.
+    const calls: { method: string; params: Record<string, unknown> }[] = [];
+    const adapter = new CodexAdapter(proc as never, "test-session", { model: "gpt-5.3-codex" });
+    // Intercept outgoing turn/start params by spying on the transport call.
+    const transport = (adapter as unknown as {
+      transport: { call: (m: string, p: Record<string, unknown>) => Promise<unknown> };
+    }).transport;
+    const origCall = transport.call.bind(transport);
+    transport.call = (method: string, params: Record<string, unknown>) => {
+      calls.push({ method, params });
+      if (method === "turn/start") return Promise.resolve({ turn: { id: "turn_1" } });
+      return origCall(method, params);
+    };
+
+    await new Promise((r) => setTimeout(r, 50));
+    stdout.push(JSON.stringify({ id: 1, result: { userAgent: "codex" } }) + "\n");
+    await new Promise((r) => setTimeout(r, 20));
+    stdout.push(JSON.stringify({ id: 2, result: { thread: { id: "thr_123" } } }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Switching to a new model is accepted…
+    expect(adapter.sendBrowserMessage({ type: "set_model", model: "gpt-5.5" })).toBe(true);
+    // …and re-selecting the current model is a no-op (still accepted).
+    expect(adapter.sendBrowserMessage({ type: "set_model", model: "gpt-5.5" })).toBe(true);
+
+    // The next user turn must carry the new model via collaborationMode.settings.
+    adapter.sendBrowserMessage({ type: "user_message", content: "hi" });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const turnStart = calls.find((c) => c.method === "turn/start");
+    expect(turnStart).toBeDefined();
+    const collab = turnStart!.params.collaborationMode as { settings: { model: string } };
+    expect(collab).toBeDefined();
+    expect(collab.settings.model).toBe("gpt-5.5");
   });
 
   it("translates webSearch item to WebSearch tool_use", async () => {

@@ -917,8 +917,7 @@ export class CodexAdapter implements IBackendAdapter {
         this.handleOutgoingInterrupt();
         return true;
       case "set_model":
-        console.warn("[codex-adapter] Runtime model switching not supported by Codex");
-        return false;
+        return this.handleOutgoingSetModel(msg.model);
       case "set_permission_mode":
         this.handleOutgoingSetPermissionMode(msg.mode);
         return true;
@@ -1457,6 +1456,31 @@ export class CodexAdapter implements IBackendAdapter {
       type: "session_update",
       session: { permissionMode: this.currentPermissionMode },
     });
+  }
+
+  /**
+   * Switch the model mid-session.
+   *
+   * Codex has no dedicated "set model" RPC. The active model rides on
+   * `collaborationMode.settings.model`, which `handleOutgoingUserMessage` only
+   * attaches to `turn/start` when the collaboration-mode *kind* changes (to
+   * avoid re-enabling permission prompts every turn). To force the new model to
+   * be sent, we update the stored model and reset `lastSentCollaborationModeKind`
+   * so the next `turn/start` re-sends `collaborationMode` carrying it. The switch
+   * therefore takes effect on the next turn — the same semantics as Claude's
+   * `set_model`. Bridge-level persistence + broadcast of the model is handled in
+   * ws-bridge (backend-agnostic), so we don't emit a session_update here.
+   */
+  private handleOutgoingSetModel(model: string): boolean {
+    if (!model || model === this.options.model) return true;
+    this.options.model = model;
+    // Force collaborationMode (which carries settings.model) to be re-sent on
+    // the next turn/start so Codex picks up the new model.
+    this.lastSentCollaborationModeKind = null;
+    console.log(
+      `[codex-adapter] Session ${this.sessionId}: model switched to ${model} (applies on next turn)`,
+    );
+    return true;
   }
 
   private async handleOutgoingMcpGetStatus(): Promise<void> {
