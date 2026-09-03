@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.119.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.118.0...companion-v0.119.0) (2026-09-03)
+
+
+### Features
+
+* **model:** switch model mid-session for Claude and Codex ([#120](https://github.com/hellcoderGIT/companion/issues/120)) ([b3f1e49](https://github.com/hellcoderGIT/companion/commit/b3f1e490e1e467e8dfae3b3723cfb809007abc15))
+
 ## [0.118.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.117.0...companion-v0.118.0) (2026-09-02)
 
 
