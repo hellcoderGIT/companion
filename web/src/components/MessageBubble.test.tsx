@@ -77,6 +77,101 @@ describe("MessageBubble - system messages", () => {
     const dividers = container.querySelectorAll(".h-px");
     expect(dividers.length).toBe(2);
   });
+
+  // A subagent's task report (`detail`) is long free-form agent output. It must
+  // never be inlined into the feed — it is collapsed at standard density and
+  // dropped entirely in compact density.
+  it("does not render a long task report inline at standard density", () => {
+    const msg = makeMessage({
+      role: "system",
+      content: "Task completed: a3413b5.",
+      metaCode: "task_notification",
+      detail: "Done. Committed as 75ac143 on feature/pricing-signal-push.",
+    });
+    render(
+      <DensityProvider value="standard">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+
+    // Terse line is shown; the report body is not in the document yet.
+    expect(screen.getByText("Task completed: a3413b5.")).toBeTruthy();
+    expect(screen.queryByText(/Committed as 75ac143/)).toBeNull();
+    // …but it is reachable behind a disclosure.
+    expect(screen.getByRole("button", { name: /show report/i })).toBeTruthy();
+  });
+
+  it("expands and collapses the task report on toggle at standard density", () => {
+    const msg = makeMessage({
+      role: "system",
+      content: "Task completed: a3413b5.",
+      metaCode: "task_notification",
+      detail: "Done. Committed as 75ac143 on feature/pricing-signal-push.",
+    });
+    render(
+      <DensityProvider value="standard">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+
+    const toggle = screen.getByRole("button", { name: /show report/i });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(toggle);
+    expect(screen.getByText(/Committed as 75ac143/)).toBeTruthy();
+    const hideToggle = screen.getByRole("button", { name: /hide report/i });
+    expect(hideToggle.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(hideToggle);
+    expect(screen.queryByText(/Committed as 75ac143/)).toBeNull();
+  });
+
+  it("omits the task report entirely in compact density", () => {
+    // Compact mode keeps only the terse one-liner — no report, no disclosure,
+    // so there is no way to surface the long internal text.
+    const msg = makeMessage({
+      role: "system",
+      content: "Task completed: a3413b5.",
+      metaCode: "task_notification",
+      detail: "Done. Committed as 75ac143 on feature/pricing-signal-push.",
+    });
+    render(
+      <DensityProvider value="compact">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+
+    expect(screen.getByText("Task completed: a3413b5.")).toBeTruthy();
+    expect(screen.queryByText(/Committed as 75ac143/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /report/i })).toBeNull();
+  });
+
+  it("renders no disclosure for a system message without detail", () => {
+    // Ordinary system lines (compaction, hooks) are unaffected by the change.
+    const msg = makeMessage({ role: "system", content: "Context compacted." });
+    render(<MessageBubble message={msg} />);
+
+    expect(screen.getByText("Context compacted.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /report/i })).toBeNull();
+  });
+
+  it("passes axe checks with an expanded task report", async () => {
+    const { axe } = await import("vitest-axe");
+    const msg = makeMessage({
+      role: "system",
+      content: "Task completed: a3413b5.",
+      metaCode: "task_notification",
+      detail: "Done. Committed as 75ac143.",
+    });
+    const { container } = render(
+      <DensityProvider value="standard">
+        <MessageBubble message={msg} />
+      </DensityProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /show report/i }));
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
 });
 
 // ─── User messages ───────────────────────────────────────────────────────────

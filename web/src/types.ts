@@ -34,6 +34,11 @@ export interface ChatMessage {
   /** Stable event code for a meta notice (e.g. "interrupted_mid_stream"),
    * used to dedupe repeated notices during reconnect storms. */
   metaCode?: string;
+  /** Long-form body for a system line — currently a subagent's full task
+   * report, which can run to thousands of characters. Deliberately kept out
+   * of `content` so it is never inlined into the chat feed: it is collapsed
+   * behind a disclosure at standard density and omitted entirely in compact. */
+  detail?: string;
 }
 
 export interface TaskItem {

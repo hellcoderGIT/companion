@@ -1442,7 +1442,31 @@ export function Playground() {
                 message={{
                   id: "event-task",
                   role: "system",
-                  content: "Task completed: a1b2c3d. Build finished successfully.",
+                  content: "Task completed: a1b2c3d.",
+                  timestamp: Date.now(),
+                }}
+              />
+            </Card>
+            <Card label="Background task completed (long report, collapsible)">
+              {/* The subagent's full report is never inlined: at standard
+                  density it hides behind "show report"; in compact density the
+                  disclosure is gone and only the terse line remains. */}
+              <MessageBubble
+                message={{
+                  id: "event-task-detail",
+                  role: "system",
+                  content: "Task completed: a3413b566f10512a6.",
+                  metaCode: "task_notification",
+                  detail:
+                    "Done. Committed as `75ac143` on `feature/pricing-signal-push` "
+                    + "(worktree `/srv/mc-agent/mcp-pricing-push`), branched off `origin/main` "
+                    + "at `b060f64`). Not pushed. No migration.\n\n"
+                    + "## Files\n"
+                    + "- `backend/app/config.py` — `PRICING_PUSH_ENABLED` (False), "
+                    + "`PRICING_API_BASE_URL` (\"\"), `PRICING_API_KEY` (\"\").\n"
+                    + "- `backend/app/services/pricing_push/signals.py` — pure query functions "
+                    + "per signal type + `collect_signals()`.\n\n"
+                    + "## Test results\n**25 passed**. `ruff check` clean on all touched files.",
                   timestamp: Date.now(),
                 }}
               />

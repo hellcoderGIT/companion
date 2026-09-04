@@ -9,17 +9,53 @@ import { MessageAttachment } from "./AttachmentChip.js";
 import { childrenToPlainText } from "../utils/children-text.js";
 import { CompactDisclosure, useIsCompact } from "./density.js";
 
-export function MessageBubble({ message }: { message: ChatMessage }) {
-  if (message.role === "system") {
-    return (
-      <div className="flex items-center gap-3 py-1 min-w-0">
+/**
+ * A divider-style system line (compaction, hooks, task notifications…).
+ *
+ * When the message carries a long `detail` body — today that is a subagent's
+ * full task report — it is never rendered inline: at standard density it sits
+ * behind a "show report" disclosure, and in compact density it is dropped
+ * entirely so the feed keeps only the terse one-liner.
+ *
+ * Split out of MessageBubble so it can own hooks (MessageBubble returns early
+ * per role and must stay hook-free).
+ */
+function SystemMessageLine({ message }: { message: ChatMessage }) {
+  const compact = useIsCompact();
+  const [open, setOpen] = useState(false);
+  const hasDetail = !compact && Boolean(message.detail);
+
+  return (
+    <div className="py-1 min-w-0">
+      <div className="flex items-center gap-3 min-w-0">
         <div className="shrink-0 flex-1 h-px bg-cc-border" />
         <span className="text-[11px] text-cc-muted italic font-mono-code px-1 min-w-0 break-words text-center">
           {message.content}
         </span>
+        {hasDetail && (
+          <button
+            type="button"
+            onClick={() => setOpen((prev) => !prev)}
+            aria-expanded={open}
+            className="shrink-0 text-[11px] text-cc-muted/60 hover:text-cc-muted underline decoration-dotted cursor-pointer"
+          >
+            {open ? "hide report" : "show report"}
+          </button>
+        )}
         <div className="shrink-0 flex-1 h-px bg-cc-border" />
       </div>
-    );
+      {hasDetail && open && (
+        <pre className="mt-1.5 mx-3 text-[11px] text-cc-muted font-mono-code whitespace-pre-wrap break-words max-h-80 overflow-auto rounded-md bg-cc-hover/40 p-2">
+          {message.detail}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+export function MessageBubble({ message }: { message: ChatMessage }) {
+  if (message.role === "system") {
+    return <SystemMessageLine message={message} />;
   }
 
   if (message.role === "user") {
