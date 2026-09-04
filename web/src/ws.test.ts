@@ -1720,6 +1720,63 @@ describe("handleMessage: message_history", () => {
     expect(msgs[0].content).toContain("Task completed: task-1");
     expect(msgs[0].timestamp).toBe(45000);
   });
+
+  it("carries a task report as detail instead of inlining it into the chat line", () => {
+    // Regression: the subagent's final report was concatenated into the system
+    // line's content, so a multi-thousand-character report rendered as one
+    // giant italic block in the feed. It must now travel as `detail` (which the
+    // renderer collapses at standard density and drops in compact).
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    const report = "Done. Committed as 75ac143 on feature/pricing-signal-push. ".repeat(20);
+    fireMessage({
+      type: "system_event",
+      timestamp: 47000,
+      event: {
+        subtype: "task_notification",
+        task_id: "task-2",
+        status: "completed",
+        output_file: "/tmp/out.txt",
+        summary: report,
+        uuid: "u-task-2",
+        session_id: "s1",
+      },
+    });
+
+    const msgs = useStore.getState().messages.get("s1")!;
+    const taskMsg = msgs.find((m) => m.content.includes("task-2"))!;
+    expect(taskMsg).toBeDefined();
+    // Terse one-liner only — the report is NOT in the rendered content.
+    expect(taskMsg.content).toBe("Task completed: task-2.");
+    expect(taskMsg.content).not.toContain("Committed as");
+    // …the full report is preserved out-of-band for the disclosure.
+    expect(taskMsg.detail).toBe(report);
+    expect(taskMsg.metaCode).toBe("task_notification");
+  });
+
+  it("sets no detail for system events that have no long body", () => {
+    // Ordinary system events (compaction) must not gain a disclosure.
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({
+      type: "system_event",
+      timestamp: 48000,
+      event: {
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "auto", pre_tokens: 1000 },
+        uuid: "u-compact",
+        session_id: "s1",
+      },
+    });
+
+    const msgs = useStore.getState().messages.get("s1")!;
+    const compactMsg = msgs.find((m) => m.content.includes("Context compacted"))!;
+    expect(compactMsg).toBeDefined();
+    expect(compactMsg.detail).toBeUndefined();
+    expect(compactMsg.metaCode).toBeUndefined();
+  });
 });
 
 // ===========================================================================

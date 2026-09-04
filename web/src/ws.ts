@@ -349,6 +349,25 @@ function sendBrowserNotification(title: string, body: string, tag: string) {
   new Notification(title, { body, tag });
 }
 
+/**
+ * Presentation extras for a system event, beyond its one-line summary.
+ *
+ * Only subagent task notifications carry a long body today: the agent's final
+ * report. It is returned as `detail` (never folded into the chat line) so the
+ * renderer can decide how much of it to show per density.
+ */
+function systemEventDetail(
+  event: Extract<BrowserIncomingMessage, { type: "system_event" }>["event"],
+): { detail?: string; metaCode?: string } {
+  if (event.subtype === "task_notification") {
+    return {
+      detail: event.summary || undefined,
+      metaCode: "task_notification",
+    };
+  }
+  return {};
+}
+
 function summarizeSystemEvent(
   event: Extract<BrowserIncomingMessage, { type: "system_event" }>["event"],
 ): string | null {
@@ -357,8 +376,13 @@ function summarizeSystemEvent(
   }
 
   if (event.subtype === "task_notification") {
-    const summary = event.summary ? ` ${event.summary}` : "";
-    return `Task ${event.status}: ${event.task_id}.${summary}`;
+    // The subagent's final report (event.summary) is deliberately NOT inlined
+    // here. It is free-form agent output that regularly runs to thousands of
+    // characters, and inlining it rendered the whole report as one giant
+    // italic system line that flooded the feed. It is carried separately by
+    // systemEventDetail() so the UI can collapse it (standard density) or
+    // drop it entirely (compact density).
+    return `Task ${event.status}: ${event.task_id}.`;
   }
 
   if (event.subtype === "files_persisted") {
@@ -1066,6 +1090,7 @@ function handleParsedMessage(
         role: "system",
         content: summary,
         timestamp: data.timestamp || Date.now(),
+        ...systemEventDetail(data.event),
       });
       break;
     }
@@ -1319,6 +1344,7 @@ function handleParsedMessage(
             role: "system",
             content: summary,
             timestamp: histMsg.timestamp || Date.now(),
+            ...systemEventDetail(histMsg.event),
           });
         }
       }
