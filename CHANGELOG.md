@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.119.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.119.0...companion-v0.119.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ui:** stop dumping subagent task reports into the chat feed ([#122](https://github.com/hellcoderGIT/companion/issues/122)) ([d6b5002](https://github.com/hellcoderGIT/companion/commit/d6b5002c3e39663cdd7d9d59b5b62633997cef88))
+
 ## [0.119.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.118.0...companion-v0.119.0) (2026-09-03)
 
 
