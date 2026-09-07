@@ -448,6 +448,29 @@ export interface TailscaleStatus {
   warning?: string;
 }
 
+/** Device-code login state for Codex ChatGPT auth. */
+export type CodexLoginState = "idle" | "pending" | "success" | "error" | "canceled";
+
+export interface CodexLoginStatus {
+  state: CodexLoginState;
+  /** The code the user enters at `verificationUrl`. Present while pending. */
+  userCode?: string;
+  verificationUrl?: string;
+  loginId?: string;
+  error?: string;
+  /** Epoch ms after which the attempt is abandoned. */
+  expiresAt?: number;
+}
+
+export interface CodexAccountStatus {
+  cliAvailable: boolean;
+  authenticated: boolean;
+  method: "chatgpt" | "apiKey" | null;
+  email: string | null;
+  planType: string | null;
+  error?: string;
+}
+
 export interface AppSettings {
   anthropicApiKeyConfigured: boolean;
   anthropicModel: string;
@@ -1115,6 +1138,13 @@ export const api = {
   }) => put<AppSettings>("/settings", data),
   verifyAnthropicKey: (apiKey: string) =>
     post<{ valid: boolean; error?: string }>("/settings/anthropic/verify", { apiKey }),
+
+  // Codex ChatGPT auth (device-code flow, so it works on a remote host)
+  getCodexAccount: () => get<CodexAccountStatus>("/codex/auth/account"),
+  getCodexLoginStatus: () => get<CodexLoginStatus>("/codex/auth/login"),
+  startCodexLogin: () => post<CodexLoginStatus>("/codex/auth/login"),
+  cancelCodexLogin: () => post<CodexLoginStatus>("/codex/auth/login/cancel"),
+  codexLogout: () => post<{ ok: boolean; error?: string }>("/codex/auth/logout"),
 
   // Project dashboard (reads the nightly summarization store)
   getDashboard: () => get<DashboardData>("/dashboard"),

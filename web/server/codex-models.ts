@@ -1,7 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { getEnrichedPath, resolveBinary } from "./path-resolver.js";
+import { buildCodexAppServerSpawn } from "./codex-app-server.js";
 
 /**
  * A Codex model as surfaced to the frontend model picker.
@@ -71,45 +69,6 @@ export function _resetCodexModelsCache(): void {
 }
 
 /**
- * Build the spawn command for `codex app-server`, resolving the binary and
- * applying the same sibling-node shim that cli-launcher uses so a CLI shipped
- * with a bundled node still launches correctly.
- */
-function buildCodexSpawn(binaryName: string): { cmd: string[]; env: NodeJS.ProcessEnv } | null {
-  const resolved = resolveBinary(binaryName);
-  if (!resolved) return null;
-
-  const binaryDir = resolve(resolved, "..");
-  const siblingNode = join(binaryDir, "node");
-  const enrichedPath = getEnrichedPath();
-  const pathSep = process.platform === "win32" ? ";" : ":";
-  const spawnPath = [binaryDir, ...enrichedPath.split(pathSep)].filter(Boolean).join(pathSep);
-
-  // `model/list` does not require auth or a sandbox, so we skip --enable flags
-  // and run a bare app-server purely for the handshake + listing.
-  const args = ["app-server"];
-
-  let cmd: string[];
-  if (existsSync(siblingNode)) {
-    let codexScript: string;
-    try {
-      codexScript = realpathSync(resolved);
-    } catch {
-      codexScript = resolved;
-    }
-    cmd = [siblingNode, codexScript, ...args];
-  } else {
-    const isCmdScript = process.platform === "win32" && (resolved.endsWith(".cmd") || resolved.endsWith(".bat"));
-    cmd = isCmdScript ? ["cmd.exe", "/c", resolved, ...args] : [resolved, ...args];
-  }
-
-  return {
-    cmd,
-    env: { ...process.env, CLAUDECODE: undefined, PATH: spawnPath },
-  };
-}
-
-/**
  * Fetch the list of available Codex models by briefly launching
  * `codex app-server`, performing the initialize handshake, and calling the
  * `model/list` RPC. Replaces the legacy `~/.codex/models_cache.json` reader —
@@ -128,7 +87,7 @@ export async function fetchCodexModels(opts: { binary?: string; timeoutMs?: numb
     return cached.models;
   }
 
-  const spawnInfo = buildCodexSpawn(binaryName);
+  const spawnInfo = buildCodexAppServerSpawn(binaryName);
   if (!spawnInfo) return [];
 
   return new Promise<CodexModelOption[]>((resolvePromise) => {

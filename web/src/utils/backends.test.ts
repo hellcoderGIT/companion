@@ -184,9 +184,11 @@ describe("CLAUDE_EFFORTS", () => {
 });
 
 describe("static model/mode lists", () => {
-  it("has codex models with GPT-5.x slugs", () => {
+  // Was `^gpt-5` until Codex 0.153.x shipped GPT-6-Astra; the assertion is now
+  // major-version agnostic so a new generation doesn't fail the suite.
+  it("has codex models with gpt- slugs", () => {
     for (const m of CODEX_MODELS) {
-      expect(m.value).toMatch(/^gpt-5/);
+      expect(m.value).toMatch(/^gpt-/);
     }
   });
 
@@ -264,12 +266,13 @@ describe("static model/mode lists", () => {
   });
 
   // The static list is only a fallback — the live list comes from the Codex
-  // app-server `model/list` RPC. We assert the current frontier model (gpt-5.5)
-  // and that the default is the first entry.
-  it("lists gpt-5.5 as the first Codex model (default fallback)", () => {
+  // app-server `model/list` RPC. We assert the current frontier model
+  // (gpt-6-astra, which Codex 0.153.x reports as isDefault) and that the
+  // default is the first entry, since getDefaultModel() reads CODEX_MODELS[0].
+  it("lists gpt-6-astra as the first Codex model (default fallback)", () => {
     const slugs = CODEX_MODELS.map((m) => m.value);
-    expect(slugs).toContain("gpt-5.5");
-    expect(CODEX_MODELS[0].value).toBe("gpt-5.5");
+    expect(slugs).toContain("gpt-6-astra");
+    expect(CODEX_MODELS[0].value).toBe("gpt-6-astra");
   });
 
   it("claude agent modes include acceptEdits for middle ground", () => {

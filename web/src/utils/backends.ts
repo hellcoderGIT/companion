@@ -62,10 +62,11 @@ export const CLAUDE_MODELS: ModelOption[] = [
 // sync with recent Codex releases so the picker is sane when the CLI is
 // unreachable; the live fetch is the source of truth.
 export const CODEX_MODELS: ModelOption[] = [
-  { value: "gpt-5.5", label: "GPT-5.5", icon: "\u25A0" },
-  { value: "gpt-5.4", label: "GPT-5.4", icon: "\u2733" },
-  { value: "gpt-5.4-mini", label: "GPT-5.4 Mini", icon: "\u26A1" },
-  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex", icon: "\u25C6" },
+  { value: "gpt-6-astra", label: "GPT-6-Astra", icon: "\u2726" },
+  { value: "gpt-5.6-sol", label: "GPT-5.6-Sol", icon: "\u25A0" },
+  { value: "gpt-5.6-terra", label: "GPT-5.6-Terra", icon: "\u2733" },
+  { value: "gpt-5.6-luna", label: "GPT-5.6-Luna", icon: "\u26A1" },
+  { value: "gpt-5.5", label: "GPT-5.5", icon: "\u25C6" },
   { value: "gpt-5.2", label: "GPT-5.2", icon: "\u25CF" },
 ];
 

@@ -34,6 +34,7 @@ interface MockStoreState {
   setUpdateInfo: ReturnType<typeof vi.fn>;
   setUpdateOverlayActive: ReturnType<typeof vi.fn>;
   setEditorTabEnabled: ReturnType<typeof vi.fn>;
+  setMagicUiAvailable: ReturnType<typeof vi.fn>;
   density: "standard" | "compact";
   toggleDensity: ReturnType<typeof vi.fn>;
 }
@@ -56,6 +57,7 @@ function createMockState(overrides: Partial<MockStoreState> = {}): MockStoreStat
     setUpdateInfo: vi.fn(),
     setUpdateOverlayActive: vi.fn(),
     setEditorTabEnabled: vi.fn(),
+    setMagicUiAvailable: vi.fn(),
     density: "standard",
     toggleDensity: vi.fn(),
     ...overrides,
@@ -88,6 +90,15 @@ vi.mock("../api.js", () => ({
     regenerateAuthToken: (...args: unknown[]) => mockApi.regenerateAuthToken(...args),
     getAuthQr: (...args: unknown[]) => mockApi.getAuthQr(...args),
     verifyAnthropicKey: (...args: unknown[]) => mockApi.verifyAnthropicKey(...args),
+    // Codex auth panel is embedded in the Providers section; it probes these
+    // on mount, so they must exist or the whole page crashes on render.
+    getCodexAccount: () => Promise.resolve({
+      cliAvailable: true, authenticated: false, method: null, email: null, planType: null,
+    }),
+    getCodexLoginStatus: () => Promise.resolve({ state: "idle" }),
+    startCodexLogin: () => Promise.resolve({ state: "idle" }),
+    cancelCodexLogin: () => Promise.resolve({ state: "idle" }),
+    codexLogout: () => Promise.resolve({ ok: true }),
   },
 }));
 
@@ -1550,5 +1561,197 @@ describe("SettingsPage", () => {
 
     const results = await axe(providersSection!);
     expect(results).toHaveNoViolations();
+  });
+});
+
+/**
+ * Optimistic-update handlers.
+ *
+ * Several settings apply immediately in the UI and only then persist. Each one
+ * must roll its local state back if the API call fails, otherwise the UI
+ * silently disagrees with the server. These paths were previously untested.
+ */
+describe("optimistic settings updates", () => {
+  /** Render and wait for the initial getSettings() to land. */
+  async function renderSettled(settings: Record<string, unknown> = {}) {
+    mockApi.getSettings.mockResolvedValue({
+      anthropicApiKeyConfigured: true,
+      anthropicModel: "claude-sonnet-4-6",
+      updateChannel: "stable",
+      publicUrl: "",
+      ...settings,
+    });
+    render(<SettingsPage />);
+    await screen.findByText("Nightly dashboard updates");
+  }
+
+  it("turns the nightly dashboard on and persists it", async () => {
+    await renderSettled({ dashboardEnabled: false });
+
+    fireEvent.click(screen.getByText("Nightly dashboard updates"));
+
+    await waitFor(() =>
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ dashboardEnabled: true }),
+    );
+  });
+
+  it("rolls the nightly dashboard toggle back when saving fails", async () => {
+    await renderSettled({ dashboardEnabled: false });
+    const toggle = screen.getByText("Nightly dashboard updates").closest("button")!;
+    expect(toggle).toHaveTextContent("Off");
+
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("network down"));
+    fireEvent.click(toggle);
+
+    // Flips optimistically, then reverts once the request rejects.
+    await waitFor(() => expect(toggle).toHaveTextContent("Off"));
+    expect(mockApi.updateSettings).toHaveBeenCalledWith({ dashboardEnabled: true });
+  });
+
+  it("syncs Magic UI availability into the store so the TopBar updates without a reload", async () => {
+    await renderSettled({ magicUiEnabled: false, claudeCliAvailable: true });
+    mockApi.updateSettings.mockResolvedValueOnce({ magicUiEnabled: true, claudeCliAvailable: true });
+
+    fireEvent.click(screen.getByText("Magic UI available to users"));
+
+    await waitFor(() => expect(mockState.setMagicUiAvailable).toHaveBeenCalledWith(true));
+  });
+
+  it("rolls the Magic UI toggle back when saving fails", async () => {
+    await renderSettled({ magicUiEnabled: false, claudeCliAvailable: true });
+    const toggle = screen.getByText("Magic UI available to users").closest("button")!;
+
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("nope"));
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle).toHaveTextContent("Off"));
+  });
+
+  it("reverts the Magic UI watcher model when saving fails", async () => {
+    await renderSettled({ magicUiEnabled: true, claudeCliAvailable: true, magicUiModel: "claude-haiku-4-5" });
+    const select = screen.getByLabelText("Watcher model") as HTMLSelectElement;
+
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("nope"));
+    fireEvent.change(select, { target: { value: "claude-sonnet-5" } });
+
+    await waitFor(() => expect(select.value).toBe("claude-haiku-4-5"));
+  });
+
+  it("persists the dashboard run hour", async () => {
+    await renderSettled({ dashboardEnabled: true, dashboardRunHour: 3 });
+
+    fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "7" } });
+
+    await waitFor(() =>
+      expect(mockApi.updateSettings).toHaveBeenCalledWith({ dashboardRunHour: 7 }),
+    );
+  });
+
+  it("reverts the dashboard run hour when saving fails", async () => {
+    await renderSettled({ dashboardEnabled: true, dashboardRunHour: 3 });
+    const select = screen.getByLabelText("Run at") as HTMLSelectElement;
+
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("nope"));
+    fireEvent.change(select, { target: { value: "7" } });
+
+    await waitFor(() => expect(select.value).toBe("3"));
+  });
+
+  it("reverts max sessions per run when saving fails", async () => {
+    await renderSettled({ dashboardEnabled: true, dashboardMaxSessionsPerRun: 20 });
+    const select = screen.getByLabelText("Max sessions per run") as HTMLSelectElement;
+
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("nope"));
+    fireEvent.change(select, { target: { value: "100" } });
+
+    await waitFor(() => expect(select.value).toBe("20"));
+  });
+
+  it("reverts the CLI bridge mode when saving fails", async () => {
+    await renderSettled({ cliBridgeMode: "loopback" });
+    const select = screen.getByLabelText("CLI bridge mode") as HTMLSelectElement;
+
+    mockApi.updateSettings.mockRejectedValueOnce(new Error("nope"));
+    fireEvent.change(select, { target: { value: "jsonHandoff" } });
+
+    await waitFor(() => expect(select.value).toBe("loopback"));
+  });
+});
+
+/** Store state where the one-click "Update & Restart" button is actually rendered. */
+const SERVICE_MODE_UPDATE_INFO = {
+  currentVersion: "0.22.1",
+  latestVersion: "0.23.0",
+  updateAvailable: true,
+  isServiceMode: true,
+  updateInProgress: false,
+  lastChecked: Date.now(),
+};
+
+/**
+ * The update/restart flow. `onTriggerUpdate` sets a localStorage flag *before*
+ * the request so the Docker prompt survives the restart, which means it also
+ * has to clear that flag when the request fails — otherwise the user gets a
+ * spurious prompt on next load.
+ */
+describe("app updates", () => {
+  async function renderSettled() {
+    render(<SettingsPage />);
+    await screen.findByText("Check for updates");
+  }
+
+  it("reports when an update is available", async () => {
+    await renderSettled();
+    mockApi.forceCheckForUpdate.mockResolvedValueOnce({
+      currentVersion: "0.22.1", latestVersion: "0.23.0", updateAvailable: true,
+      isServiceMode: false, updateInProgress: false, lastChecked: Date.now(), channel: "stable",
+    });
+
+    fireEvent.click(screen.getByText("Check for updates"));
+
+    expect(await screen.findByText("Update v0.23.0 is available.")).toBeInTheDocument();
+  });
+
+  it("reports when already up to date", async () => {
+    await renderSettled();
+
+    fireEvent.click(screen.getByText("Check for updates"));
+
+    expect(await screen.findByText("You are up to date.")).toBeInTheDocument();
+  });
+
+  it("surfaces a failure to check for updates", async () => {
+    await renderSettled();
+    mockApi.forceCheckForUpdate.mockRejectedValueOnce(new Error("registry unreachable"));
+
+    fireEvent.click(screen.getByText("Check for updates"));
+
+    expect(await screen.findByText("registry unreachable")).toBeInTheDocument();
+  });
+
+  it("starts an update and shows the restart overlay", async () => {
+    // The button renders off store state, not the local check result.
+    mockState = createMockState({ updateInfo: SERVICE_MODE_UPDATE_INFO });
+    await renderSettled();
+
+    const btn = await screen.findByText("Update & Restart");
+    mockApi.triggerUpdate.mockResolvedValueOnce({ message: "Updating to v0.23.0..." });
+    fireEvent.click(btn);
+
+    expect(await screen.findByText("Updating to v0.23.0...")).toBeInTheDocument();
+    await waitFor(() => expect(mockState.setUpdateOverlayActive).toHaveBeenCalledWith(true));
+  });
+
+  it("clears the pending Docker prompt flag when starting an update fails", async () => {
+    mockState = createMockState({ updateInfo: SERVICE_MODE_UPDATE_INFO });
+    await renderSettled();
+
+    const btn = await screen.findByText("Update & Restart");
+    mockApi.triggerUpdate.mockRejectedValueOnce(new Error("update failed"));
+    fireEvent.click(btn);
+
+    expect(await screen.findByText("update failed")).toBeInTheDocument();
+    // Otherwise the user sees a spurious Docker image prompt on next load.
+    expect(localStorage.getItem("companion_docker_prompt_pending")).toBeNull();
   });
 });

@@ -36,6 +36,7 @@ import { registerLinearRoutes, fetchLinearTeamStates } from "./routes/linear-rou
 import { registerLinearConnectionRoutes } from "./routes/linear-connection-routes.js";
 import { getConnection, resolveApiKey } from "./linear-connections.js";
 import { registerLinearOAuthConnectionRoutes } from "./routes/linear-oauth-connection-routes.js";
+import { registerCodexAuthRoutes } from "./routes/codex-auth-routes.js";
 import { getSettings } from "./settings-manager.js";
 import { discoverClaudeSessions } from "./claude-session-discovery.js";
 import { getClaudeSessionHistoryPage } from "./claude-session-history.js";
@@ -1276,6 +1277,7 @@ export function createRoutes(
 
   registerPromptRoutes(api);
   registerSettingsRoutes(api);
+  registerCodexAuthRoutes(api);
   registerDashboardRoutes(api, {
     listCompanionSessions: () => launcher.listSessions(),
   });

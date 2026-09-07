@@ -23,6 +23,14 @@ vi.mock("../api.js", () => ({
   api: {
     updateSettings: vi.fn().mockResolvedValue({}),
     getSettings: vi.fn().mockResolvedValue({ codexDeviceAuthConfigured: false }),
+    // The Codex step embeds CodexAuthPanel, which probes these on mount.
+    getCodexAccount: vi.fn().mockResolvedValue({
+      cliAvailable: true, authenticated: false, method: null, email: null, planType: null,
+    }),
+    getCodexLoginStatus: vi.fn().mockResolvedValue({ state: "idle" }),
+    startCodexLogin: vi.fn().mockResolvedValue({ state: "idle" }),
+    cancelCodexLogin: vi.fn().mockResolvedValue({ state: "idle" }),
+    codexLogout: vi.fn().mockResolvedValue({ ok: true }),
   },
 }));
 
@@ -53,11 +61,16 @@ describe("OnboardingModal", () => {
     expect(screen.getByText("claude setup-token")).toBeInTheDocument();
   });
 
-  it("navigates to Codex setup when Codex is clicked", () => {
+  // The Codex step used to print a `codex --login` command for the user to run
+  // over SSH. It now embeds CodexAuthPanel, which drives the device-code login
+  // in-browser, so this asserts the in-UI sign-in affordance instead.
+  it("navigates to Codex setup when Codex is clicked", async () => {
     render(<OnboardingModal onComplete={vi.fn()} />);
     fireEvent.click(screen.getByText("Codex"));
     expect(screen.getByText("Set up Codex")).toBeInTheDocument();
-    expect(screen.getByText("codex --login")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /sign in with chatgpt/i }),
+    ).toBeInTheDocument();
   });
 
   it("skips all setup when skip link is clicked", async () => {
