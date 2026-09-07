@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.120.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.119.1...companion-v0.120.0) (2026-09-07)
+
+
+### Features
+
+* **codex:** sign in to ChatGPT from the UI and support Codex 0.153 ([#124](https://github.com/hellcoderGIT/companion/issues/124)) ([7074f9d](https://github.com/hellcoderGIT/companion/commit/7074f9dcc69f98d5ad6ea34b1df2e28fe7ee8a06))
+
 ## [0.119.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.119.0...companion-v0.119.1) (2026-09-04)
 
 
