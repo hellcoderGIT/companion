@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "../api.js";
+import { CodexAuthPanel } from "./CodexAuthPanel.js";
 import { useStore } from "../store.js";
 import { getTelemetryPreferenceEnabled, setTelemetryPreferenceEnabled } from "../analytics.js";
 import { navigateToSession, navigateHome } from "../utils/routing.js";
@@ -853,13 +854,15 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   </p>
                 </div>
 
+                <CodexAuthPanel />
+
                 {/* OpenAI API Key (Codex) */}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium" htmlFor="openai-api-key">
                     OpenAI API Key (Codex)
                   </label>
                   <p className="text-xs text-cc-muted">
-                    Used to authenticate Codex sessions. You can also use <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">codex --login</code> for device-based auth.
+                    Optional fallback for Codex sessions when you aren&apos;t signing in with a ChatGPT subscription above.
                   </p>
                   <input
                     id="openai-api-key"

@@ -88,6 +88,15 @@ vi.mock("../api.js", () => ({
     regenerateAuthToken: (...args: unknown[]) => mockApi.regenerateAuthToken(...args),
     getAuthQr: (...args: unknown[]) => mockApi.getAuthQr(...args),
     verifyAnthropicKey: (...args: unknown[]) => mockApi.verifyAnthropicKey(...args),
+    // Codex auth panel is embedded in the Providers section; it probes these
+    // on mount, so they must exist or the whole page crashes on render.
+    getCodexAccount: () => Promise.resolve({
+      cliAvailable: true, authenticated: false, method: null, email: null, planType: null,
+    }),
+    getCodexLoginStatus: () => Promise.resolve({ state: "idle" }),
+    startCodexLogin: () => Promise.resolve({ state: "idle" }),
+    cancelCodexLogin: () => Promise.resolve({ state: "idle" }),
+    codexLogout: () => Promise.resolve({ ok: true }),
   },
 }));
 

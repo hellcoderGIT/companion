@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api.js";
+import { CodexAuthPanel } from "./CodexAuthPanel.js";
 
 type Step = "welcome" | "claude" | "codex" | "done";
 
@@ -104,7 +105,7 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
         setCodexConfigured(true);
         await finishOnboarding();
       } else {
-        setError("No Codex auth found. Run codex --login in your terminal first.");
+        setError("No Codex auth found yet. Complete the sign-in above, then check again.");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to check auth status");
@@ -495,32 +496,11 @@ function CodexSetupStep({
           Set up Codex
         </h2>
         <p className="text-sm text-cc-muted mt-1.5 leading-relaxed">
-          Log in with your ChatGPT account by running this in your terminal:
+          Sign in with your ChatGPT account — no terminal needed.
         </p>
       </div>
 
-      {/* Terminal-style command block */}
-      <div
-        className="rounded-lg overflow-hidden mb-4 border border-cc-border"
-        style={{ background: "var(--color-cc-code-bg)" }}
-      >
-        <div
-          className="flex items-center justify-between px-3 py-1.5 border-b border-cc-border"
-        >
-          <div className="flex items-center gap-1.5" aria-hidden="true">
-            <div className="w-[7px] h-[7px] rounded-full bg-cc-error opacity-60" />
-            <div className="w-[7px] h-[7px] rounded-full bg-cc-warning opacity-60" />
-            <div className="w-[7px] h-[7px] rounded-full bg-cc-success opacity-60" />
-          </div>
-          <CopyButton text="codex --login" />
-        </div>
-        <div className="px-3.5 py-3">
-          <div className="flex items-center gap-2">
-            <span className="text-cc-muted text-xs font-mono-code select-none" aria-hidden="true">$</span>
-            <code className="text-[13px] font-mono-code text-cc-fg select-all">codex --login</code>
-          </div>
-        </div>
-      </div>
+      <CodexAuthPanel />
 
       {error && (
         <div id={errorId} role="alert" className="flex items-start gap-2 mb-4 text-xs text-cc-error">
