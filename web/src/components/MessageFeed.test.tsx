@@ -6,6 +6,7 @@ beforeAll(() => {
 });
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import type { ChatMessage, ProcessItem } from "../types.js";
 
 const { getClaudeSessionHistoryMock } = vi.hoisted(() => ({
@@ -53,6 +54,7 @@ vi.mock("../store.js", () => ({
 }));
 
 import { MessageFeed } from "./MessageFeed.js";
+import { DensityProvider } from "./density.js";
 
 function makeMessage(
   overrides: Partial<ChatMessage> & { role: ChatMessage["role"] },
@@ -1026,5 +1028,136 @@ describe("MessageFeed - subagent grouping", () => {
     expect(screen.getByText(/sender: thr_main/)).toBeTruthy();
     expect(screen.getByText("thr_sub_1")).toBeTruthy();
     expect(screen.getByText("thr_sub_2")).toBeTruthy();
+  });
+});
+
+// ─── Compact density: activity-run folding ───────────────────────────────────
+//
+// In compact mode every stretch of agent work between two real outputs (user
+// message / final answer / live draft) folds into one two-line ActivityRun:
+// a summary header plus the latest action. Standard density is untouched.
+describe("MessageFeed - compact activity runs", () => {
+  const sessionId = "compact-runs";
+
+  function toolStep(id: string, command: string, ts: number, thinking = ""): ChatMessage {
+    return makeMessage({
+      id,
+      role: "assistant",
+      stopReason: "tool_use",
+      timestamp: ts,
+      contentBlocks: [
+        { type: "thinking", thinking },
+        { type: "tool_use", id: `tu-${id}`, name: "Bash", input: { command } },
+        { type: "tool_result", tool_use_id: `tu-${id}`, content: "ok" },
+      ],
+    });
+  }
+
+  const conversation = (): ChatMessage[] => [
+    makeMessage({ id: "u1", role: "user", content: "Why is the OEM code missing?", timestamp: 1_000 }),
+    toolStep("a1", "grep -rn mc_number src", 2_000),
+    toolStep("a2", "psql -c 'select 1'", 3_000, "The OEM manufacturer code isn't indexed."),
+    makeMessage({ id: "sys1", role: "system", content: "Task completed: brnbk6cys", timestamp: 4_000 }),
+    makeMessage({
+      id: "final",
+      role: "assistant",
+      content: "The transformer only handles mc_number.",
+      stopReason: "end_turn",
+      timestamp: 5_000,
+      contentBlocks: [{ type: "text", text: "The transformer only handles mc_number." }],
+    }),
+  ];
+
+  it("folds the work between question and answer into one run showing only the latest action", () => {
+    resetStore();
+    setStoreMessages(sessionId, conversation());
+    setStoreStatus(sessionId, "idle");
+    render(
+      <DensityProvider value="compact">
+        <MessageFeed sessionId={sessionId} />
+      </DensityProvider>,
+    );
+
+    // Real outputs stay visible.
+    expect(screen.getByText("Why is the OEM code missing?")).toBeInTheDocument();
+    expect(screen.getByText("The transformer only handles mc_number.")).toBeInTheDocument();
+    // One finished run summarising the three folded steps.
+    expect(screen.getByText("Worked")).toBeInTheDocument();
+    expect(screen.getByText("2 tool calls")).toBeInTheDocument();
+    expect(screen.getByText("3 steps")).toBeInTheDocument();
+    // Only the last folded step (the system line) is previewed …
+    expect(screen.getByRole("status")).toHaveTextContent("Task completed: brnbk6cys");
+    // … the earlier commands / thinking are not in the DOM at all.
+    expect(screen.queryByText(/grep -rn mc_number/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/isn't indexed/)).not.toBeInTheDocument();
+  });
+
+  it("expands a run on click to the full per-step rendering", () => {
+    resetStore();
+    setStoreMessages(sessionId, conversation());
+    setStoreStatus(sessionId, "idle");
+    render(
+      <DensityProvider value="compact">
+        <MessageFeed sessionId={sessionId} />
+      </DensityProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Worked: 3 steps/ }));
+    // Compact BashBlock shows the command's first line as its disclosure label.
+    expect(screen.getByText("grep -rn mc_number src")).toBeInTheDocument();
+    expect(screen.getByText("psql -c 'select 1'")).toBeInTheDocument();
+  });
+
+  it("marks the trailing run as live ('Working') while the session is running", () => {
+    resetStore();
+    setStoreMessages(sessionId, conversation().slice(0, 4)); // no answer yet
+    setStoreStatus(sessionId, "running");
+    setStoreStreamingStartedAt(sessionId, Date.now() - 5_000);
+    setStoreLastActivity(sessionId, Date.now());
+    render(
+      <DensityProvider value="compact">
+        <MessageFeed sessionId={sessionId} />
+      </DensityProvider>,
+    );
+    expect(screen.getByText("Working")).toBeInTheDocument();
+    expect(screen.queryByText("Worked")).not.toBeInTheDocument();
+  });
+
+  it("never folds the live streaming draft — it stays visible after the run", () => {
+    resetStore();
+    setStoreMessages(sessionId, [
+      ...conversation().slice(0, 3),
+      makeMessage({
+        id: "draft",
+        role: "assistant",
+        content: "Drafting the answer",
+        isStreaming: true,
+        streamingPhase: "text",
+        timestamp: 6_000,
+      }),
+    ]);
+    setStoreStatus(sessionId, "running");
+    render(
+      <DensityProvider value="compact">
+        <MessageFeed sessionId={sessionId} />
+      </DensityProvider>,
+    );
+    expect(screen.getByText("Drafting the answer")).toBeInTheDocument();
+    // The run before the draft is finished-looking, not live: the draft is the tail.
+    expect(screen.getByText("Worked")).toBeInTheDocument();
+  });
+
+  it("leaves standard density exactly as before (no runs, every step rendered)", () => {
+    resetStore();
+    setStoreMessages(sessionId, conversation());
+    setStoreStatus(sessionId, "idle");
+    render(
+      <DensityProvider value="standard">
+        <MessageFeed sessionId={sessionId} />
+      </DensityProvider>,
+    );
+    expect(screen.queryByText("Worked")).not.toBeInTheDocument();
+    expect(screen.queryByText(/steps$/)).not.toBeInTheDocument();
+    expect(screen.getByText(/grep -rn mc_number src/)).toBeInTheDocument();
+    expect(screen.getByText("Task completed: brnbk6cys")).toBeInTheDocument();
   });
 });

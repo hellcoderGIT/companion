@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { PermissionBanner } from "./PermissionBanner.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { DensityProvider } from "./density.js";
+import { ActivityRunBlock } from "./ActivityRun.js";
+import type { ActivityRun } from "./activity-run.js";
 import {
   ToolBlock,
   getToolIcon,
@@ -491,6 +493,57 @@ const MSG_EMPTY_THINKING_STREAMING: ChatMessage = {
   isStreaming: true,
   contentBlocks: [{ type: "thinking", thinking: "" }],
   timestamp: Date.now() - 17000,
+};
+
+// Compact density folds the agent's work between two real outputs into one
+// "activity run": a summary header plus the latest action. These are the
+// turn-steps (thinking + tool calls + a task-completed line) that would
+// otherwise each cost an avatar row, a card and a summary strip.
+function activityStep(id: string, command: string, description: string, agoMs: number, thinking = ""): ChatMessage {
+  return {
+    id,
+    role: "assistant",
+    content: "",
+    stopReason: "tool_use",
+    timestamp: Date.now() - agoMs,
+    contentBlocks: [
+      { type: "thinking", thinking },
+      { type: "tool_use", id: `tu-${id}`, name: "Bash", input: { command, description } },
+      { type: "tool_result", tool_use_id: `tu-${id}`, content: "ok" },
+    ],
+  };
+}
+
+const MOCK_ACTIVITY_RUN: ActivityRun = {
+  kind: "activity_run",
+  key: "run-1",
+  children: [
+    { kind: "message", msg: activityStep("run-1", "hostname && git status", "Check hostname, repo state, and list backend docs", 95_000) },
+    { kind: "message", msg: activityStep("run-2", "grep -rn mc_number src/", "Find where manufacturer codes are indexed", 80_000) },
+    {
+      kind: "subagent",
+      taskToolUseId: "run-task-1",
+      description: "Explore Meilisearch transformer",
+      agentType: "Explore",
+      children: [
+        { kind: "message", msg: activityStep("run-3", "cat src/search/transform.ts", "Read transformer", 60_000) },
+      ],
+    },
+    {
+      kind: "message",
+      msg: activityStep(
+        "run-4",
+        "psql -c \"select settings from search_settings\"",
+        "Check DB-stored search settings",
+        30_000,
+        "I found that the OEM manufacturer code isn't indexed in Meilisearch since the transformer only handles mc_number / mc_number_short. Now I'll check the prod data shape.",
+      ),
+    },
+    {
+      kind: "message",
+      msg: { id: "run-sys", role: "system", content: "Task completed: brnbk6cys", timestamp: Date.now() - 5_000 },
+    },
+  ],
 };
 
 // Tasks
@@ -1151,7 +1204,7 @@ export function Playground() {
         {/* ─── Message density ───────────────────────────────── */}
         <Section
           title="Message density"
-          description="Standard (default) vs compact — set in Settings → General. Compact collapses commands, diffs and output to one expandable line and hides empty thinking steps."
+          description="Standard (default) vs compact — set in Settings → General. Compact collapses commands, diffs and output to one expandable line, hides empty thinking steps, and folds each stretch of work between two real outputs into a two-line activity run."
         >
           <div className="grid gap-4 lg:grid-cols-2 max-w-6xl">
             <Card label="Standard — empty thinking + command + output">
@@ -1192,6 +1245,24 @@ export function Playground() {
             <Card label="Compact — error output">
               <DensityProvider value="compact">
                 <MessageBubble message={MSG_TOOL_ERROR} />
+              </DensityProvider>
+            </Card>
+            <Card label="Compact — activity run, still working (live)">
+              <DensityProvider value="compact">
+                <ActivityRunBlock run={MOCK_ACTIVITY_RUN} live>
+                  {MOCK_ACTIVITY_RUN.children.map((c) =>
+                    c.kind === "message" ? <MessageBubble key={c.msg.id} message={c.msg} /> : null,
+                  )}
+                </ActivityRunBlock>
+              </DensityProvider>
+            </Card>
+            <Card label="Compact — activity run, finished (click to expand)">
+              <DensityProvider value="compact">
+                <ActivityRunBlock run={MOCK_ACTIVITY_RUN} live={false}>
+                  {MOCK_ACTIVITY_RUN.children.map((c) =>
+                    c.kind === "message" ? <MessageBubble key={c.msg.id} message={c.msg} /> : null,
+                  )}
+                </ActivityRunBlock>
               </DensityProvider>
             </Card>
           </div>

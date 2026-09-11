@@ -13,6 +13,9 @@ import type { ToolActivityEntry } from "../store/tasks-slice.js";
 import { formatElapsed, formatTokenCount } from "../utils/format.js";
 import { ToolExecutionBar } from "./ToolExecutionBar.js";
 import { ToolTurnSummary } from "./ToolTurnSummary.js";
+import { useIsCompact } from "./density.js";
+import { foldActivityRuns, type ActivityRun } from "./activity-run.js";
+import { ActivityRunBlock } from "./ActivityRun.js";
 
 const FEED_PAGE_SIZE = 100;
 const RESUME_HISTORY_PAGE_SIZE = 40;
@@ -45,14 +48,17 @@ interface ToolItem {
   input: Record<string, unknown>;
 }
 
-interface ToolMsgGroup {
+export interface ToolMsgGroup {
   kind: "tool_msg_group";
   toolName: string;
   items: ToolItem[];
   firstId: string;
+  /** Timestamp of the first / last merged message — used by compact activity runs. */
+  startedAt: number;
+  endedAt: number;
 }
 
-interface SubagentGroup {
+export interface SubagentGroup {
   kind: "subagent";
   taskToolUseId: string;
   description: string;
@@ -65,10 +71,11 @@ interface SubagentGroup {
   children: FeedEntry[];
 }
 
-type FeedEntry =
+export type FeedEntry =
   | { kind: "message"; msg: ChatMessage }
   | ToolMsgGroup
-  | SubagentGroup;
+  | SubagentGroup
+  | ActivityRun;
 
 /**
  * Get the dominant tool name if this message is "tool-only"
@@ -137,6 +144,7 @@ function groupToolMessages(messages: ChatMessage[]): FeedEntry[] {
       const last = entries[entries.length - 1];
       if (last?.kind === "tool_msg_group" && last.toolName === toolName) {
         last.items.push(...extractToolItems(msg));
+        last.endedAt = Math.max(last.endedAt, msg.timestamp);
         continue;
       }
       entries.push({
@@ -144,6 +152,8 @@ function groupToolMessages(messages: ChatMessage[]): FeedEntry[] {
         toolName,
         items: extractToolItems(msg),
         firstId: msg.id,
+        startedAt: msg.timestamp,
+        endedAt: msg.timestamp,
       });
     } else {
       entries.push({ kind: "message", msg });
@@ -383,10 +393,26 @@ function ToolMessageGroup({ group }: { group: ToolMsgGroup }) {
   );
 }
 
-function FeedEntries({ entries, toolActivity }: { entries: FeedEntry[]; toolActivity?: ToolActivityEntry[] }) {
+function FeedEntries({
+  entries,
+  toolActivity,
+  liveRunKey,
+}: {
+  entries: FeedEntry[];
+  toolActivity?: ToolActivityEntry[];
+  /** Key of the activity run the agent is still appending to (compact only). */
+  liveRunKey?: string;
+}) {
   return (
     <>
       {entries.map((entry, i) => {
+        if (entry.kind === "activity_run") {
+          return (
+            <ActivityRunBlock key={entry.key} run={entry} live={entry.key === liveRunKey}>
+              <FeedEntries entries={entry.children} toolActivity={toolActivity} />
+            </ActivityRunBlock>
+          );
+        }
         if (entry.kind === "tool_msg_group") {
           return <ToolMessageGroup key={entry.firstId || i} group={entry} />;
         }
@@ -706,10 +732,27 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
 
   const totalEntries = grouped.length;
   const hasMore = totalEntries > visibleCount;
-  const visibleEntries = hasMore
-    ? grouped.slice(totalEntries - visibleCount)
-    : grouped;
+  const visibleEntries = useMemo(
+    () => (hasMore ? grouped.slice(totalEntries - visibleCount) : grouped),
+    [grouped, hasMore, totalEntries, visibleCount],
+  );
   const hiddenCount = totalEntries - visibleEntries.length;
+  // Compact density folds the agent's in-progress work between real outputs
+  // into activity runs (see activity-run.ts). Applied to the visible window
+  // only, so paging keeps its plain entry semantics. Standard density renders
+  // the entries untouched.
+  const compact = useIsCompact();
+  const feedEntries = useMemo(
+    () => (compact ? foldActivityRuns(visibleEntries) : visibleEntries),
+    [compact, visibleEntries],
+  );
+  // The trailing run is "live" while the turn is still going — it gets the
+  // pulsing dot and a ticking timer instead of a finished summary.
+  const lastFeedEntry = feedEntries[feedEntries.length - 1];
+  const liveRunKey =
+    sessionStatus === "running" && lastFeedEntry?.kind === "activity_run"
+      ? lastFeedEntry.key
+      : undefined;
 
   const handleLoadMore = useCallback(() => {
     const el = containerRef.current;
@@ -1062,7 +1105,11 @@ export function MessageFeed({ sessionId }: { sessionId: string }) {
               </button>
             </div>
           )}
-          <FeedEntries entries={visibleEntries} toolActivity={toolActivity} />
+          <FeedEntries
+            entries={feedEntries}
+            toolActivity={toolActivity}
+            liveRunKey={liveRunKey}
+          />
 
           {/* Tool progress indicator */}
           {toolProgress && toolProgress.size > 0 && !hasStreamingAssistant && (
