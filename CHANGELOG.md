@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.121.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.120.0...companion-v0.121.0) (2026-09-11)
+
+
+### Features
+
+* **ui:** fold in-progress work into activity runs in compact mode ([#126](https://github.com/hellcoderGIT/companion/issues/126)) ([54db5ef](https://github.com/hellcoderGIT/companion/commit/54db5effee435b45150fae9315b28fa0e146cd79))
+
 ## [0.120.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.119.1...companion-v0.120.0) (2026-09-07)
 
 
