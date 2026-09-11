@@ -233,7 +233,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-function AssistantAvatar() {
+export function AssistantAvatar() {
   return (
     <div className="w-6 h-6 rounded-full avatar-ring flex items-center justify-center shrink-0 mt-0.5">
       <div className="avatar-inner w-full h-full rounded-full flex items-center justify-center">
