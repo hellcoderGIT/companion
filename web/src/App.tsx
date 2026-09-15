@@ -65,6 +65,7 @@ export default function App() {
   const sessionCreatingBackend = useStore((s) => s.sessionCreatingBackend);
   const creationProgress = useStore((s) => s.creationProgress);
   const creationError = useStore((s) => s.creationError);
+  const creationDraft = useStore((s) => s.creationDraft);
   const updateOverlayActive = useStore((s) => s.updateOverlayActive);
   const hash = useHash();
   const route = useMemo(() => parseHash(hash), [hash]);
@@ -323,6 +324,7 @@ export default function App() {
                 <SessionLaunchOverlay
                   steps={creationProgress}
                   error={creationError}
+                  unsentPrompt={creationDraft?.text ?? null}
                   backend={sessionCreatingBackend ?? undefined}
                   onCancel={() => useStore.getState().clearCreation()}
                 />

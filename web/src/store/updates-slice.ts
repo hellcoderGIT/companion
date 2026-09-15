@@ -14,6 +14,8 @@ export interface UpdatesSlice {
   dockerUpdateDialogOpen: boolean;
   creationProgress: CreationProgressEvent[] | null;
   creationError: string | null;
+  /** The prompt the user typed when creation failed — surfaced in the overlay so it is never lost. */
+  creationDraft: { text: string } | null;
   sessionCreating: boolean;
   sessionCreatingBackend: "claude" | "codex" | null;
   claudeCompatInfo: ClaudeCompatInfo | null;
@@ -25,7 +27,7 @@ export interface UpdatesSlice {
   addCreationProgress: (step: CreationProgressEvent) => void;
   clearCreation: () => void;
   setSessionCreating: (creating: boolean, backend?: "claude" | "codex") => void;
-  setCreationError: (error: string | null) => void;
+  setCreationError: (error: string | null, draft?: { text: string } | null) => void;
   setClaudeCompatInfo: (info: ClaudeCompatInfo | null) => void;
 }
 
@@ -36,6 +38,7 @@ export const createUpdatesSlice: StateCreator<AppState, [], [], UpdatesSlice> = 
   dockerUpdateDialogOpen: false,
   creationProgress: null,
   creationError: null,
+  creationDraft: null,
   sessionCreating: false,
   sessionCreatingBackend: null,
   claudeCompatInfo: null,
@@ -58,8 +61,8 @@ export const createUpdatesSlice: StateCreator<AppState, [], [], UpdatesSlice> = 
     }
     return { creationProgress: [...existing, step] };
   }),
-  clearCreation: () => set({ creationProgress: null, creationError: null, sessionCreating: false, sessionCreatingBackend: null }),
+  clearCreation: () => set({ creationProgress: null, creationError: null, creationDraft: null, sessionCreating: false, sessionCreatingBackend: null }),
   setSessionCreating: (creating, backend) => set({ sessionCreating: creating, sessionCreatingBackend: backend ?? null }),
-  setCreationError: (error) => set({ creationError: error }),
+  setCreationError: (error, draft) => set({ creationError: error, creationDraft: draft ?? null }),
   setClaudeCompatInfo: (info) => set({ claudeCompatInfo: info }),
 });

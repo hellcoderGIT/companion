@@ -12,7 +12,7 @@ import {
   type ImagePullState,
   type LinearIssue,
 } from "../api.js";
-import { connectSession, createClientMessageId, waitForConnection, sendToSession } from "../ws.js";
+import { connectSession, createClientMessageId } from "../ws.js";
 import { disconnectSession } from "../ws.js";
 import { generateUniqueSessionName } from "../utils/names.js";
 import { getRecentDirs, addRecentDir } from "../utils/recent-dirs.js";
@@ -98,8 +98,17 @@ function formatTimeAgo(timestamp: number): string {
   return `${Math.max(1, months)}mo ago`;
 }
 
+/** localStorage key for the in-progress composer text, so a reload mid-create can't lose it. */
+const DRAFT_PROMPT_KEY = "cc-draft-prompt";
+
 export function HomePage() {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => localStorage.getItem(DRAFT_PROMPT_KEY) || "");
+  // Mirror the composer to localStorage. Cleared once the server has accepted
+  // the prompt (see doCreateSession) — until then it is the user's only copy.
+  useEffect(() => {
+    if (text) localStorage.setItem(DRAFT_PROMPT_KEY, text);
+    else localStorage.removeItem(DRAFT_PROMPT_KEY);
+  }, [text]);
   // Identity: who is creating the session + an optional session-name prefix. These
   // are normally edited from the Context panel (TaskPanel) and persisted to
   // localStorage. But the Context panel only exists inside an open session, so on a
@@ -683,9 +692,23 @@ export function HomePage() {
         ? launchOverride.createBranch
         : Boolean(effectiveBranch && isNewBranch);
 
+      // The first prompt travels with the create request. The server persists
+      // it in the session's queue before responding, so it is safe regardless
+      // of how long this browser's WebSocket takes to come up (or whether the
+      // tab survives at all). See hellcoderGIT/companion#128.
+      const trimmedMsg = msg.trim();
+      const initialContent = trimmedMsg.length > 0 ? buildInitialMessage(trimmedMsg) : null;
+      const clientMsgId = initialContent ? createClientMessageId() : null;
+      const attachmentPayload = attachments.length > 0
+        ? attachments.map((a) => ({ name: a.name, media_type: a.mediaType, data: a.base64, size: a.size }))
+        : undefined;
+
       // Create session with progress streaming
       const result = await createSessionStream(
         {
+          initialMessage: initialContent && clientMsgId
+            ? { content: initialContent, attachments: attachmentPayload, clientMsgId }
+            : undefined,
           model,
           permissionMode: mode,
           // Empty effort = let the model use its default; Codex has no effort selector.
@@ -761,38 +784,27 @@ export function HomePage() {
       // Store the permission mode for this session
       useStore.getState().setPreviousPermissionMode(sessionId, mode);
 
+      // The server owns the prompt now — drop the local draft. Only when one
+      // was actually sent: a branched-session launch leaves composer text alone.
+      if (initialContent) {
+        localStorage.removeItem(DRAFT_PROMPT_KEY);
+        setText("");
+      }
+
       // Switch to session — use replace to avoid a back-button entry for the creation state
       navigateToSession(sessionId, true);
-      // connectSession called eagerly so waitForConnection below can resolve immediately;
-      // the App.tsx hash-sync effect also calls it, but that runs after render (too late).
+      // Connect eagerly (the App.tsx hash-sync effect also does this, after render).
+      // Nothing waits on the socket: history replay on subscribe brings the
+      // prompt back from the server whenever the connection does come up.
       connectSession(sessionId);
 
-      // Wait for WebSocket connection
-      await waitForConnection(sessionId);
-
-      const trimmedMsg = msg.trim();
-      if (trimmedMsg.length > 0) {
-        const initialMessage = buildInitialMessage(trimmedMsg);
-        const clientMsgId = createClientMessageId();
-
-        const attachmentPayload = attachments.length > 0
-          ? attachments.map((a) => ({ name: a.name, media_type: a.mediaType, data: a.base64, size: a.size }))
-          : undefined;
-
-        // Send message
-        sendToSession(sessionId, {
-          type: "user_message",
-          content: initialMessage,
-          session_id: sessionId,
-          attachments: attachmentPayload,
-          client_msg_id: clientMsgId,
-        });
-
-        // Add user message to store
+      if (initialContent && clientMsgId) {
+        // Optimistic echo. The server recorded the message under the same id,
+        // so the replayed history entry dedups against this one.
         useStore.getState().appendMessage(sessionId, {
           id: clientMsgId,
           role: "user",
-          content: initialMessage,
+          content: initialContent,
           attachments: attachmentPayload,
           timestamp: Date.now(),
         });
@@ -815,8 +827,11 @@ export function HomePage() {
       const errMsg = e instanceof Error ? e.message : String(e);
       setError(errMsg);
       // Set error in store so the overlay can display it; keep sessionCreating
-      // true so the overlay stays visible — user dismisses via the overlay's cancel button
-      useStore.getState().setCreationError(errMsg);
+      // true so the overlay stays visible — user dismisses via the overlay's cancel button.
+      // Hand the overlay the raw prompt too: creation failed, so the user must be
+      // able to see and copy exactly what they typed.
+      const draft = msg.trim();
+      useStore.getState().setCreationError(errMsg, draft ? { text: draft } : null);
       setSending(false);
     }
   }

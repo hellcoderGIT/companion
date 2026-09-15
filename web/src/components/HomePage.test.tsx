@@ -56,7 +56,6 @@ vi.mock("../store.js", () => {
 vi.mock("../ws.js", () => ({
   connectSession: vi.fn(),
   createClientMessageId: vi.fn(() => "test-client-msg-id"),
-  waitForConnection: vi.fn().mockResolvedValue(undefined),
   sendToSession: vi.fn(),
   disconnectSession: vi.fn(),
 }));
@@ -756,12 +755,19 @@ describe("HomePage", () => {
           permissionMode: "bypassPermissions",
           cwd: "/repo",
           backend: "claude",
+          // The prompt rides on the create request so the server persists it
+          // before this browser has a WebSocket (hellcoderGIT/companion#128).
+          initialMessage: expect.objectContaining({
+            content: "[Tester]: Fix the login bug",
+            clientMsgId: expect.any(String),
+          }),
         }),
         expect.any(Function),
       );
     });
 
-    // The message should be appended to the store
+    // The message should be appended to the store as an optimistic echo, under
+    // the same id the server recorded it with so history replay dedups.
     await waitFor(() => {
       expect(storeMock.appendMessage).toHaveBeenCalledWith(
         "new-session-abc",
@@ -772,6 +778,46 @@ describe("HomePage", () => {
         }),
       );
     });
+    const sentId = createSessionStreamMock.mock.calls[0][0].initialMessage.clientMsgId;
+    expect(storeMock.appendMessage.mock.calls[0][1].id).toBe(sentId);
+
+    // Accepted by the server → the local draft is no longer the only copy.
+    expect(localStorage.getItem("cc-draft-prompt")).toBeNull();
+  });
+
+  it("keeps the prompt when session creation fails and surfaces it to the overlay", async () => {
+    // The user must never lose what they typed: on failure the draft stays in
+    // the composer, in localStorage, and is handed to the launch overlay so it
+    // can be shown with a copy button.
+    const storeMock = buildStoreMock();
+    mockStoreGetState.mockReturnValue(storeMock);
+    createSessionStreamMock.mockRejectedValue(new Error("Failed to launch CLI: boom"));
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("repo")).toBeInTheDocument());
+
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Fix the login bug" } });
+    fireEvent.click(screen.getByTitle("Send message"));
+
+    await waitFor(() => {
+      expect(storeMock.setCreationError).toHaveBeenCalledWith(
+        "Failed to launch CLI: boom",
+        { text: "Fix the login bug" },
+      );
+    });
+    expect(textarea.value).toBe("Fix the login bug");
+    expect(localStorage.getItem("cc-draft-prompt")).toBe("Fix the login bug");
+    expect(storeMock.appendMessage).not.toHaveBeenCalled();
+  });
+
+  it("restores an unsent draft prompt from localStorage on mount", async () => {
+    // A reload mid-create (or a crashed tab) must not lose the typed prompt.
+    window.localStorage.setItem("cc-draft-prompt", "Half-typed idea");
+    render(<HomePage />);
+
+    const textarea = screen.getByPlaceholderText("Fix a bug, build a feature, refactor code...") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("Half-typed idea");
   });
 
   // ─── Identity (name + session prefix) ───────────────────────────────────────
@@ -961,7 +1007,8 @@ describe("HomePage", () => {
     });
 
     // Store should have the error
-    expect(storeMock.setCreationError).toHaveBeenCalledWith("CLI not found");
+    // The typed prompt travels with the error so the overlay can show/copy it.
+    expect(storeMock.setCreationError).toHaveBeenCalledWith("CLI not found", { text: "Do something" });
   });
 
   it("does not send when textarea is empty", async () => {
