@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.121.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.121.0...companion-v0.121.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **session:** never lose the initial prompt on session create ([#129](https://github.com/hellcoderGIT/companion/issues/129)) ([30c55b4](https://github.com/hellcoderGIT/companion/commit/30c55b4c41a38d93a7b2cd3f5cd2a59343e79a19))
+
+
+### Performance Improvements
+
+* **ws:** stop opening a socket per dead session and cap concurrent handshakes ([#130](https://github.com/hellcoderGIT/companion/issues/130)) ([5d714b0](https://github.com/hellcoderGIT/companion/commit/5d714b0fa867bf6df70bf68ddcce215addfaa912))
+
 ## [0.121.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.120.0...companion-v0.121.0) (2026-09-11)
 
 
