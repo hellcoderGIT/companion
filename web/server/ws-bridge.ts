@@ -1192,14 +1192,31 @@ export class WsBridge {
   }
 
   /** Send a user message into a session programmatically (no browser required).
-   *  Used by the cron scheduler and agent executor to send prompts to autonomous sessions. */
-  injectUserMessage(sessionId: string, content: string): void {
+   *  Used by the cron scheduler, agent executor and the session orchestrator
+   *  (initial prompt at create time). Goes through the same path as a
+   *  browser-sent message: recorded in history, broadcast to attached
+   *  browsers, and queued in the persisted pendingMessages if the backend
+   *  isn't connected yet. */
+  injectUserMessage(
+    sessionId: string,
+    content: string,
+    opts?: {
+      attachments?: { name: string; media_type: string; data: string; size: number }[];
+      /** Browser-generated id so an optimistic local echo dedups against the replayed history entry. */
+      clientMsgId?: string;
+    },
+  ): void {
     const session = this.sessions.get(sessionId);
     if (!session) {
       console.error(`[ws-bridge] Cannot inject message: session ${sessionId} not found`);
       return;
     }
-    this.routeBrowserMessage(session, { type: "user_message", content });
+    this.routeBrowserMessage(session, {
+      type: "user_message",
+      content,
+      attachments: opts?.attachments,
+      client_msg_id: opts?.clientMsgId,
+    });
   }
 
   /** Configure MCP servers on a session programmatically (no browser required).

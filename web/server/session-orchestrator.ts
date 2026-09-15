@@ -19,6 +19,7 @@ import { buildLinearSystemPrompt } from "./linear-prompt-builder.js";
 import { transitionLinearIssue, fetchLinearTeamStates } from "./routes/linear-routes.js";
 import { hasContainerClaudeAuth } from "./claude-container-auth.js";
 import { hasContainerCodexAuth } from "./codex-container-auth.js";
+import { validateAttachments } from "./ws-bridge-browser-ingest.js";
 import { discoverCommandsAndSkills } from "./commands-discovery.js";
 import { getSettings } from "./settings-manager.js";
 import { generateSessionTitle } from "./auto-namer.js";
@@ -103,6 +104,39 @@ export interface CreateSessionRequest {
   forkSession?: boolean;
   /** Name of the human creating this session (injected into prompts, used for filtering). */
   userName?: string;
+  /**
+   * Optional first prompt. Queued server-side (into the persisted pendingMessages
+   * queue) as soon as the session exists, so it survives slow browser sockets,
+   * page reloads and CLI startup. The browser never has to wait for its
+   * WebSocket before the prompt is safe.
+   */
+  initialMessage?: InitialMessage;
+}
+
+export interface InitialMessage {
+  content: string;
+  attachments?: { name: string; media_type: string; data: string; size: number }[];
+  /** Browser-generated id so an optimistic local echo dedups against the replayed history entry. */
+  clientMsgId?: string;
+}
+
+/**
+ * Validate and trim the optional first prompt. Returns `undefined` when absent,
+ * the normalized message when valid, or an Error describing why it was rejected.
+ */
+function normalizeInitialMessage(raw: unknown): InitialMessage | undefined | Error {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object") return new Error("initialMessage must be an object");
+  const m = raw as Partial<InitialMessage>;
+  const content = typeof m.content === "string" ? m.content.trim() : "";
+  if (!content) return new Error("initialMessage.content must be a non-empty string");
+  const attachmentError = validateAttachments(m.attachments);
+  if (attachmentError) return new Error(`Attachment rejected: ${attachmentError}`);
+  return {
+    content,
+    attachments: m.attachments?.length ? m.attachments : undefined,
+    clientMsgId: typeof m.clientMsgId === "string" && m.clientMsgId ? m.clientMsgId : undefined,
+  };
 }
 
 export type CreateSessionResult =
@@ -330,6 +364,13 @@ export class SessionOrchestrator {
       const backend = (body.backend ?? "claude") as BackendType;
       if (backend !== "claude" && backend !== "codex") {
         return { ok: false, error: `Invalid backend: ${String(body.backend)}`, status: 400 };
+      }
+
+      // Validate the initial prompt up front, before anything is provisioned:
+      // a rejected prompt must not leave behind a spawned-but-empty session.
+      const initialMessage = normalizeInitialMessage(body.initialMessage);
+      if (initialMessage instanceof Error) {
+        return { ok: false, error: initialMessage.message, status: 400 };
       }
 
       // --- Step: Resolve environment ---
@@ -684,6 +725,17 @@ export class SessionOrchestrator {
 
       const discovered = await discoverCommandsAndSkills(cwd).catch(() => ({ slash_commands: [] as string[], skills: [] as string[] }));
       this.wsBridge.prePopulateCommands(session.sessionId, discovered.slash_commands, discovered.skills);
+
+      // Hand the first prompt to the bridge now, after the system prompt so
+      // ordering is preserved. The bridge records it in history and either
+      // forwards it to the CLI or parks it in the persisted queue until the
+      // CLI connects — either way it is durable before this call returns.
+      if (initialMessage) {
+        this.wsBridge.injectUserMessage(session.sessionId, initialMessage.content, {
+          attachments: initialMessage.attachments,
+          clientMsgId: initialMessage.clientMsgId,
+        });
+      }
 
       if (onProgress) await onProgress("launching_cli", "Session started", "done");
 

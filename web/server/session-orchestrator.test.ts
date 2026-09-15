@@ -179,6 +179,7 @@ function createMockBridge() {
     broadcastNameUpdate: vi.fn(),
     broadcastToSession: vi.fn(),
     injectSystemPrompt: vi.fn(),
+    injectUserMessage: vi.fn(),
     attachBackendAdapter: vi.fn(),
     cancelDisconnectTimer: vi.fn(() => false),
   } as any;
@@ -694,6 +695,81 @@ describe("SessionOrchestrator", () => {
           backendType: "claude",
         }),
       );
+    });
+
+    // ── Initial prompt (hellcoderGIT/companion#128) ────────────────────
+    // The first prompt travels with the create request and is handed to the
+    // bridge server-side, so it is durable before the browser has a socket.
+
+    it("queues the initial prompt through the bridge once the session exists", async () => {
+      const result = await orchestrator.createSession({
+        cwd: "/test",
+        initialMessage: { content: "  Fix the login bug  ", clientMsgId: "cm-1" },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(deps.wsBridge.injectUserMessage).toHaveBeenCalledTimes(1);
+      expect(deps.wsBridge.injectUserMessage).toHaveBeenCalledWith(
+        "session-1",
+        "Fix the login bug",
+        { attachments: undefined, clientMsgId: "cm-1" },
+      );
+      // Ordering: the prompt must come after the launch and after any system
+      // prompt / command pre-population, never before the session exists.
+      const launchOrder = deps.launcher.launch.mock.invocationCallOrder[0];
+      const injectOrder = deps.wsBridge.injectUserMessage.mock.invocationCallOrder[0];
+      expect(injectOrder).toBeGreaterThan(launchOrder);
+    });
+
+    it("forwards initial prompt attachments to the bridge", async () => {
+      const attachments = [{ name: "a.png", media_type: "image/png", data: "AAAA", size: 4 }];
+      await orchestrator.createSession({
+        cwd: "/test",
+        initialMessage: { content: "look at this", attachments },
+      });
+
+      expect(deps.wsBridge.injectUserMessage).toHaveBeenCalledWith(
+        "session-1",
+        "look at this",
+        { attachments, clientMsgId: undefined },
+      );
+    });
+
+    it("does not inject anything when no initial prompt is given", async () => {
+      await orchestrator.createSession({ cwd: "/test" });
+      expect(deps.wsBridge.injectUserMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects an empty initial prompt with 400 before launching anything", async () => {
+      const result = await orchestrator.createSession({
+        cwd: "/test",
+        initialMessage: { content: "   " },
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(400);
+        expect(result.error).toContain("initialMessage.content");
+      }
+      expect(deps.launcher.launch).not.toHaveBeenCalled();
+      expect(deps.wsBridge.injectUserMessage).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid initial prompt attachments with 400 before launching anything", async () => {
+      const result = await orchestrator.createSession({
+        cwd: "/test",
+        initialMessage: {
+          content: "hi",
+          attachments: [{ name: "x", media_type: "image/png", data: "AAAA", size: -1 }],
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(400);
+        expect(result.error).toContain("Attachment rejected");
+      }
+      expect(deps.launcher.launch).not.toHaveBeenCalled();
     });
 
     it("returns 400 for invalid backend", async () => {

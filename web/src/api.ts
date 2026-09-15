@@ -238,6 +238,15 @@ export interface CreateSessionOpts {
     teamName: string;
     url: string;
   };
+  /**
+   * First prompt, handed to the server with the create request so it is
+   * persisted in the session's queue before the browser even has a WebSocket.
+   */
+  initialMessage?: {
+    content: string;
+    attachments?: { name: string; media_type: string; data: string; size: number }[];
+    clientMsgId?: string;
+  };
 }
 
 export interface BackendInfo {

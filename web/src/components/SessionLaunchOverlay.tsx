@@ -1,10 +1,55 @@
+import { useEffect, useState } from "react";
 import type { CreationProgressEvent } from "../api.js";
 
 interface Props {
   steps: CreationProgressEvent[];
   error?: string | null;
+  /** Prompt the user typed when creation failed. Shown verbatim with a copy button so it is never lost. */
+  unsentPrompt?: string | null;
   backend?: "claude" | "codex";
   onCancel?: () => void;
+}
+
+function UnsentPrompt({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      // Clipboard unavailable (insecure context / permission) — the text is
+      // still selectable below, so there is nothing more to do here.
+    }
+  }
+
+  return (
+    <div className="mt-3 w-full max-w-xs px-4" data-testid="unsent-prompt">
+      <div className="rounded-lg border border-cc-border bg-cc-card/80">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-cc-border/60">
+          <span className="text-[11px] font-medium text-cc-fg">Your prompt was not sent</span>
+          <button
+            type="button"
+            onClick={copy}
+            className="px-2 py-1 min-h-[28px] text-[11px] font-medium rounded-md bg-cc-hover text-cc-muted hover:text-cc-fg hover:bg-cc-border transition-colors cursor-pointer"
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+        <pre className="px-3 py-2 max-h-40 overflow-auto text-[11px] text-cc-fg whitespace-pre-wrap break-words font-mono-code leading-relaxed select-text">
+          {text}
+        </pre>
+        <p className="px-3 pb-2 text-[10px] text-cc-muted">
+          It is still in the composer — dismiss to edit and retry.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -12,7 +57,7 @@ interface Props {
  * Replaces the inline progress list under the input box with a
  * centered, animated launch screen.
  */
-export function SessionLaunchOverlay({ steps, error, backend, onCancel }: Props) {
+export function SessionLaunchOverlay({ steps, error, unsentPrompt, backend, onCancel }: Props) {
   const logoSrc = backend === "codex" ? "/logo-codex.svg" : "/logo.svg";
   const isAnyInProgress = steps.some((s) => s.status === "in_progress");
   const allDone = steps.length > 0 && steps.every((s) => s.status === "done");
@@ -144,6 +189,9 @@ export function SessionLaunchOverlay({ steps, error, backend, onCancel }: Props)
           </div>
         </div>
       )}
+
+      {/* The prompt that did not make it — never let the user lose their text */}
+      {hasError && unsentPrompt && <UnsentPrompt text={unsentPrompt} />}
 
       {/* Cancel / Dismiss button */}
       {(hasError || isAnyInProgress) && onCancel && (

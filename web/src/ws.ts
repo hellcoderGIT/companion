@@ -1549,23 +1549,6 @@ export function connectAllSessions(sessions: SdkSessionInfo[]) {
   }
 }
 
-export function waitForConnection(sessionId: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const check = setInterval(() => {
-      const ws = sockets.get(sessionId);
-      if (ws?.readyState === WebSocket.OPEN) {
-        clearInterval(check);
-        clearTimeout(timeout);
-        resolve();
-      }
-    }, 50);
-    const timeout = setTimeout(() => {
-      clearInterval(check);
-      reject(new Error("Connection timeout"));
-    }, 10000);
-  });
-}
-
 export function sendToSession(sessionId: string, msg: BrowserOutgoingMessage) {
   const ws = sockets.get(sessionId);
   let outgoing: BrowserOutgoingMessage = msg;
