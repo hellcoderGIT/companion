@@ -8,6 +8,14 @@ import { getPreview } from "./components/ToolBlock.js";
 import type { ToolActivityEntry } from "./store/tasks-slice.js";
 
 const WS_RECONNECT_DELAY_MS = 2000;
+/**
+ * Upper bound on simultaneous WebSocket handshakes. A page load used to open
+ * one socket per non-archived session at once; past ~100 that starved every
+ * handshake — including the one for a freshly created session — for minutes
+ * (hellcoderGIT/companion#128). Extra sessions wait in `handshakeQueue` and
+ * are connected as slots free up. The current session always bypasses the cap.
+ */
+const MAX_CONCURRENT_HANDSHAKES = 6;
 
 /** Message types that prove the agent is actively working. Receiving any of
  * these bumps the session's lastActivityAt, which the "Generating" indicator
@@ -41,22 +49,65 @@ function isSocketUsable(ws: WebSocket | undefined): boolean {
   return !!ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
 }
 
+/**
+ * Whether a background socket is worth holding for this session. Archived
+ * sessions never are. Exited sessions aren't either: their backend is gone, so
+ * the only thing the socket would deliver is the "CLI disconnected" banner —
+ * and a page with many dead sessions was opening one such socket each
+ * (`backend_dead_on_browser_open`, see #102/#128). The session the user is
+ * looking at is always connected, so opening a dead session still replays its
+ * history; if it is resumed, the sidebar poll sees the new state and
+ * connectAllSessions picks it up.
+ */
+function isLiveSession(s: SdkSessionInfo): boolean {
+  return !s.archived && s.state !== "exited";
+}
+
 function shouldReconnectSession(sessionId: string): boolean {
   const store = useStore.getState();
+  if (store.currentSessionId === sessionId) return true;
   const sdkSession = store.sdkSessions.find((s) => s.sessionId === sessionId);
-  if (sdkSession) return !sdkSession.archived;
-  // Fallback for freshly-created sessions that may not be in sdkSessions yet.
-  return store.currentSessionId === sessionId;
+  // Unknown sessions (freshly created, not yet in sdkSessions) are only kept
+  // alive while they are the current one — handled above.
+  return sdkSession ? isLiveSession(sdkSession) : false;
 }
 
 function getReconnectCandidates(): string[] {
   const store = useStore.getState();
   const ids = new Set<string>();
-  for (const s of store.sdkSessions) {
-    if (!s.archived) ids.add(s.sessionId);
-  }
+  // Current session first so it gets a handshake slot before the rest.
   if (store.currentSessionId) ids.add(store.currentSessionId);
+  for (const s of store.sdkSessions) {
+    if (isLiveSession(s)) ids.add(s.sessionId);
+  }
   return Array.from(ids);
+}
+
+// ── Handshake throttling ─────────────────────────────────────────────────────
+/** Sessions waiting for a free handshake slot, in request order. */
+const handshakeQueue: string[] = [];
+
+function connectingCount(): number {
+  let n = 0;
+  for (const ws of sockets.values()) {
+    if (ws.readyState === WebSocket.CONNECTING) n++;
+  }
+  return n;
+}
+
+function removeFromHandshakeQueue(sessionId: string) {
+  const idx = handshakeQueue.indexOf(sessionId);
+  if (idx >= 0) handshakeQueue.splice(idx, 1);
+}
+
+/** Called whenever a handshake finishes (open, close or error) to start the next waiting one. */
+function drainHandshakeQueue() {
+  if (pageHidden) return;
+  while (handshakeQueue.length > 0 && connectingCount() < MAX_CONCURRENT_HANDSHAKES) {
+    const next = handshakeQueue.shift()!;
+    if (!shouldReconnectSession(next)) continue;
+    connectSession(next);
+  }
 }
 
 // ── Page visibility handling ─────────────────────────────────────────────────
@@ -1462,6 +1513,13 @@ export function connectSession(sessionId: string) {
   const store = useStore.getState();
   store.setConnectionStatus(sessionId, "connecting");
 
+  // Throttle background handshakes. The session on screen never waits.
+  if (store.currentSessionId !== sessionId && connectingCount() >= MAX_CONCURRENT_HANDSHAKES) {
+    if (!handshakeQueue.includes(sessionId)) handshakeQueue.push(sessionId);
+    return;
+  }
+  removeFromHandshakeQueue(sessionId);
+
   const ws = new WebSocket(getWsUrl(sessionId));
   sockets.set(sessionId, ws);
 
@@ -1477,6 +1535,7 @@ export function connectSession(sessionId: string) {
       clearTimeout(timer);
       reconnectTimers.delete(sessionId);
     }
+    drainHandshakeQueue();
   };
 
   ws.onmessage = (event) => handleMessage(sessionId, event);
@@ -1487,6 +1546,7 @@ export function connectSession(sessionId: string) {
     sockets.delete(sessionId);
     useStore.getState().setConnectionStatus(sessionId, "disconnected");
     scheduleReconnect(sessionId);
+    drainHandshakeQueue();
   };
 
   ws.onerror = () => {
@@ -1510,6 +1570,7 @@ function scheduleReconnect(sessionId: string) {
 }
 
 export function disconnectSession(sessionId: string) {
+  removeFromHandshakeQueue(sessionId);
   const timer = reconnectTimers.get(sessionId);
   if (timer) {
     clearTimeout(timer);
@@ -1533,6 +1594,7 @@ export function disconnectSession(sessionId: string) {
 }
 
 export function disconnectAll() {
+  handshakeQueue.length = 0;
   for (const [id] of sockets) {
     disconnectSession(id);
   }
@@ -1542,10 +1604,16 @@ export function connectAllSessions(sessions: SdkSessionInfo[]) {
   // Skip connection attempts when page is hidden — mobile browsers kill
   // backgrounded WS connections, so connecting here would just cycle.
   if (pageHidden) return;
-  for (const s of sessions) {
-    if (!s.archived) {
-      connectSession(s.sessionId);
-    }
+  const currentId = useStore.getState().currentSessionId;
+  // Only sessions with a live backend get a background socket (see
+  // isLiveSession). The current session goes first so it is never stuck
+  // behind the rest in the handshake queue.
+  const live = sessions.filter(isLiveSession);
+  const ordered = currentId
+    ? [...live.filter((s) => s.sessionId === currentId), ...live.filter((s) => s.sessionId !== currentId)]
+    : live;
+  for (const s of ordered) {
+    connectSession(s.sessionId);
   }
 }
 
