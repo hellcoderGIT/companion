@@ -2278,3 +2278,156 @@ describe("handleMessage: assistant clears only completed tool progress", () => {
     expect(progress?.get("tu-b")).toEqual({ toolName: "Glob", elapsedSeconds: 2 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// connectAllSessions / handshake throttling (hellcoderGIT/companion#128)
+// ---------------------------------------------------------------------------
+describe("connectAllSessions: fan-out control", () => {
+  // Every socket the module opens, by session id, in creation order.
+  let opened: string[] = [];
+  const idOf = (url: string) => /\/ws\/browser\/([^?]+)/.exec(url)![1];
+
+  /** WebSocket stub that stays in CONNECTING until a test opens it explicitly. */
+  class ConnectingWebSocket extends MockWebSocket {
+    readyState = MockWebSocket.CONNECTING;
+    constructor(url: string) {
+      super(url);
+      opened.push(idOf(url));
+    }
+  }
+  /** WebSocket stub that reports OPEN immediately (like the default mock) but records creation. */
+  class OpenWebSocket extends MockWebSocket {
+    constructor(url: string) {
+      super(url);
+      opened.push(idOf(url));
+    }
+  }
+
+  function sdk(id: string, over: Partial<import("./types.js").SdkSessionInfo> = {}) {
+    return { sessionId: id, state: "connected" as const, cwd: "/repo", createdAt: 1, ...over };
+  }
+
+  beforeEach(() => {
+    opened = [];
+  });
+  afterEach(() => {
+    vi.stubGlobal("WebSocket", MockWebSocket);
+  });
+
+  it("opens sockets only for sessions with a live backend (not archived, not exited)", () => {
+    // An exited session's socket would only ever deliver the "CLI disconnected"
+    // banner; with many dead sessions that was one pointless handshake each.
+    vi.stubGlobal("WebSocket", OpenWebSocket);
+    const list = [
+      sdk("live-1"),
+      sdk("archived", { archived: true }),
+      sdk("dead", { state: "exited" }),
+      sdk("live-2", { state: "starting" }),
+    ];
+    useStore.getState().setSdkSessions(list);
+
+    wsModule.connectAllSessions(list);
+
+    expect(opened).toEqual(["live-1", "live-2"]);
+  });
+
+  it("connects the current session before any other", () => {
+    // The session on screen must get a handshake slot first, otherwise a
+    // freshly created session can sit behind ~100 background handshakes.
+    vi.stubGlobal("WebSocket", OpenWebSocket);
+    const list = [sdk("a"), sdk("b"), sdk("c")];
+    useStore.getState().setSdkSessions(list);
+    useStore.getState().setCurrentSession("c");
+
+    wsModule.connectAllSessions(list);
+
+    expect(opened[0]).toBe("c");
+    expect(opened).toHaveLength(3);
+  });
+
+  it("caps concurrent handshakes and drains the queue as sockets open", () => {
+    vi.stubGlobal("WebSocket", ConnectingWebSocket);
+    const list = Array.from({ length: 9 }, (_, i) => sdk(`s${i}`));
+    useStore.getState().setSdkSessions(list);
+
+    wsModule.connectAllSessions(list);
+
+    // Only the first 6 handshakes are in flight; the rest wait.
+    expect(opened).toHaveLength(6);
+    // Waiting sessions still read as "connecting" so the UI does not flash "disconnected".
+    expect(useStore.getState().connectionStatus.get("s8")).toBe("connecting");
+
+    // One handshake completes (any completion frees a slot) → exactly one
+    // queued session gets its slot, in FIFO order.
+    lastWs.readyState = MockWebSocket.OPEN;
+    lastWs.onopen?.(new Event("open"));
+    expect(opened).toHaveLength(7);
+    expect(opened[6]).toBe("s6");
+
+    // A failed handshake frees a slot too.
+    lastWs.readyState = MockWebSocket.CLOSED;
+    lastWs.onclose?.();
+    expect(opened).toHaveLength(8);
+    expect(opened[7]).toBe("s7");
+  });
+
+  it("lets the current session bypass the handshake cap", () => {
+    vi.stubGlobal("WebSocket", ConnectingWebSocket);
+    const list = Array.from({ length: 8 }, (_, i) => sdk(`s${i}`));
+    useStore.getState().setSdkSessions(list);
+    wsModule.connectAllSessions(list);
+    expect(opened).toHaveLength(6);
+
+    // User creates/opens a new session while 6 handshakes are still pending.
+    useStore.getState().setCurrentSession("fresh");
+    wsModule.connectSession("fresh");
+
+    expect(opened).toContain("fresh");
+    expect(opened).toHaveLength(7);
+  });
+
+  it("drops a queued session when it is disconnected before getting a slot", () => {
+    vi.stubGlobal("WebSocket", ConnectingWebSocket);
+    const list = Array.from({ length: 7 }, (_, i) => sdk(`s${i}`));
+    useStore.getState().setSdkSessions(list);
+    wsModule.connectAllSessions(list);
+    expect(opened).toHaveLength(6); // s6 queued
+
+    wsModule.disconnectSession("s6");
+    lastWs.readyState = MockWebSocket.OPEN;
+    lastWs.onopen?.(new Event("open"));
+
+    expect(opened).toHaveLength(6);
+  });
+
+  it("does not auto-reconnect an exited session that is not on screen", () => {
+    // Backend died → server closes the browser socket. Reconnecting a session
+    // nobody is looking at only re-triggers the dead-backend banner.
+    vi.stubGlobal("WebSocket", OpenWebSocket);
+    useStore.getState().setSdkSessions([sdk("dead", { state: "exited" })]);
+    useStore.getState().setCurrentSession("other");
+
+    wsModule.connectSession("dead");
+    expect(opened).toEqual(["dead"]);
+    lastWs.readyState = MockWebSocket.CLOSED;
+    lastWs.onclose?.();
+    vi.advanceTimersByTime(5000);
+
+    expect(opened).toEqual(["dead"]);
+  });
+
+  it("keeps reconnecting the current session even after its backend exited", () => {
+    // The session on screen must stay subscribed: the user can still read its
+    // history, and typing into it asks the server to relaunch the CLI.
+    vi.stubGlobal("WebSocket", OpenWebSocket);
+    useStore.getState().setSdkSessions([sdk("dead", { state: "exited" })]);
+    useStore.getState().setCurrentSession("dead");
+
+    wsModule.connectSession("dead");
+    lastWs.readyState = MockWebSocket.CLOSED;
+    lastWs.onclose?.();
+    vi.advanceTimersByTime(5000);
+
+    expect(opened).toEqual(["dead", "dead"]);
+  });
+});
