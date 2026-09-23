@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.122.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.121.1...companion-v0.122.0) (2026-09-23)
+
+
+### Features
+
+* **models:** add Claude Opus 5.5 and default new sessions to it ([#132](https://github.com/hellcoderGIT/companion/issues/132)) ([277f1ce](https://github.com/hellcoderGIT/companion/commit/277f1ce2b114d0181477fb5a570c98a0bf33b9bd))
+
 ## [0.121.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.121.0...companion-v0.121.1) (2026-09-15)
 
 
