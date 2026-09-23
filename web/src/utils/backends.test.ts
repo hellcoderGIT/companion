@@ -219,15 +219,25 @@ describe("static model/mode lists", () => {
     expect(CODEX_AGENT_MODES[0].value).toBe("bypassPermissions");
   });
 
-  // Opus 5 — the Claude 5-family flagship — is the current default and must be
-  // first so getDefaultModel() picks it. Fable 5 (Mythos-class) is exposed
-  // alongside it but is not the default since its safeguards route ~5% of
-  // sessions back to Opus; users should opt in deliberately.
-  it("lists claude-opus-5 as the first Claude model (default)", () => {
-    expect(CLAUDE_MODELS[0].value).toBe("claude-opus-5");
+  // Opus 5.5 — the current Opus flagship — must be first so getDefaultModel()
+  // picks it. Claude Code CLI 2.1.280 makes claude-opus-5-5 the `opus` alias
+  // default and latest_per_family.opus, so the picker tracks the CLI. Fable 5
+  // (Mythos-class) is exposed alongside it but is not the default since its
+  // safeguards route ~5% of sessions back to Opus; users opt in deliberately.
+  it("lists claude-opus-5-5 as the first Claude model (default)", () => {
+    expect(CLAUDE_MODELS[0].value).toBe("claude-opus-5-5");
   });
 
-  // Opus 4.8 remains selectable as the prior-generation flagship.
+  // Opus 5 remains selectable — 5.5 is a new entry, not a rename. A prefix bug
+  // that collapsed "claude-opus-5-5" into "claude-opus-5" would silently route
+  // 5.5 sessions to the older model, so assert both slugs and labels are distinct.
+  it("keeps Opus 5 and Opus 5.5 as separate options with distinct labels", () => {
+    const opus5 = CLAUDE_MODELS.filter((m) => m.value.startsWith("claude-opus-5"));
+    expect(opus5.map((m) => m.value)).toEqual(["claude-opus-5-5", "claude-opus-5"]);
+    expect(opus5.map((m) => m.label)).toEqual(["Opus 5.5", "Opus 5"]);
+  });
+
+  // Opus 4.8 remains selectable as an older-generation flagship.
   it("still includes claude-opus-4-8 in Claude models", () => {
     const slugs = CLAUDE_MODELS.map((m) => m.value);
     expect(slugs).toContain("claude-opus-4-8");
@@ -240,12 +250,12 @@ describe("static model/mode lists", () => {
 
   // Fable 5.1 is the newest Mythos-class model (Claude Code CLI 2.1.258 ships
   // it alongside Bedrock/Vertex region mappings). It is opt-in for the same
-  // reason Fable 5 is — it must never displace Opus 5 as CLAUDE_MODELS[0],
-  // which is what getDefaultModel() returns.
+  // reason Fable 5 is — it must never displace the current Opus flagship as
+  // CLAUDE_MODELS[0], which is what getDefaultModel() returns.
   it("includes claude-fable-5-1 in Claude models without making it the default", () => {
     const slugs = CLAUDE_MODELS.map((m) => m.value);
     expect(slugs).toContain("claude-fable-5-1");
-    expect(getDefaultModel("claude")).toBe("claude-opus-5");
+    expect(getDefaultModel("claude")).toBe("claude-opus-5-5");
     expect(getDefaultModel("claude")).not.toBe("claude-fable-5-1");
   });
 

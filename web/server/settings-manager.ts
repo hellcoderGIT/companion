@@ -7,7 +7,7 @@ import {
 import { join, dirname } from "node:path";
 import { COMPANION_HOME } from "./paths.js";
 
-export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
+export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5";
 
 /**
  * Nightly dashboard summarization runs over every active session, so it
