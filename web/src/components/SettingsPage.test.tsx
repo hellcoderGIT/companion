@@ -99,6 +99,17 @@ vi.mock("../api.js", () => ({
     startCodexLogin: () => Promise.resolve({ state: "idle" }),
     cancelCodexLogin: () => Promise.resolve({ state: "idle" }),
     codexLogout: () => Promise.resolve({ ok: true }),
+    // Claude auth panel is embedded in the Providers section; it probes these
+    // on mount, so they must exist or the whole page crashes on render.
+    getClaudeAccount: () => Promise.resolve({
+      cliAvailable: true, authenticated: false, method: null,
+      email: null, orgName: null, subscriptionType: null,
+    }),
+    getClaudeLoginStatus: () => Promise.resolve({ state: "idle" }),
+    startClaudeLogin: () => Promise.resolve({ state: "idle" }),
+    submitClaudeLoginCode: () => Promise.resolve({ state: "idle" }),
+    cancelClaudeLogin: () => Promise.resolve({ state: "idle" }),
+    claudeLogout: () => Promise.resolve({ ok: true }),
   },
 }));
 

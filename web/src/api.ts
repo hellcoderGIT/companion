@@ -457,6 +457,30 @@ export interface TailscaleStatus {
   warning?: string;
 }
 
+/** Claude Code sign-in state. Paste-code flow, so `awaiting_code` is the long-lived step. */
+export type ClaudeLoginState =
+  | "idle" | "awaiting_code" | "verifying" | "success" | "error" | "canceled";
+
+export interface ClaudeLoginStatus {
+  state: ClaudeLoginState;
+  /** URL the user opens to approve. Present from `awaiting_code` on. */
+  authUrl?: string;
+  /** Failure detail; set alongside `awaiting_code` when a code is rejected but retryable. */
+  error?: string;
+  expiresAt?: number;
+}
+
+export interface ClaudeAccountStatus {
+  cliAvailable: boolean;
+  authenticated: boolean;
+  /** `authMethod` from the CLI, e.g. "claude.ai" or "console". */
+  method: string | null;
+  email: string | null;
+  orgName: string | null;
+  subscriptionType: string | null;
+  error?: string;
+}
+
 /** Device-code login state for Codex ChatGPT auth. */
 export type CodexLoginState = "idle" | "pending" | "success" | "error" | "canceled";
 
@@ -1154,6 +1178,15 @@ export const api = {
   startCodexLogin: () => post<CodexLoginStatus>("/codex/auth/login"),
   cancelCodexLogin: () => post<CodexLoginStatus>("/codex/auth/login/cancel"),
   codexLogout: () => post<{ ok: boolean; error?: string }>("/codex/auth/logout"),
+
+  // Claude Code auth (paste-code flow: we issue a URL, the user returns a code)
+  getClaudeAccount: () => get<ClaudeAccountStatus>("/claude/auth/account"),
+  getClaudeLoginStatus: () => get<ClaudeLoginStatus>("/claude/auth/login"),
+  startClaudeLogin: () => post<ClaudeLoginStatus>("/claude/auth/login"),
+  submitClaudeLoginCode: (code: string) =>
+    post<ClaudeLoginStatus>("/claude/auth/login/code", { code }),
+  cancelClaudeLogin: () => post<ClaudeLoginStatus>("/claude/auth/login/cancel"),
+  claudeLogout: () => post<{ ok: boolean; error?: string }>("/claude/auth/logout"),
 
   // Project dashboard (reads the nightly summarization store)
   getDashboard: () => get<DashboardData>("/dashboard"),

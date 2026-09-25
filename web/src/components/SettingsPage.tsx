@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "../api.js";
+import { ClaudeAuthPanel } from "./ClaudeAuthPanel.js";
 import { CodexAuthPanel } from "./CodexAuthPanel.js";
 import { useStore } from "../store.js";
 import { getTelemetryPreferenceEnabled, setTelemetryPreferenceEnabled } from "../analytics.js";
@@ -831,13 +832,15 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                   Configure authentication tokens for Claude Code and Codex. These are injected into sessions automatically.
                 </p>
 
+                <ClaudeAuthPanel />
+
                 {/* Claude Code OAuth Token */}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium" htmlFor="claude-code-token">
                     Claude Code OAuth Token
                   </label>
                   <p className="text-xs text-cc-muted">
-                    Run <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude setup-token</code> in your terminal, then paste the token here.
+                    Optional fallback for headless setups. Generate one with <code className="font-mono-code bg-cc-code-bg px-1 py-0.5 rounded text-cc-code-fg">claude setup-token</code> and paste it here.
                   </p>
                   <input
                     id="claude-code-token"
