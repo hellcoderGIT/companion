@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.122.0...companion-v0.123.0) (2026-09-25)
+
+
+### Features
+
+* **claude:** sign in to Claude from the UI with a paste-code flow ([#134](https://github.com/hellcoderGIT/companion/issues/134)) ([ca4924e](https://github.com/hellcoderGIT/companion/commit/ca4924e80a9473503bae8c63f58afedc3ca73ec5))
+
 ## [0.122.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.121.1...companion-v0.122.0) (2026-09-23)
 
 
