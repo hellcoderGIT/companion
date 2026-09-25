@@ -31,6 +31,16 @@ vi.mock("../api.js", () => ({
     startCodexLogin: vi.fn().mockResolvedValue({ state: "idle" }),
     cancelCodexLogin: vi.fn().mockResolvedValue({ state: "idle" }),
     codexLogout: vi.fn().mockResolvedValue({ ok: true }),
+    // The Claude step embeds ClaudeAuthPanel, which probes these on mount.
+    getClaudeAccount: vi.fn().mockResolvedValue({
+      cliAvailable: true, authenticated: false, method: null,
+      email: null, orgName: null, subscriptionType: null,
+    }),
+    getClaudeLoginStatus: vi.fn().mockResolvedValue({ state: "idle" }),
+    startClaudeLogin: vi.fn().mockResolvedValue({ state: "idle" }),
+    submitClaudeLoginCode: vi.fn().mockResolvedValue({ state: "idle" }),
+    cancelClaudeLogin: vi.fn().mockResolvedValue({ state: "idle" }),
+    claudeLogout: vi.fn().mockResolvedValue({ ok: true }),
   },
 }));
 

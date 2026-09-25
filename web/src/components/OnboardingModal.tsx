@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api.js";
+import { ClaudeAuthPanel } from "./ClaudeAuthPanel.js";
 import { CodexAuthPanel } from "./CodexAuthPanel.js";
 
 type Step = "welcome" | "claude" | "codex" | "done";
@@ -386,7 +387,17 @@ function ClaudeSetupStep({
           Set up Claude Code
         </h2>
         <p className="text-sm text-cc-muted mt-1.5 leading-relaxed">
-          Generate an OAuth token by running this in your terminal:
+          Sign in with your Claude subscription — no terminal needed.
+        </p>
+      </div>
+
+      <ClaudeAuthPanel />
+
+      {/* Fallback: a long-lived token, for headless setups where the
+          browser-based sign-in above isn't usable. */}
+      <div className="mt-5 pt-4 border-t border-cc-border">
+        <p className="text-xs text-cc-muted mb-2">
+          Or paste a long-lived token instead — generate one with:
         </p>
       </div>
 

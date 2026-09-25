@@ -2186,3 +2186,117 @@ describe("dashboard, tailscale and linear-connection wrappers", () => {
     expect(JSON.parse(opts.body)).toEqual({ name: "Work", apiKey: "lin_api_x" });
   });
 });
+
+// ===========================================================================
+// Claude & Codex auth endpoints
+// ===========================================================================
+// These back the in-UI sign-in panels. Claude's flow is paste-code (we issue a
+// URL and send back the code the user is shown); Codex's is device-code (we
+// show a code the user enters on OpenAI's page). Both are driven purely through
+// these thin wrappers, so the URL/method/body contract is what matters here.
+describe("Claude auth", () => {
+  it("GETs the Claude account status", async () => {
+    const account = {
+      cliAvailable: true, authenticated: true, method: "claude.ai",
+      email: "user@example.com", orgName: "Acme Inc", subscriptionType: "max",
+    };
+    mockFetch.mockResolvedValueOnce(mockResponse(account));
+
+    expect(await api.getClaudeAccount()).toEqual(account);
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/claude/auth/account");
+  });
+
+  it("GETs the Claude login status for polling/resume", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ state: "awaiting_code", authUrl: "https://claude.com/x" }));
+
+    const res = await api.getClaudeLoginStatus();
+
+    expect(res.state).toBe("awaiting_code");
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/claude/auth/login");
+  });
+
+  it("POSTs to start a Claude login", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ state: "awaiting_code", authUrl: "https://claude.com/x" }));
+
+    await api.startClaudeLogin();
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/claude/auth/login");
+    expect(opts.method).toBe("POST");
+  });
+
+  it("POSTs the pasted code in the body", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ state: "success" }));
+
+    await api.submitClaudeLoginCode("abc-123");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/claude/auth/login/code");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ code: "abc-123" });
+  });
+
+  it("POSTs to cancel a Claude login", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ state: "canceled" }));
+
+    await api.cancelClaudeLogin();
+
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/claude/auth/login/cancel");
+    expect(mockFetch.mock.calls[0][1].method).toBe("POST");
+  });
+
+  it("POSTs to sign out of Claude", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    expect(await api.claudeLogout()).toEqual({ ok: true });
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/claude/auth/logout");
+  });
+});
+
+describe("Codex auth", () => {
+  it("GETs the Codex account status", async () => {
+    const account = {
+      cliAvailable: true, authenticated: true, method: "chatgpt",
+      email: "user@example.com", planType: "pro",
+    };
+    mockFetch.mockResolvedValueOnce(mockResponse(account));
+
+    expect(await api.getCodexAccount()).toEqual(account);
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/codex/auth/account");
+  });
+
+  it("GETs the Codex login status for polling", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ state: "pending", userCode: "ABCD-1234" }));
+
+    const res = await api.getCodexLoginStatus();
+
+    expect(res.userCode).toBe("ABCD-1234");
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/codex/auth/login");
+  });
+
+  it("POSTs to start a Codex device login", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ state: "pending", userCode: "ABCD-1234" }));
+
+    await api.startCodexLogin();
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/codex/auth/login");
+    expect(opts.method).toBe("POST");
+  });
+
+  it("POSTs to cancel a Codex login", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ state: "canceled" }));
+
+    await api.cancelCodexLogin();
+
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/codex/auth/login/cancel");
+    expect(mockFetch.mock.calls[0][1].method).toBe("POST");
+  });
+
+  it("POSTs to sign out of Codex", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ ok: true }));
+
+    expect(await api.codexLogout()).toEqual({ ok: true });
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/codex/auth/logout");
+  });
+});
