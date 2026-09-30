@@ -42,6 +42,19 @@ jobs:
     name: deploy/preview-npm
     needs: test-gate
     runs-on: ubuntu-latest
+    # Trusted Publishing (OIDC) — same as publish.yml. There is no
+    # NPM_PUBLISH_TOKEN secret in this repo; the token-based publish this job
+    # used to do failed with `E404 PUT .../@hellcoder%2fcompanion` on every
+    # push to main (empty NODE_AUTH_TOKEN reads as an unauthenticated PUT),
+    # which froze the `next` dist-tag at 0.117.1-preview from 2026-08-18.
+    # NOTE: npm scopes trusted publishers per workflow file, so this workflow
+    # must ALSO be registered at
+    # https://www.npmjs.com/package/@hellcoder/companion/access
+    # (org hellcoderGIT, repo companion, workflow preview.yml, no environment)
+    # or the OIDC exchange here will 404 exactly like the token did.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -51,8 +64,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      # Pin npm 11: Trusted Publishing needs >= 11.5.1, and npm@latest (12+)
+      # requires newer Node than the runner may have.
+      - name: Upgrade npm CLI (Trusted Publishing needs >= 11.5.1)
+        run: npm install -g npm@11
 
       - name: Install dependencies
         working-directory: web
@@ -118,6 +136,4 @@ jobs:
 
       - name: Publish prerelease to npm
         working-directory: web
-        run: npm publish --access public --tag next
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: npm publish --access public --tag next --provenance

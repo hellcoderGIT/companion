@@ -63,10 +63,12 @@ describe("ModelSwitcher", () => {
 
     // All Claude models should appear as options. Moritz Edition adds
     // Opus 4.7 alongside 4.6, so we assert on the exact labels rather than
-    // the loose /Opus/ regex (which would now match two rows).
+    // the loose /Opus/ regex (which would now match two rows). The same now
+    // applies to Sonnet: 5.5 ships alongside 5, so these are anchored too.
     expect(screen.getByRole("option", { name: /Opus 4\.7/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Opus 4\.6/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Sonnet/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^Sonnet 5\.5$/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^Sonnet 5$/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Haiku/ })).toBeInTheDocument();
   });
 
@@ -82,14 +84,14 @@ describe("ModelSwitcher", () => {
     const opus47 = screen.getByRole("option", { name: /Opus 4\.7/ });
     expect(opus47).toHaveAttribute("aria-selected", "false");
 
-    const sonnetOption = screen.getByRole("option", { name: /Sonnet/ });
+    const sonnetOption = screen.getByRole("option", { name: /^Sonnet 5$/ });
     expect(sonnetOption).toHaveAttribute("aria-selected", "false");
   });
 
   it("sends set_model via WebSocket on selection", () => {
     render(<ModelSwitcher sessionId="s1" />);
     fireEvent.click(screen.getByLabelText("Switch model"));
-    fireEvent.click(screen.getByRole("option", { name: /Sonnet/ }));
+    fireEvent.click(screen.getByRole("option", { name: /^Sonnet 5$/ }));
 
     expect(mockSendToSession).toHaveBeenCalledWith("s1", {
       type: "set_model",
@@ -100,7 +102,7 @@ describe("ModelSwitcher", () => {
   it("optimistically updates the store after selection", () => {
     render(<ModelSwitcher sessionId="s1" />);
     fireEvent.click(screen.getByLabelText("Switch model"));
-    fireEvent.click(screen.getByRole("option", { name: /Sonnet/ }));
+    fireEvent.click(screen.getByRole("option", { name: /^Sonnet 5$/ }));
 
     expect(mockSetSdkSessions).toHaveBeenCalledOnce();
     const updatedSessions = mockSetSdkSessions.mock.calls[0][0];
