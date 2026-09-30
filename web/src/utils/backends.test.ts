@@ -275,6 +275,25 @@ describe("static model/mode lists", () => {
     expect(slugs).toContain("claude-sonnet-5");
   });
 
+  // Sonnet 5.5 is the current Sonnet (1M context, $2/$10 per MTok) and replaces
+  // Sonnet 5 as the speed/intelligence pick, but it must not displace the Opus
+  // flagship at CLAUDE_MODELS[0] — getDefaultModel() returns that entry.
+  it("includes claude-sonnet-5-5 in Claude models without making it the default", () => {
+    const slugs = CLAUDE_MODELS.map((m) => m.value);
+    expect(slugs).toContain("claude-sonnet-5-5");
+    expect(getDefaultModel("claude")).toBe("claude-opus-5-5");
+  });
+
+  // Same prefix-collapse guard as the Opus and Fable pairs: a bug that folded
+  // "claude-sonnet-5-5" into "claude-sonnet-5" would silently route 5.5
+  // sessions to the older model. 5.5 is a new entry, not a rename, and is
+  // listed first so the picker offers the current Sonnet at the top.
+  it("keeps Sonnet 5 and Sonnet 5.5 as separate options with distinct labels", () => {
+    const sonnet = CLAUDE_MODELS.filter((m) => m.value.startsWith("claude-sonnet-5"));
+    expect(sonnet.map((m) => m.value)).toEqual(["claude-sonnet-5-5", "claude-sonnet-5"]);
+    expect(sonnet.map((m) => m.label)).toEqual(["Sonnet 5.5", "Sonnet 5"]);
+  });
+
   // The static list is only a fallback — the live list comes from the Codex
   // app-server `model/list` RPC. We assert the current frontier model
   // (gpt-6-astra, which Codex 0.153.x reports as isDefault) and that the
