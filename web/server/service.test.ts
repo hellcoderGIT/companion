@@ -50,6 +50,38 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+// Mock node:net so isPortInUse() never binds a real port (the dev box may
+// well be running a Companion on the default port).
+const mockPortInUse = vi.hoisted(() => {
+  let inUse = false;
+  return { get: () => inUse, set: (v: boolean) => { inUse = v; } };
+});
+
+vi.mock("node:net", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:net")>();
+  const { EventEmitter } = await import("node:events");
+  return {
+    ...actual,
+    createServer: () => {
+      const server = new EventEmitter() as InstanceType<typeof EventEmitter> & {
+        listen: (port: number) => void;
+        close: (cb?: () => void) => void;
+      };
+      server.listen = () => {
+        queueMicrotask(() => {
+          if (mockPortInUse.get()) {
+            server.emit("error", Object.assign(new Error("in use"), { code: "EADDRINUSE" }));
+          } else {
+            server.emit("listening");
+          }
+        });
+      };
+      server.close = (cb) => cb?.();
+      return server;
+    },
+  };
+});
+
 // Mock path-resolver to return a deterministic enriched PATH
 const MOCK_SERVICE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/mock/.bun/bin:/mock/.local/bin";
 vi.mock("./path-resolver.js", () => ({
@@ -74,6 +106,9 @@ beforeEach(async () => {
   mockHomedir.set(tempDir);
   mockPlatform.set("darwin");
   mockExecSync.mockReset();
+  mockPortInUse.set(false);
+  delete process.env.COMPANION_SERVICE_MODE;
+  delete process.env.INVOCATION_ID;
 
   // Set process.platform AFTER resetting mockPlatform to "darwin"
   Object.defineProperty(process, "platform", {
@@ -1415,5 +1450,202 @@ describe("platform check", () => {
     // Should not throw platform error
     await service.install();
     expect(existsSync(unitPath())).toBe(true);
+  });
+});
+
+// ===========================================================================
+// System-wide systemd unit support (issue #139)
+// ===========================================================================
+
+const SYSTEM_UNIT_SHOW = [
+  "LoadState=loaded",
+  "ActiveState=active",
+  "MainPID=4321",
+  "InvocationID=0123456789abcdef0123456789abcdef",
+  "FragmentPath=/etc/systemd/system/the-companion.service",
+  "Environment=NODE_ENV=production PORT=3999 HOST=0.0.0.0",
+].join("\n");
+
+/** True for system-scope `systemctl show the-companion.service` queries. */
+function isSystemShow(cmd: string): boolean {
+  return cmd.startsWith("systemctl show the-companion.service");
+}
+
+describe("system-wide systemd unit (linux)", () => {
+  beforeEach(async () => {
+    mockPlatform.set("linux");
+    Object.defineProperty(process, "platform", { value: "linux" });
+    vi.resetModules();
+    service = await import("./service.js");
+  });
+
+  describe("getSystemUnitInfo", () => {
+    it("parses state, pid, invocation id, path and port", () => {
+      mockExecSync.mockImplementation((cmd: string) => (isSystemShow(cmd) ? SYSTEM_UNIT_SHOW : ""));
+      expect(service.getSystemUnitInfo()).toEqual({
+        activeState: "active",
+        mainPid: 4321,
+        invocationId: "0123456789abcdef0123456789abcdef",
+        fragmentPath: "/etc/systemd/system/the-companion.service",
+        port: 3999,
+      });
+    });
+
+    it("returns undefined for LoadState=not-found", () => {
+      mockExecSync.mockImplementation(() => "LoadState=not-found\nActiveState=inactive\n");
+      expect(service.getSystemUnitInfo()).toBeUndefined();
+    });
+
+    it("returns undefined when systemctl fails", () => {
+      mockExecSync.mockImplementation(() => { throw new Error("no systemd"); });
+      expect(service.getSystemUnitInfo()).toBeUndefined();
+    });
+  });
+
+  describe("detectServiceKind / isRunningAsService", () => {
+    it("detects the system unit when INVOCATION_ID matches", () => {
+      process.env.INVOCATION_ID = "0123456789abcdef0123456789abcdef";
+      mockExecSync.mockImplementation((cmd: string) => (isSystemShow(cmd) ? SYSTEM_UNIT_SHOW : ""));
+      expect(service.isRunningAsService()).toBe(true);
+      expect(service.getDetectedServiceKind()).toBe("systemd-system");
+    });
+
+    it("ignores the system unit when this process is not its invocation", () => {
+      process.env.INVOCATION_ID = "ffffffffffffffffffffffffffffffff";
+      mockExecSync.mockImplementation((cmd: string) => (isSystemShow(cmd) ? SYSTEM_UNIT_SHOW : ""));
+      expect(service.detectServiceKind()).toBeNull();
+    });
+
+    it("ignores the system unit when not started by systemd (no INVOCATION_ID)", () => {
+      mockExecSync.mockImplementation((cmd: string) => (isSystemShow(cmd) ? SYSTEM_UNIT_SHOW : ""));
+      expect(service.detectServiceKind()).toBeNull();
+    });
+
+    it("ignores an inactive system unit", () => {
+      process.env.INVOCATION_ID = "0123456789abcdef0123456789abcdef";
+      mockExecSync.mockImplementation((cmd: string) =>
+        isSystemShow(cmd) ? SYSTEM_UNIT_SHOW.replace("ActiveState=active", "ActiveState=failed") : "");
+      expect(service.detectServiceKind()).toBeNull();
+    });
+
+    it("COMPANION_SERVICE_MODE=1 opts in without any unit", () => {
+      process.env.COMPANION_SERVICE_MODE = "1";
+      expect(service.isRunningAsService()).toBe(true);
+      expect(service.getDetectedServiceKind()).toBe("external");
+    });
+
+    it("COMPANION_SERVICE_MODE=0 forces service mode off", () => {
+      process.env.COMPANION_SERVICE_MODE = "0";
+      process.env.INVOCATION_ID = "0123456789abcdef0123456789abcdef";
+      mockExecSync.mockImplementation((cmd: string) => (isSystemShow(cmd) ? SYSTEM_UNIT_SHOW : ""));
+      expect(service.isRunningAsService()).toBe(false);
+      expect(service.getDetectedServiceKind()).toBeNull();
+    });
+
+    it("still reports systemd-user for an active per-user unit", async () => {
+      mockExecSync.mockImplementation((cmd: string) =>
+        cmd.startsWith("which") ? "/usr/local/bin/the-companion\n" : "");
+      await service.install();
+      mockExecSync.mockReset();
+      mockExecSync.mockImplementation((cmd: string) => (cmd.includes("is-active") ? "active\n" : ""));
+      expect(service.detectServiceKind()).toBe("systemd-user");
+    });
+  });
+
+  describe("install", () => {
+    it("refuses when a system-wide unit exists", async () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.startsWith("which")) return "/usr/local/bin/the-companion\n";
+        if (isSystemShow(cmd)) return SYSTEM_UNIT_SHOW;
+        return "";
+      });
+      await expect(service.install()).rejects.toThrow("process.exit(1)");
+      expect(existsSync(unitPath())).toBe(false);
+      expect(mockExecSync).not.toHaveBeenCalledWith(
+        expect.stringContaining("enable --now"), expect.anything());
+    });
+
+    it("refuses when the port is already in use", async () => {
+      mockPortInUse.set(true);
+      mockExecSync.mockImplementation((cmd: string) =>
+        cmd.startsWith("which") ? "/usr/local/bin/the-companion\n" : "");
+      await expect(service.install()).rejects.toThrow("process.exit(1)");
+      expect(existsSync(unitPath())).toBe(false);
+    });
+  });
+
+  describe("start/stop/restart/status/uninstall with only a system unit", () => {
+    beforeEach(() => {
+      mockExecSync.mockImplementation((cmd: string) => (isSystemShow(cmd) ? SYSTEM_UNIT_SHOW : ""));
+    });
+
+    it("start does not install a user unit and prints the sudo hint when unprivileged", async () => {
+      vi.spyOn(process, "getuid").mockReturnValue(1000);
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await expect(service.start()).rejects.toThrow("process.exit(1)");
+      expect(existsSync(unitPath())).toBe(false);
+      expect(log.mock.calls.flat().join("\n")).toContain("sudo systemctl start the-companion.service");
+    });
+
+    it("restart drives the system unit directly as root", async () => {
+      vi.spyOn(process, "getuid").mockReturnValue(0);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      await service.restart();
+      expect(mockExecSync).toHaveBeenCalledWith(
+        "systemctl restart the-companion.service", expect.anything());
+      expect(mockExecSync).not.toHaveBeenCalledWith(
+        expect.stringContaining("--user restart"), expect.anything());
+    });
+
+    it("stop prints the sudo hint when unprivileged", async () => {
+      vi.spyOn(process, "getuid").mockReturnValue(1000);
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await expect(service.stop()).rejects.toThrow("process.exit(1)");
+      expect(log.mock.calls.flat().join("\n")).toContain("sudo systemctl stop the-companion.service");
+    });
+
+    it("status reports the system unit", async () => {
+      expect(await service.status()).toEqual({
+        installed: true, running: true, pid: 4321, port: 3999, scope: "system",
+      });
+    });
+
+    it("uninstall leaves the system unit alone", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await service.uninstall();
+      expect(mockExecSync).not.toHaveBeenCalledWith(
+        expect.stringContaining("disable"), expect.anything());
+      expect(log.mock.calls.flat().join("\n")).toContain("sudo systemctl disable --now");
+    });
+  });
+});
+
+describe("getUpdateRestartPlan", () => {
+  it("exits non-zero without spawning for a system unit", () => {
+    expect(service.getUpdateRestartPlan("systemd-system")).toEqual({
+      exitCode: service.UPDATE_RESTART_EXIT_CODE,
+    });
+    expect(service.UPDATE_RESTART_EXIT_CODE).not.toBe(0);
+    // 42 is SuccessExitStatus in our own template; a "please restart" code must differ.
+    expect(service.UPDATE_RESTART_EXIT_CODE).not.toBe(42);
+  });
+
+  it("exits non-zero without spawning for COMPANION_SERVICE_MODE=1", () => {
+    expect(service.getUpdateRestartPlan("external").command).toBeUndefined();
+    expect(service.getUpdateRestartPlan("external").exitCode).toBe(service.UPDATE_RESTART_EXIT_CODE);
+  });
+
+  it("uses systemctl --user restart for the user unit", () => {
+    const plan = service.getUpdateRestartPlan("systemd-user");
+    expect(plan.command).toEqual(["systemctl", "--user", "restart", "the-companion.service"]);
+    expect(plan.env?.XDG_RUNTIME_DIR).toBeTruthy();
+    expect(plan.exitCode).toBe(0);
+  });
+
+  it("uses launchctl kickstart for launchd", () => {
+    const plan = service.getUpdateRestartPlan("launchd");
+    expect(plan.command?.slice(0, 3)).toEqual(["launchctl", "kickstart", "-k"]);
+    expect(plan.command?.[3]).toMatch(/sh\.thecompanion\.app$/);
+    expect(plan.exitCode).toBe(0);
   });
 });

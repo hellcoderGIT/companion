@@ -50,6 +50,23 @@ the-companion logs
 | `COMPANION_RECORDINGS_DIR` | Override recordings directory | `~/.companion/recordings/` |
 | `COMPANION_RECORDINGS_MAX_LINES` | Max total lines before recording rotation | `1,000,000` |
 | `COMPANION_INIT_SCRIPT_TIMEOUT` | Init script timeout in seconds | `120` |
+| `COMPANION_SERVICE_MODE` | `1` = treat the process as supervised, enabling in-app "Update & restart" (the server exits with code `75` and relies on the supervisor to restart it); `0` = force service mode off | Auto-detected |
+
+## Running under a system-wide systemd unit
+
+`the-companion install` creates a **per-user** unit. If you run The Companion
+from your own system-wide unit instead (e.g. `/etc/systemd/system/the-companion.service`
+with `User=...`), service mode is detected automatically when that unit is named
+`the-companion.service`; for any other name, add `Environment=COMPANION_SERVICE_MODE=1`.
+
+The unit needs `Restart=on-failure` or `Restart=always`, and must not list `75`
+in `SuccessExitStatus=`. After an in-app update the server exits with code `75`
+so systemd restarts it on the new version. The service user must own the global
+Bun install directory so `bun install -g` can run without root.
+
+On such hosts, `the-companion install` refuses to create a second, conflicting
+user unit, and `start`/`stop`/`restart`/`status`/`uninstall` point you to the
+right `sudo systemctl` command (or run it directly when invoked as root).
 
 ## REST API
 

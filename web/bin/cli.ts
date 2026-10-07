@@ -110,9 +110,17 @@ switch (command) {
       } else if (result.running) {
         console.log(`The Companion is running (PID: ${result.pid})`);
         console.log(`  URL: http://localhost:${result.port}`);
+        if (result.scope === "system") {
+          console.log("  Managed by a system-wide systemd unit (use sudo systemctl).");
+        }
       } else {
         console.log("The Companion is installed but not running.");
-        console.log("Check logs at ~/.companion/logs/");
+        if (result.scope === "system") {
+          console.log("It is managed by a system-wide systemd unit:");
+          console.log("  sudo systemctl status the-companion.service");
+        } else {
+          console.log("Check logs at ~/.companion/logs/");
+        }
       }
     }
     break;

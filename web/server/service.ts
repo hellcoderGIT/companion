@@ -8,6 +8,7 @@ import {
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
+import { createServer } from "node:net";
 import { DEFAULT_PORT_PROD } from "./constants.js";
 import { getServicePath } from "./path-resolver.js";
 import { COMPANION_HOME } from "./paths.js";
@@ -31,6 +32,16 @@ const OLD_PLIST_PATH = join(PLIST_DIR, `${OLD_LABEL}.plist`);
 const SYSTEMD_DIR = join(homedir(), ".config", "systemd", "user");
 const UNIT_NAME = "the-companion.service";
 const UNIT_PATH = join(SYSTEMD_DIR, UNIT_NAME);
+
+/**
+ * Exit code the server uses to ask an external supervisor (a system-wide
+ * systemd unit, or anything configured via COMPANION_SERVICE_MODE=1) to
+ * restart it after an in-app update. It must be non-zero so that units with
+ * `Restart=on-failure` respawn the process, and it deliberately differs from
+ * 42, which our own user-unit template lists in `SuccessExitStatus=`.
+ * 75 is EX_TEMPFAIL from sysexits.h ("temporary failure, try again").
+ */
+export const UPDATE_RESTART_EXIT_CODE = 75;
 
 // ─── Platform check ─────────────────────────────────────────────────────────────
 
@@ -225,6 +236,114 @@ function systemctlUser(cmd: string): string {
   });
 }
 
+/**
+ * Run a command against the system-wide systemd instance (no `--user`).
+ * Read-only queries (show / is-active) work unprivileged; mutating commands
+ * need root or a polkit rule.
+ */
+function systemctlSystem(cmd: string): string {
+  return execSync(`systemctl ${cmd}`, {
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+export interface SystemUnitInfo {
+  activeState: string;
+  mainPid?: number;
+  invocationId?: string;
+  fragmentPath?: string;
+  port?: number;
+}
+
+/**
+ * Look up a system-wide `the-companion.service` (e.g. one an admin placed in
+ * /etc/systemd/system with `User=...`). Returns undefined when no such unit
+ * is loaded or systemctl is unavailable. Never throws.
+ */
+export function getSystemUnitInfo(): SystemUnitInfo | undefined {
+  if (!isLinux()) return undefined;
+  let output: string;
+  try {
+    output = systemctlSystem(
+      `show ${UNIT_NAME} --property=LoadState,ActiveState,MainPID,InvocationID,FragmentPath,Environment --no-pager`,
+    );
+  } catch {
+    return undefined;
+  }
+  if (typeof output !== "string") return undefined;
+  const prop = (name: string): string | undefined => {
+    const m = output.match(new RegExp(`^${name}=(.*)$`, "m"));
+    return m ? m[1].trim() : undefined;
+  };
+  // LoadState=not-found is what systemd reports for units that don't exist.
+  if (prop("LoadState") !== "loaded") return undefined;
+
+  const pid = Number(prop("MainPID"));
+  const portMatch = prop("Environment")?.match(/(?:^|\s)PORT=(\d+)/);
+  return {
+    activeState: prop("ActiveState") || "unknown",
+    mainPid: Number.isFinite(pid) && pid > 0 ? pid : undefined,
+    invocationId: prop("InvocationID") || undefined,
+    fragmentPath: prop("FragmentPath") || undefined,
+    port: portMatch ? Number(portMatch[1]) : undefined,
+  };
+}
+
+/** Explains how to manage a system-wide unit, which we can't do for the user. */
+function printSystemUnitHint(action: string, info: SystemUnitInfo): void {
+  console.log("The Companion is managed by a system-wide systemd unit:");
+  console.log(`  Unit:   ${info.fragmentPath ?? UNIT_NAME}`);
+  console.log(`  State:  ${info.activeState}`);
+  console.log("");
+  console.log(`Use: sudo systemctl ${action} ${UNIT_NAME}`);
+}
+
+function isRoot(): boolean {
+  return typeof process.getuid === "function" && process.getuid() === 0;
+}
+
+/**
+ * Handle start/stop/restart when only a system-wide unit exists. As root we
+ * can drive it directly; otherwise print the sudo command and fail, rather
+ * than falling through to `systemctl --user` (misleading) or, for `start`,
+ * installing a second, conflicting user unit.
+ */
+function controlSystemUnit(action: "start" | "stop" | "restart", info: SystemUnitInfo): void {
+  if (isRoot()) {
+    try {
+      systemctlSystem(`${action} ${UNIT_NAME}`);
+    } catch (err: unknown) {
+      console.error(`Failed to ${action} the system service with systemctl:`);
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const past = action === "stop" ? "stopped" : action === "start" ? "started" : "restarted";
+    console.log(`The Companion system service has been ${past}.`);
+    return;
+  }
+  printSystemUnitHint(action, info);
+  process.exit(1);
+}
+
+/**
+ * Resolve true when something is already listening on `port`. Binding with
+ * no host uses the dual-stack wildcard, which conflicts with a listener on
+ * any address, so this also catches servers bound to 0.0.0.0 or 127.0.0.1.
+ */
+export function isPortInUse(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      resolve(err.code === "EADDRINUSE");
+    });
+    server.once("listening", () => {
+      server.close(() => resolve(false));
+    });
+    server.listen(port);
+  });
+}
+
 // ─── Install ────────────────────────────────────────────────────────────────────
 
 export async function install(opts?: { port?: number }): Promise<void> {
@@ -285,8 +404,30 @@ async function installLinux(opts?: { port?: number }): Promise<void> {
     process.exit(1);
   }
 
+  // A system-wide unit already supervises the Companion on this host. A
+  // second (user) unit would fight it for the port and crash-loop, or, if it
+  // ever won, start with the wrong environment and an empty session store.
+  const systemUnit = getSystemUnitInfo();
+  if (systemUnit) {
+    console.error("The Companion is already installed as a system-wide systemd unit:");
+    console.error(`  ${systemUnit.fragmentPath ?? UNIT_NAME} (${systemUnit.activeState})`);
+    console.error("");
+    console.error("Refusing to install a second, per-user unit.");
+    console.error(`Manage it with: sudo systemctl <start|stop|restart|status> ${UNIT_NAME}`);
+    console.error("In-app updates work there too (see COMPANION_SERVICE_MODE in the docs).");
+    process.exit(1);
+  }
+
   const binPath = resolveBinPath();
   const port = opts?.port ?? DEFAULT_PORT_PROD;
+
+  if (await isPortInUse(port)) {
+    console.error(`Port ${port} is already in use.`);
+    console.error("Another Companion (or something else) is listening there, so the");
+    console.error("service would crash-loop. Stop it first, or install on another port:");
+    console.error("  the-companion install --port <port>");
+    process.exit(1);
+  }
 
   // Create log directory
   mkdirSync(LOG_DIR, { recursive: true });
@@ -356,6 +497,16 @@ async function uninstallDarwin(): Promise<void> {
 
 async function uninstallLinux(): Promise<void> {
   if (!isSystemdUnitInstalled()) {
+    const systemUnit = getSystemUnitInfo();
+    if (systemUnit) {
+      // Never remove an admin-managed unit on the user's behalf.
+      console.log("The Companion is managed by a system-wide systemd unit, which");
+      console.log("'the-companion uninstall' does not remove. To remove it:");
+      console.log(`  sudo systemctl disable --now ${UNIT_NAME}`);
+      console.log(`  sudo rm ${systemUnit.fragmentPath ?? `/etc/systemd/system/${UNIT_NAME}`}`);
+      console.log("  sudo systemctl daemon-reload");
+      return;
+    }
     console.log("The Companion is not installed as a service.");
     return;
   }
@@ -428,6 +579,8 @@ async function startDarwin(): Promise<void> {
 
 async function startLinux(): Promise<void> {
   if (!isSystemdUnitInstalled()) {
+    const systemUnit = getSystemUnitInfo();
+    if (systemUnit) return controlSystemUnit("start", systemUnit);
     console.log("Service not yet installed. Installing now...");
     await installLinux();
     return; // installLinux uses enable --now which starts the service
@@ -484,6 +637,8 @@ async function stopDarwin(): Promise<void> {
 
 async function stopLinux(): Promise<void> {
   if (!isSystemdUnitInstalled()) {
+    const systemUnit = getSystemUnitInfo();
+    if (systemUnit) return controlSystemUnit("stop", systemUnit);
     console.log("The Companion is not installed as a service.");
     return;
   }
@@ -540,6 +695,8 @@ async function restartDarwin(): Promise<void> {
 
 async function restartLinux(): Promise<void> {
   if (!isSystemdUnitInstalled()) {
+    const systemUnit = getSystemUnitInfo();
+    if (systemUnit) return controlSystemUnit("restart", systemUnit);
     console.log("The Companion is not installed as a service.");
     return;
   }
@@ -565,38 +722,135 @@ export interface ServiceStatus {
   running: boolean;
   pid?: number;
   port?: number;
+  /** Linux only: "system" when managed by a system-wide unit. */
+  scope?: "user" | "system";
 }
+
+/**
+ * How the current process is supervised, which decides how an in-app update
+ * restarts it:
+ * - "launchd" / "systemd-user": our own `the-companion install` units; the
+ *   updater asks the service manager to restart us.
+ * - "systemd-system": a system-wide `the-companion.service` (typically with
+ *   `User=...`), which an unprivileged process can't restart, so the updater
+ *   exits with UPDATE_RESTART_EXIT_CODE and lets `Restart=` respawn it.
+ * - "external": COMPANION_SERVICE_MODE=1, i.e. the operator promises some
+ *   supervisor restarts the process on a non-zero exit. Same exit strategy.
+ */
+export type ServiceKind = "launchd" | "systemd-user" | "systemd-system" | "external";
+
+function serviceModeEnv(): "on" | "off" | undefined {
+  const raw = process.env.COMPANION_SERVICE_MODE?.trim().toLowerCase();
+  if (!raw) return undefined;
+  if (["1", "true", "yes", "on"].includes(raw)) return "on";
+  if (["0", "false", "no", "off"].includes(raw)) return "off";
+  return undefined;
+}
+
+/**
+ * Detect how (and whether) the current process runs as a managed service.
+ * Never calls process.exit() and never throws.
+ *
+ * COMPANION_SERVICE_MODE=0 forces service mode off; =1 forces it on when no
+ * known service manager is detected.
+ */
+export function detectServiceKind(): ServiceKind | null {
+  const envMode = serviceModeEnv();
+  if (envMode === "off") return null;
+
+  if (isDarwin()) {
+    const installedService = getInstalledLaunchdService();
+    if (installedService) {
+      try {
+        const output = execSync(`launchctl list "${installedService.label}"`, {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        if (/"PID"\s*=\s*\d+/.test(output)) return "launchd";
+      } catch { /* not loaded */ }
+    }
+  } else if (isLinux()) {
+    if (isSystemdUnitInstalled()) {
+      try {
+        if (systemctlUser(`is-active ${UNIT_NAME}`).trim() === "active") {
+          return "systemd-user";
+        }
+      } catch { /* inactive or no user bus */ }
+    }
+    if (envMode !== "on" && isUnderSystemUnit()) return "systemd-system";
+  }
+
+  return envMode === "on" ? "external" : null;
+}
+
+/**
+ * True when this process was started by systemd as the system-wide
+ * the-companion.service. systemd exports INVOCATION_ID to every service it
+ * starts; matching it against the unit's InvocationID proves we are that
+ * unit's process rather than, say, a foreground run on a host that also has
+ * the unit installed.
+ */
+function isUnderSystemUnit(): boolean {
+  const invocationId = process.env.INVOCATION_ID?.trim();
+  if (!invocationId) return false;
+  const info = getSystemUnitInfo();
+  if (!info) return false;
+  if (info.activeState !== "active" && info.activeState !== "reloading") return false;
+  // Very old systemd versions don't expose InvocationID; fall back to the
+  // active state alone there.
+  return !info.invocationId || info.invocationId === invocationId.replace(/-/g, "");
+}
+
+let detectedServiceKind: ServiceKind | null = null;
 
 /**
  * Safe check for whether the current process is running as a managed service.
  * Unlike status(), this never calls process.exit() and works on all platforms.
+ * The detected kind is remembered for getDetectedServiceKind().
  */
 export function isRunningAsService(): boolean {
-  if (isDarwin()) {
-    const installedService = getInstalledLaunchdService();
-    if (!installedService) return false;
-    try {
-      const output = execSync(`launchctl list "${installedService.label}"`, {
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      return /"PID"\s*=\s*\d+/.test(output);
-    } catch {
-      return false;
-    }
-  }
+  detectedServiceKind = detectServiceKind();
+  return detectedServiceKind !== null;
+}
 
-  if (isLinux()) {
-    if (!isSystemdUnitInstalled()) return false;
-    try {
-      const output = systemctlUser(`is-active ${UNIT_NAME}`);
-      return output.trim() === "active";
-    } catch {
-      return false;
-    }
-  }
+/** The kind found by the last isRunningAsService() call (null if none). */
+export function getDetectedServiceKind(): ServiceKind | null {
+  return detectedServiceKind;
+}
 
-  return false;
+export interface UpdateRestartPlan {
+  /** Command to spawn (detached) before exiting, if any. */
+  command?: string[];
+  /** Extra environment for the command. */
+  env?: Record<string, string>;
+  /** Exit code for the current process once the command was spawned. */
+  exitCode: number;
+}
+
+/**
+ * How to get the new version running after `bun install -g` succeeded.
+ * A null/undefined kind keeps the historical platform-based behaviour.
+ */
+export function getUpdateRestartPlan(kind: ServiceKind | null | undefined): UpdateRestartPlan {
+  if (kind === "systemd-system" || kind === "external") {
+    // Nothing to spawn: an unprivileged process can't restart a system unit,
+    // and the non-zero exit makes Restart=on-failure (or always) respawn us.
+    return { exitCode: UPDATE_RESTART_EXIT_CODE };
+  }
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  if (kind === "systemd-user" || (!kind && process.platform === "linux")) {
+    return {
+      command: ["systemctl", "--user", "restart", UNIT_NAME],
+      env: { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || `/run/user/${uid ?? 1000}` },
+      exitCode: 0,
+    };
+  }
+  return {
+    command: uid !== undefined
+      ? ["launchctl", "kickstart", "-k", `gui/${uid}/${LABEL}`]
+      : ["launchctl", "kickstart", "-k", LABEL],
+    exitCode: 0,
+  };
 }
 
 /**
@@ -687,7 +941,16 @@ async function statusDarwin(): Promise<ServiceStatus> {
 
 async function statusLinux(): Promise<ServiceStatus> {
   if (!isSystemdUnitInstalled()) {
-    return { installed: false, running: false };
+    const systemUnit = getSystemUnitInfo();
+    if (!systemUnit) return { installed: false, running: false };
+    const running = systemUnit.activeState === "active" && !!systemUnit.mainPid;
+    return {
+      installed: true,
+      running,
+      pid: running ? systemUnit.mainPid : undefined,
+      port: systemUnit.port ?? DEFAULT_PORT_PROD,
+      scope: "system",
+    };
   }
 
   // Read port from the unit file

@@ -45,7 +45,7 @@ import { getSettings, updateSettings } from "./settings-manager.js";
 import { setCliIngressServer } from "./routes/system-routes.js";
 import { imagePullManager } from "./image-pull-manager.js";
 import { restoreIfNeeded as restoreTailscaleFunnel, cleanup as cleanupTailscaleFunnel } from "./tailscale-manager.js";
-import { isRunningAsService } from "./service.js";
+import { getDetectedServiceKind, isRunningAsService } from "./service.js";
 import { getToken, verifyToken } from "./auth-manager.js";
 import { getCookie } from "hono/cookie";
 import type { SocketData } from "./ws-bridge.js";
@@ -421,7 +421,7 @@ if (getSettings().claudeBridgeMode === "patched") {
 }
 if (isRunningAsService()) {
   setServiceMode(true);
-  console.log("[server] Running as background service (auto-update available)");
+  console.log(`[server] Running as background service (${getDetectedServiceKind()}, auto-update available)`);
 }
 
 // ── Runtime diagnostics ──────────────────────────────────────────────────────
