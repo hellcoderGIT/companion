@@ -61,7 +61,8 @@ describe("SessionItem", () => {
     render(<SessionItem {...buildProps()} />);
 
     expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument();
-    expect(screen.getByText("/workspace/app")).toBeInTheDocument();
+    // Second line shows the project (cwd/repo root basename) as a chip
+    expect(screen.getByText("app")).toBeInTheDocument();
   });
 
   it("renders the Docker logo asset when session is containerized", () => {
@@ -148,8 +149,8 @@ describe("SessionItem", () => {
   it("applies active background class when isActive is true", () => {
     // The active session should have a visually distinct background.
     const { container } = render(<SessionItem {...buildProps({ isActive: true })} />);
-    const btn = container.querySelector("button");
-    expect(btn?.className).toContain("bg-cc-active");
+    const row = container.firstElementChild;
+    expect(row?.className).toContain("bg-cc-active");
   });
 
   // --- F2 shortcut ---
@@ -508,5 +509,37 @@ describe("SessionItem", () => {
       <SessionItem {...buildProps({ session: makeSession({ status: "compacting" }) })} />,
     );
     expect(container.querySelector(".bg-cc-success")).toBeTruthy();
+  });
+
+  it("project chip calls onFilterProject without selecting the session", () => {
+    // The chip is its own control: filtering must not also navigate to the session.
+    const onSelect = vi.fn();
+    const onFilterProject = vi.fn();
+    render(
+      <SessionItem
+        {...buildProps({
+          onSelect,
+          onFilterProject,
+          session: makeSession({ cwd: "/srv/mc-agent/UserPlayground", repoRoot: "/srv/mc-agent" }),
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter by project mc-agent" }));
+    expect(onFilterProject).toHaveBeenCalledWith("/srv/mc-agent", "mc-agent");
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(screen.getByText("/UserPlayground")).toBeInTheDocument();
+  });
+
+  it("marks the chip pressed when its project is the active filter", () => {
+    render(<SessionItem {...buildProps({ onFilterProject: vi.fn(), activeProjectKey: "/workspace/app" })} />);
+    expect(screen.getByRole("button", { name: "Clear project filter app", pressed: true })).toBeInTheDocument();
+  });
+
+  it("clicking the project line outside the chip still selects the session", () => {
+    const onSelect = vi.fn();
+    render(<SessionItem {...buildProps({ onSelect, onFilterProject: vi.fn() })} />);
+    fireEvent.click(screen.getByText("CC"));
+    expect(onSelect).toHaveBeenCalledWith("session-1");
   });
 });

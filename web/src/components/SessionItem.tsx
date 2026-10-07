@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useRef, type RefObject } from "react";
-import type { SessionItem as SessionItemType } from "../utils/project-grouping.js";
+import {
+  extractProjectKey,
+  extractProjectLabel,
+  type SessionItem as SessionItemType,
+} from "../utils/project-grouping.js";
 
 interface SessionItemProps {
   session: SessionItemType;
@@ -20,6 +24,14 @@ interface SessionItemProps {
   onConfirmRename: () => void;
   onCancelRename: () => void;
   editInputRef: RefObject<HTMLInputElement | null>;
+  /** Called when the project chip under the name is clicked (filters the sidebar by project). */
+  onFilterProject?: (projectKey: string, projectLabel: string) => void;
+  /** Project key currently used as sidebar filter (chip is highlighted when it matches). */
+  activeProjectKey?: string | null;
+  /** Show as pinned (pin icon). Only true for the viewer's own pinned sessions. */
+  isPinned?: boolean;
+  /** Present only for the viewer's own sessions — enables the Pin/Unpin menu item. */
+  onTogglePin?: (id: string, pinned: boolean) => void;
 }
 
 type DerivedStatus = "awaiting" | "running" | "reconnecting" | "idle" | "exited";
@@ -60,6 +72,14 @@ function StatusDot({ status }: { status: DerivedStatus }) {
   }
 }
 
+function PinIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden>
+      <path d="M9.828.722a.5.5 0 01.354.146l4.95 4.95a.5.5 0 010 .707c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.927 5.927 0 01.16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 01-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.902-1.414.707-.195-.195.512-1.22.707-1.414l3.182-3.182-2.828-2.829a.5.5 0 010-.707c.688-.688 1.673-.767 2.375-.72a5.922 5.922 0 011.013.16l3.134-3.133a2.772 2.772 0 01-.04-.461c0-.43.108-1.022.589-1.503a.5.5 0 01.353-.146z" />
+    </svg>
+  );
+}
+
 function BackendBadge({ type }: { type: "claude" | "codex" }) {
   if (type === "codex") {
     return (
@@ -94,6 +114,10 @@ export function SessionItem({
   onConfirmRename,
   onCancelRename,
   editInputRef,
+  onFilterProject,
+  activeProjectKey,
+  isPinned = false,
+  onTogglePin,
 }: SessionItemProps) {
   const shortId = s.id.slice(0, 8);
   const label = sessionName || s.model || shortId;
@@ -104,8 +128,12 @@ export function SessionItem({
 
   const derivedStatus = archived ? ("exited" as DerivedStatus) : deriveStatus(s, permCount);
 
-  // Show the full cwd path below the session name
-  const cwdTail = s.cwd || "";
+  // Second line: project (repo root) chip + the cwd sub-path inside it.
+  const projectKey = s.cwd || s.repoRoot ? extractProjectKey(s.cwd, s.repoRoot || undefined, s.isContainerized) : "";
+  const projectLabel = projectKey ? extractProjectLabel(projectKey) : "";
+  const subPath =
+    projectKey && s.cwd.startsWith(projectKey + "/") ? s.cwd.slice(projectKey.length + 1) : "";
+  const isProjectFiltered = !!projectKey && activeProjectKey === projectKey;
 
   // Close menu on click outside or Escape; arrow-key navigation between menu items
   useEffect(() => {
@@ -171,8 +199,39 @@ export function SessionItem({
     action();
   }, []);
 
+  const badges = (
+    <span className="flex items-center gap-1 shrink-0 ml-auto pl-1">
+      <BackendBadge type={s.backendType} />
+      {s.isContainerized && (
+        <span className="flex items-center px-1 py-0.5 rounded bg-blue-400/10" title="Docker">
+          <img src="/logo-docker.svg" alt="Docker logo" className="w-3 h-3" />
+        </span>
+      )}
+      {s.cronJobId && (
+        <span className="flex items-center px-1 py-0.5 rounded bg-cc-primary/10" title="Scheduled">
+          <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 text-cc-primary">
+            <path d="M8 2a6 6 0 100 12A6 6 0 008 2zM0 8a8 8 0 1116 0A8 8 0 010 8zm9-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 001.414-1.414L9 7.586V5z" />
+          </svg>
+        </span>
+      )}
+    </span>
+  );
+
   return (
-    <div className="relative group">
+    <div
+      className={`relative group min-h-[44px] rounded-lg transition-all duration-100 ${
+        isActive ? "bg-cc-active" : "hover:bg-cc-hover"
+      }`}
+    >
+      {/* Left accent edge for active state */}
+      <span
+        aria-hidden
+        className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-full transition-all duration-150 ${
+          isActive ? "h-5 bg-cc-primary" : "h-0 bg-transparent"
+        }`}
+      />
+
+      {/* Line 1: status dot + session name (the row's primary control) */}
       <button
         onClick={() => onSelect(s.id)}
         onDoubleClick={(e) => {
@@ -185,20 +244,11 @@ export function SessionItem({
             onStartRename(s.id, label);
           }
         }}
-        className={`w-full flex items-center gap-2 py-2 pl-2.5 pr-12 min-h-[44px] rounded-lg transition-all duration-100 cursor-pointer relative ${
-          isActive
-            ? "bg-cc-active"
-            : "hover:bg-cc-hover"
+        title={label}
+        className={`w-full flex items-center gap-2 pt-1.5 pl-2.5 pr-8 sm:pr-2 sm:group-hover:pr-12 text-left rounded-lg cursor-pointer ${
+          isEditing ? "pb-1.5" : "pb-0.5"
         }`}
       >
-        {/* Left accent edge for active state */}
-        <span
-          aria-hidden
-          className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-full transition-all duration-150 ${
-            isActive ? "h-5 bg-cc-primary" : "h-0 bg-transparent"
-          }`}
-        />
-
         {/* Status dot */}
         {!isEditing && (
           <StatusDot status={derivedStatus} />
@@ -223,45 +273,69 @@ export function SessionItem({
             onBlur={onConfirmRename}
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            className="text-[12.5px] font-medium flex-1 min-w-0 text-cc-fg bg-transparent border border-cc-border rounded-md px-2 py-1 outline-none focus:border-cc-primary/50 focus:ring-1 focus:ring-cc-primary/20"
+            className="text-[12px] font-medium flex-1 min-w-0 text-cc-fg bg-transparent border border-cc-border rounded-md px-2 py-1 outline-none focus:border-cc-primary/50 focus:ring-1 focus:ring-cc-primary/20"
           />
         ) : (
-          <div className="flex-1 min-w-0">
-            <span
-              className={`text-[12.5px] font-medium truncate block leading-snug ${
-                isActive ? "text-cc-fg" : "text-cc-fg/90"
-              } ${isRecentlyRenamed ? "animate-name-appear" : ""}`}
-              onAnimationEnd={() => onClearRecentlyRenamed(s.id)}
-            >
-              {label}
-            </span>
-            {cwdTail && (
-              <span className="text-[10px] text-cc-muted/70 truncate block leading-tight mt-px">
-                {cwdTail}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Badges: backend type + Docker + Cron */}
-        {!isEditing && (
-          <span className="flex items-center gap-1 shrink-0">
-            <BackendBadge type={s.backendType} />
-            {s.isContainerized && (
-              <span className="flex items-center px-1 py-0.5 rounded bg-blue-400/10" title="Docker">
-                <img src="/logo-docker.svg" alt="Docker logo" className="w-3 h-3" />
-              </span>
-            )}
-            {s.cronJobId && (
-              <span className="flex items-center px-1 py-0.5 rounded bg-cc-primary/10" title="Scheduled">
-                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 text-cc-primary">
-                  <path d="M8 2a6 6 0 100 12A6 6 0 008 2zM0 8a8 8 0 1116 0A8 8 0 010 8zm9-3a1 1 0 10-2 0v3a1 1 0 00.293.707l2 2a1 1 0 001.414-1.414L9 7.586V5z" />
-                </svg>
-              </span>
-            )}
+          <>
+          <span
+            className={`flex-1 min-w-0 text-[12px] font-medium truncate block leading-snug ${
+              isActive ? "text-cc-fg" : "text-cc-fg/90"
+            } ${isRecentlyRenamed ? "animate-name-appear" : ""}`}
+            onAnimationEnd={() => onClearRecentlyRenamed(s.id)}
+          >
+            {label}
           </span>
+          {isPinned && (
+            <span className="shrink-0 text-cc-primary" title="Pinned" aria-label="Pinned">
+              <PinIcon className="w-3 h-3" />
+            </span>
+          )}
+          </>
         )}
       </button>
+
+      {/* Line 2: project chip (filters the list) + sub-path + badges.
+          Kept outside the row button so the chip can be its own control
+          (no nested interactive elements); clicks elsewhere still select. */}
+      {!isEditing && (
+        <div
+          onClick={() => onSelect(s.id)}
+          onDoubleClick={() => onStartRename(s.id, label)}
+          className="flex items-center gap-1 min-w-0 pl-[26px] pr-8 sm:pr-2 sm:group-hover:pr-12 pb-1.5 leading-none cursor-pointer"
+        >
+          {projectLabel && (
+            onFilterProject ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFilterProject(projectKey, projectLabel);
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+                title={`${isProjectFiltered ? "Clear filter" : "Show only sessions in"} ${projectKey}`}
+                aria-label={`${isProjectFiltered ? "Clear project filter" : "Filter by project"} ${projectLabel}`}
+                aria-pressed={isProjectFiltered}
+                className={`shrink min-w-0 max-w-[65%] truncate text-[10px] leading-tight px-1 py-px rounded transition-colors cursor-pointer ${
+                  isProjectFiltered
+                    ? "bg-cc-primary/15 text-cc-primary"
+                    : "bg-cc-hover text-cc-muted hover:text-cc-fg hover:bg-cc-border"
+                }`}
+              >
+                {projectLabel}
+              </button>
+            ) : (
+              <span className="shrink min-w-0 max-w-[65%] truncate text-[10px] leading-tight text-cc-muted/80" title={projectKey}>
+                {projectLabel}
+              </span>
+            )
+          )}
+          {subPath && (
+            <span className="truncate min-w-0 flex-1 text-[10px] leading-tight text-cc-muted/60" title={s.cwd}>
+              /{subPath}
+            </span>
+          )}
+          {badges}
+        </div>
+      )}
 
       {/* Archive button — hover reveal (desktop), always visible (mobile) */}
       {!archived && !isEditing && !menuOpen && (
@@ -319,6 +393,17 @@ export function SessionItem({
                 <path d="M12.146.854a.5.5 0 00-.707 0L3.714 8.579a.5.5 0 00-.138.242l-.777 3.11a.5.5 0 00.607.607l3.11-.777a.5.5 0 00.242-.138L14.573 3.854a.5.5 0 000-.708L12.146.854z" />
               </svg>
               Rename
+            </button>
+          )}
+          {!archived && onTogglePin && (
+            <button
+              role="menuitem"
+              tabIndex={-1}
+              onClick={() => handleMenuAction(() => onTogglePin(s.id, !isPinned))}
+              className="w-full px-3 py-1.5 text-[12px] text-left text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer flex items-center gap-2"
+            >
+              <PinIcon className="w-3 h-3 text-cc-muted" />
+              {isPinned ? "Unpin" : "Pin to top"}
             </button>
           )}
           {archived ? (

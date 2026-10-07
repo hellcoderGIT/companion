@@ -1165,6 +1165,20 @@ export function createRoutes(
     return c.json({ ok: true });
   });
 
+  // Pin/unpin a session to the top of its owner's sidebar. Ownership (session.userName
+  // vs. the browser's own user name) is a UI concern — identity is not authenticated.
+  api.post("/sessions/:id/pin", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => ({}));
+    if (typeof body.pinned !== "boolean") {
+      return c.json({ error: "pinned (boolean) is required" }, 400);
+    }
+    if (!launcher.setPinned(id, body.pinned)) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+    return c.json({ ok: true, pinned: body.pinned });
+  });
+
   // ─── Recording Management ──────────────────────────────────
 
   api.post("/sessions/:id/recording/start", (c) => {

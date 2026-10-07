@@ -4,9 +4,9 @@ import { api, type ArchiveInfo } from "../api.js";
 import { ArchiveLinearModal, type LinearTransitionChoice } from "./ArchiveLinearModal.js";
 import { connectAllSessions, disconnectSession } from "../ws.js";
 import { navigateToSession, navigateHome, parseHash } from "../utils/routing.js";
-import { ProjectGroup } from "./ProjectGroup.js";
 import { SessionItem } from "./SessionItem.js";
-import { groupSessionsByProject, type SessionItem as SessionItemType } from "../utils/project-grouping.js";
+import { type SessionItem as SessionItemType } from "../utils/project-grouping.js";
+import { filterSessions, type ProjectFilter } from "../utils/session-search.js";
 
 interface NavItem {
   id: string;
@@ -145,8 +145,6 @@ export function Sidebar() {
   const clearRecentlyRenamed = useStore((s) => s.clearRecentlyRenamed);
   const pendingPermissions = useStore((s) => s.pendingPermissions);
   const linkedLinearIssues = useStore((s) => s.linkedLinearIssues);
-  const collapsedProjects = useStore((s) => s.collapsedProjects);
-  const toggleProjectCollapse = useStore((s) => s.toggleProjectCollapse);
   const route = parseHash(hash);
 
   // Poll for SDK sessions on mount
@@ -413,6 +411,23 @@ export function Sidebar() {
     setArchiveModalInfo(null);
   }, []);
 
+  const handleTogglePin = useCallback(async (sessionId: string, pinned: boolean) => {
+    // Optimistic update so the row jumps immediately; re-sync from the server after.
+    const store = useStore.getState();
+    store.setSdkSessions(store.sdkSessions.map((s) => (s.sessionId === sessionId ? { ...s, pinned } : s)));
+    try {
+      await api.setSessionPinned(sessionId, pinned);
+    } catch {
+      // best-effort — the refresh below restores the server's truth
+    }
+    try {
+      const list = await api.listSessions();
+      useStore.getState().setSdkSessions(list);
+    } catch {
+      // best-effort
+    }
+  }, []);
+
   const handleUnarchiveSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
     try {
@@ -460,8 +475,15 @@ export function Sidebar() {
       agentId: bridgeState?.agentId || sdkInfo?.agentId,
       agentName: bridgeState?.agentName || sdkInfo?.agentName,
       userName: sdkInfo?.userName,
+      pinned: sdkInfo?.pinned ?? false,
     };
   }).sort((a, b) => b.createdAt - a.createdAt);
+
+  // The browser's own identity (set on the home page). Pins are personal: only
+  // the session's creator can pin it, and pins only reorder the creator's view.
+  const myUserName = (typeof localStorage !== "undefined" && localStorage.getItem("cc-user-name")?.trim()) || "";
+  const isOwnSession = (s: SessionItemType) => !!myUserName && s.userName === myUserName;
+  const isPinnedForMe = (s: SessionItemType) => !!s.pinned && isOwnSession(s);
 
   // ── User filter ──────────────────────────────────────────────────────────
   // Distinct user names across all sessions, used to populate the filter dropdown.
@@ -481,22 +503,37 @@ export function Sidebar() {
   const hasUnassignedSessions = allSessionList.some((s) => !s.userName);
   const visibleSessionList = allSessionList.filter(matchesUserFilter);
 
-  const activeSessions = visibleSessionList.filter((s) => !s.archived && !s.cronJobId && !s.agentId);
-  const cronSessions = visibleSessionList.filter((s) => !s.archived && !!s.cronJobId);
-  const agentSessions = visibleSessionList.filter((s) => !s.archived && !!s.agentId);
-  const archivedSessions = visibleSessionList.filter((s) => s.archived);
+  // ── Search + project filter ──────────────────────────────────────────────
+  // Both apply to non-archived sessions only (on top of the user filter); while
+  // either is active the archived section is hidden.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [projectFilter, setProjectFilter] = useState<ProjectFilter | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const isFiltering = searchQuery.trim() !== "" || projectFilter !== null;
+  const liveSessionList = filterSessions(
+    visibleSessionList.filter((s) => !s.archived),
+    searchQuery,
+    projectFilter?.key ?? null,
+    sessionNames,
+  );
+  const handleFilterProject = useCallback((key: string, label: string) => {
+    setProjectFilter((prev) => (prev?.key === key ? null : { key, label }));
+  }, []);
+
+  // Flat list, newest first (allSessionList is already sorted by createdAt desc),
+  // with the viewer's own pinned sessions on top (stable sort keeps age order inside).
+  const activeSessions = liveSessionList
+    .filter((s) => !s.cronJobId && !s.agentId)
+    .sort((a, b) => Number(isPinnedForMe(b)) - Number(isPinnedForMe(a)));
+  const cronSessions = liveSessionList.filter((s) => !!s.cronJobId);
+  const agentSessions = liveSessionList.filter((s) => !!s.agentId);
+  const archivedSessions = isFiltering ? [] : visibleSessionList.filter((s) => s.archived);
   const currentSession = currentSessionId ? allSessionList.find((s) => s.id === currentSessionId) : null;
   const logoSrc = currentSession?.backendType === "codex" ? "/logo-codex.svg" : "/logo.svg";
   const [showCronSessions, setShowCronSessions] = useState(true);
   const [showAgentSessions, setShowAgentSessions] = useState(true);
 
-  // Group active sessions by project
-  const projectGroups = useMemo(
-    () => groupSessionsByProject(activeSessions),
-    [activeSessions],
-  );
-
-  // Shared props for SessionItem / ProjectGroup
+  // Shared props for SessionItem
   const sessionItemProps = {
     onSelect: handleSelectSession,
     onStartRename: handleStartRename,
@@ -510,6 +547,8 @@ export function Sidebar() {
     onConfirmRename: confirmRename,
     onCancelRename: cancelRename,
     editInputRef,
+    onFilterProject: handleFilterProject,
+    activeProjectKey: projectFilter?.key ?? null,
   };
 
   return (
@@ -569,6 +608,61 @@ export function Sidebar() {
         </div>
       )}
 
+      {/* Session search + active project filter */}
+      <div className="px-3.5 pb-2">
+        <div className="relative">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-cc-muted/70 pointer-events-none">
+            <path d="M11.742 10.344a6.5 6.5 0 10-1.397 1.398h-.001l3.85 3.85a1 1 0 001.415-1.414l-3.85-3.85zM12 6.5a5.5 5.5 0 11-11 0 5.5 5.5 0 0111 0z" />
+          </svg>
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && searchQuery) {
+                e.preventDefault();
+                setSearchQuery("");
+              }
+            }}
+            placeholder="Search sessions…"
+            aria-label="Search sessions"
+            className="w-full pl-7 pr-7 py-1.5 text-[12px] bg-cc-card border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted/60 focus:outline-none focus:border-cc-primary [&::-webkit-search-cancel-button]:hidden"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => {
+                setSearchQuery("");
+                searchInputRef.current?.focus();
+              }}
+              aria-label="Clear search"
+              title="Clear search"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-cc-muted hover:text-cc-fg hover:bg-cc-hover cursor-pointer"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+              </svg>
+            </button>
+          )}
+        </div>
+        {projectFilter && (
+          <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-cc-muted">
+            <span className="shrink-0">Project:</span>
+            <button
+              onClick={() => setProjectFilter(null)}
+              title={`${projectFilter.key} — click to clear`}
+              aria-label={`Clear project filter ${projectFilter.label}`}
+              className="min-w-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-cc-primary/15 text-cc-primary hover:bg-cc-primary/25 cursor-pointer"
+            >
+              <span className="truncate">{projectFilter.label}</span>
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 shrink-0">
+                <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+              </svg>
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Container archive confirmation */}
       {confirmArchiveId && (
         <div className="mx-2 mb-1 p-2.5 rounded-[10px] bg-cc-warning/10 border border-cc-warning/20">
@@ -601,26 +695,35 @@ export function Sidebar() {
 
       {/* Session list */}
       <div className="flex-1 overflow-y-auto px-2.5 pb-2">
-        {activeSessions.length === 0 && cronSessions.length === 0 && archivedSessions.length === 0 ? (
+        {activeSessions.length === 0 && cronSessions.length === 0 && agentSessions.length === 0 && archivedSessions.length === 0 ? (
           <p className="px-3 py-8 text-xs text-cc-muted text-center leading-relaxed">
-            No sessions yet.
+            {isFiltering ? "No matching sessions." : "No sessions yet."}
           </p>
         ) : (
           <>
-            {projectGroups.map((group, i) => (
-              <ProjectGroup
-                key={group.key}
-                group={group}
-                isCollapsed={collapsedProjects.has(group.key)}
-                onToggleCollapse={toggleProjectCollapse}
-                currentSessionId={currentSessionId}
-                sessionNames={sessionNames}
-                pendingPermissions={pendingPermissions}
-                recentlyRenamed={recentlyRenamed}
-                isFirst={i === 0}
-                {...sessionItemProps}
-              />
-            ))}
+            {activeSessions.length > 0 && (
+              <div>
+                {activeSessions.map((s, i) => {
+                  const pinned = isPinnedForMe(s);
+                  // Thin separator between the pinned block and the rest
+                  const lastPinned = pinned && i < activeSessions.length - 1 && !isPinnedForMe(activeSessions[i + 1]);
+                  return (
+                    <div key={s.id} className={lastPinned ? "pb-1 mb-1 border-b border-cc-separator" : ""}>
+                      <SessionItem
+                        session={s}
+                        isActive={currentSessionId === s.id}
+                        sessionName={sessionNames.get(s.id)}
+                        permCount={pendingPermissions.get(s.id)?.size ?? 0}
+                        isRecentlyRenamed={recentlyRenamed.has(s.id)}
+                        isPinned={pinned}
+                        onTogglePin={isOwnSession(s) ? handleTogglePin : undefined}
+                        {...sessionItemProps}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {cronSessions.length > 0 && (
               <div className="mt-3 pt-3 border-t border-cc-separator">

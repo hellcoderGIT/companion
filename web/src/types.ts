@@ -121,6 +121,8 @@ export interface SdkSessionInfo {
   cwd: string;
   createdAt: number;
   archived?: boolean;
+  /** Pinned to the top of the owner's sidebar */
+  pinned?: boolean;
   containerId?: string;
   containerName?: string;
   containerImage?: string;
