@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.124.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.124.0...companion-v0.124.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **service:** support system-wide systemd units for service mode and auto-update ([#140](https://github.com/hellcoderGIT/companion/issues/140)) ([fde82a7](https://github.com/hellcoderGIT/companion/commit/fde82a7eef23eb10f2f226efa1063b3e79c220b6)), closes [#139](https://github.com/hellcoderGIT/companion/issues/139)
+
 ## [0.124.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.123.0...companion-v0.124.0) (2026-10-07)
 
 
