@@ -310,6 +310,7 @@ function createMockLauncher() {
     listSessions: vi.fn(() => []),
     getSession: vi.fn(),
     setArchived: vi.fn(),
+    setPinned: vi.fn(() => true),
     removeSession: vi.fn(),
   } as any;
 }
@@ -1190,6 +1191,34 @@ describe("POST /api/sessions/:id/unarchive", () => {
     const json = await res.json();
     expect(json).toEqual({ ok: true });
     expect(orchestrator.unarchiveSession).toHaveBeenCalledWith("s1");
+  });
+});
+
+describe("POST /api/sessions/:id/pin", () => {
+  const pin = (body: unknown) =>
+    app.request("/api/sessions/s1/pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("sets the pinned flag via the launcher", async () => {
+    const res = await pin({ pinned: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, pinned: true });
+    expect(launcher.setPinned).toHaveBeenCalledWith("s1", true);
+  });
+
+  it("rejects a missing/non-boolean pinned value", async () => {
+    const res = await pin({ pinned: "yes" });
+    expect(res.status).toBe(400);
+    expect(launcher.setPinned).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for an unknown session", async () => {
+    launcher.setPinned.mockReturnValue(false);
+    const res = await pin({ pinned: false });
+    expect(res.status).toBe(404);
   });
 });
 

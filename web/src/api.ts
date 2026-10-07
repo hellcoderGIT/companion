@@ -1083,6 +1083,9 @@ export const api = {
   unarchiveSession: (sessionId: string) =>
     post(`/sessions/${encodeURIComponent(sessionId)}/unarchive`),
 
+  setSessionPinned: (sessionId: string, pinned: boolean) =>
+    post<{ ok: boolean; pinned: boolean }>(`/sessions/${encodeURIComponent(sessionId)}/pin`, { pinned }),
+
   renameSession: (sessionId: string, name: string) =>
     patch<{ ok: boolean; name: string }>(
       `/sessions/${encodeURIComponent(sessionId)}/name`,

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { SessionState, SdkSessionInfo } from "../types.js";
 
@@ -20,6 +20,7 @@ const mockApi = {
   deleteSession: vi.fn().mockResolvedValue({}),
   archiveSession: vi.fn().mockResolvedValue({}),
   unarchiveSession: vi.fn().mockResolvedValue({}),
+  setSessionPinned: vi.fn().mockResolvedValue({ ok: true, pinned: true }),
   renameSession: vi.fn().mockResolvedValue({}),
   getArchiveInfo: vi.fn().mockResolvedValue({ hasLinkedIssue: false, issueNotDone: false }),
 };
@@ -30,6 +31,7 @@ vi.mock("../api.js", () => ({
     deleteSession: (...args: unknown[]) => mockApi.deleteSession(...args),
     archiveSession: (...args: unknown[]) => mockApi.archiveSession(...args),
     unarchiveSession: (...args: unknown[]) => mockApi.unarchiveSession(...args),
+    setSessionPinned: (...args: unknown[]) => mockApi.setSessionPinned(...args),
     renameSession: (...args: unknown[]) => mockApi.renameSession(...args),
     getArchiveInfo: (...args: unknown[]) => mockApi.getArchiveInfo(...args),
   },
@@ -263,21 +265,18 @@ describe("Sidebar", () => {
     expect(screen.getByText("abcdef12")).toBeInTheDocument();
   });
 
-  it("session items show project name in group header and full cwd path in session row", () => {
-    // "myapp" appears in the project group header, full cwd path appears in the session row
-    const session = makeSession("s1", { cwd: "/home/user/projects/myapp" });
-    const sdk = makeSdkSession("s1");
+  it("session items show the project chip and the sub-path below the name", () => {
+    // The repo root is shown as a clickable chip; the cwd inside it as a sub-path.
+    const session = makeSession("s1", { cwd: "/home/user/projects/myapp/packages/api", repo_root: "/home/user/projects/myapp" });
+    const sdk = makeSdkSession("s1", { cwd: "/home/user/projects/myapp/packages/api" });
     mockState = createMockState({
       sessions: new Map([["s1", session]]),
       sdkSessions: [sdk],
     });
 
     render(<Sidebar />);
-    // Group header shows "myapp"
-    const matches = screen.getAllByText("myapp");
-    expect(matches.length).toBeGreaterThanOrEqual(1);
-    // Session row shows the full cwd path
-    expect(screen.getByText("/home/user/projects/myapp")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Filter by project myapp" })).toHaveTextContent("myapp");
+    expect(screen.getByText("/packages/api")).toBeInTheDocument();
   });
 
   it("session items do not show git branch (removed in redesign)", () => {
@@ -340,9 +339,9 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    // Find the session button element
-    const sessionButton = screen.getByText("claude-sonnet-4-6").closest("button");
-    expect(sessionButton).toHaveClass("bg-cc-active");
+    // The row container (wraps name button + project line) carries the active background
+    const row = screen.getByText("claude-sonnet-4-6").closest(".group");
+    expect(row).toHaveClass("bg-cc-active");
   });
 
   it("clicking a session navigates to the session hash", () => {
@@ -711,64 +710,180 @@ describe("Sidebar", () => {
     expect(screen.getAllByText("CX").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("sessions are grouped by project directory", () => {
-    const session1 = makeSession("s1", { cwd: "/home/user/project-a" });
-    const session2 = makeSession("s2", { cwd: "/home/user/project-a" });
-    const session3 = makeSession("s3", { cwd: "/home/user/project-b" });
-    const sdk1 = makeSdkSession("s1", { cwd: "/home/user/project-a" });
-    const sdk2 = makeSdkSession("s2", { cwd: "/home/user/project-a" });
-    const sdk3 = makeSdkSession("s3", { cwd: "/home/user/project-b" });
+  it("lists active sessions flat, newest first, regardless of project", () => {
+    // No more per-project groups: one list sorted by createdAt desc.
+    const now = Date.now();
     mockState = createMockState({
-      sessions: new Map([["s1", session1], ["s2", session2], ["s3", session3]]),
-      sdkSessions: [sdk1, sdk2, sdk3],
+      sdkSessions: [
+        makeSdkSession("old", { cwd: "/home/user/project-a", model: "model-old", createdAt: now - 3000 }),
+        makeSdkSession("new", { cwd: "/home/user/project-b", model: "model-new", createdAt: now }),
+        makeSdkSession("mid", { cwd: "/home/user/project-a", model: "model-mid", createdAt: now - 1000 }),
+      ],
     });
 
     render(<Sidebar />);
-    // Project group headers should be visible (also appears as dirName in session items)
-    expect(screen.getAllByText("project-a").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("project-b").length).toBeGreaterThanOrEqual(1);
+    const names = screen.getAllByText(/^model-(old|new|mid)$/).map((el) => el.textContent);
+    expect(names).toEqual(["model-new", "model-mid", "model-old"]);
+    // Project names now live on the session rows, not in group headers
+    expect(screen.getAllByRole("button", { name: "Filter by project project-a" })).toHaveLength(2);
   });
 
-  it("project group header shows running status dot and session count", () => {
-    const session1 = makeSession("s1", { cwd: "/home/user/myapp" });
-    const session2 = makeSession("s2", { cwd: "/home/user/myapp" });
-    const sdk1 = makeSdkSession("s1", { cwd: "/home/user/myapp" });
-    const sdk2 = makeSdkSession("s2", { cwd: "/home/user/myapp" });
+  it("search filters active sessions by name and path, hiding archived ones", () => {
     mockState = createMockState({
-      sessions: new Map([["s1", session1], ["s2", session2]]),
-      sdkSessions: [sdk1, sdk2],
-      sessionStatus: new Map([["s1", "running"], ["s2", "running"]]),
+      sdkSessions: [
+        makeSdkSession("s1", { cwd: "/srv/mc-agent", model: "m1" }),
+        makeSdkSession("s2", { cwd: "/srv/mc-procurement", model: "m2" }),
+        makeSdkSession("s3", { cwd: "/srv/mc-agent", model: "m3", archived: true }),
+      ],
+      sessionNames: new Map([["s1", "MA_MovingAvgSync"], ["s2", "MA_ProkuUploadFile"], ["s3", "MA_MovingAvgOld"]]),
     });
 
     render(<Sidebar />);
-    // Status dot with title "2 running" should be present
-    expect(screen.getByTitle("2 running")).toBeInTheDocument();
-    // Session count badge should show "2"
-    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText(/Archived \(1\)/)).toBeInTheDocument();
+    const search = screen.getByLabelText("Search sessions");
+
+    // Multi-term, case-insensitive AND match
+    fireEvent.change(search, { target: { value: "moving sync" } });
+    expect(screen.getByText("MA_MovingAvgSync")).toBeInTheDocument();
+    expect(screen.queryByText("MA_ProkuUploadFile")).not.toBeInTheDocument();
+    // Archived sessions are never searched and the section is hidden while searching
+    expect(screen.queryByText(/Archived \(/)).not.toBeInTheDocument();
+
+    // Path matches work too
+    fireEvent.change(search, { target: { value: "procurement" } });
+    expect(screen.getByText("MA_ProkuUploadFile")).toBeInTheDocument();
+    expect(screen.queryByText("MA_MovingAvgSync")).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "nothing-matches-this" } });
+    expect(screen.getByText("No matching sessions.")).toBeInTheDocument();
+
+    // Escape clears the search
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(screen.getByText("MA_ProkuUploadFile")).toBeInTheDocument();
+    expect(screen.getByText(/Archived \(1\)/)).toBeInTheDocument();
   });
 
-  it("collapsing a project group hides its session items but shows a preview", () => {
-    const session = makeSession("s1", { cwd: "/home/user/myapp", model: "hidden-model" });
-    const sdk = makeSdkSession("s1", { cwd: "/home/user/myapp" });
+  it("search only covers the selected user's sessions", () => {
     mockState = createMockState({
-      sessions: new Map([["s1", session]]),
-      sdkSessions: [sdk],
-      collapsedProjects: new Set(["/home/user/myapp"]),
+      sdkSessions: [
+        makeSdkSession("a1", { model: "report-alice", userName: "Alice" }),
+        makeSdkSession("b1", { model: "report-bob", userName: "Bob" }),
+      ],
     });
 
     render(<Sidebar />);
-    // Group header should still be visible
-    expect(screen.getByText("myapp")).toBeInTheDocument();
-    // The session button itself should not be present (no clickable session row)
-    const sessionButtons = screen.getAllByRole("button");
-    const sessionRowButton = sessionButtons.find((btn) =>
-      btn.textContent?.includes("hidden-model") && btn.classList.contains("rounded-lg"),
-    );
-    expect(sessionRowButton).toBeUndefined();
-    // But a collapsed preview text should appear with the session name
-    const previewElement = screen.getByText("hidden-model");
-    expect(previewElement).toBeInTheDocument();
-    expect(previewElement.className).toContain("text-cc-muted/70");
+    fireEvent.change(screen.getByLabelText("Filter sessions by user"), { target: { value: "Alice" } });
+    fireEvent.change(screen.getByLabelText("Search sessions"), { target: { value: "report" } });
+    expect(screen.getByText("report-alice")).toBeInTheDocument();
+    expect(screen.queryByText("report-bob")).not.toBeInTheDocument();
+  });
+
+  it("clicking a project chip filters to that project; clicking again clears it", () => {
+    mockState = createMockState({
+      sdkSessions: [
+        makeSdkSession("s1", { cwd: "/srv/mc-agent", model: "agent-1" }),
+        makeSdkSession("s2", { cwd: "/srv/mc-agent/UserPlayground", model: "agent-2" }),
+        makeSdkSession("s3", { cwd: "/srv/mc-procurement", model: "proc-1" }),
+      ],
+    });
+
+    render(<Sidebar />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Filter by project mc-procurement" })[0]);
+    // Selecting a project does not navigate to the session
+    expect(window.location.hash).not.toContain("s3");
+    expect(screen.getByText("proc-1")).toBeInTheDocument();
+    expect(screen.queryByText("agent-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("agent-2")).not.toBeInTheDocument();
+
+    // Active filter is shown above the list and the row chip toggles it off
+    expect(screen.getByRole("button", { name: "Clear project filter mc-procurement", pressed: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear project filter mc-procurement", pressed: true }));
+    expect(screen.getByText("agent-1")).toBeInTheDocument();
+    expect(screen.getByText("agent-2")).toBeInTheDocument();
+  });
+
+  it("the project filter pill above the list clears the filter", () => {
+    mockState = createMockState({
+      sdkSessions: [
+        makeSdkSession("s1", { cwd: "/srv/a", model: "in-a" }),
+        makeSdkSession("s2", { cwd: "/srv/b", model: "in-b" }),
+      ],
+    });
+
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole("button", { name: "Filter by project a" }));
+    expect(screen.queryByText("in-b")).not.toBeInTheDocument();
+    const pill = screen.getAllByRole("button", { name: "Clear project filter a" }).find((b) => !b.hasAttribute("aria-pressed"))!;
+    fireEvent.click(pill);
+    expect(screen.getByText("in-b")).toBeInTheDocument();
+  });
+
+  describe("pinning", () => {
+    afterEach(() => localStorage.removeItem("cc-user-name"));
+
+    it("floats the viewer's own pinned sessions to the top", () => {
+      localStorage.setItem("cc-user-name", "Moritz");
+      const now = Date.now();
+      mockState = createMockState({
+        sdkSessions: [
+          makeSdkSession("new", { model: "m-new", userName: "Moritz", createdAt: now }),
+          makeSdkSession("pin-old", { model: "m-pin-old", userName: "Moritz", createdAt: now - 5000, pinned: true }),
+          makeSdkSession("pin-mid", { model: "m-pin-mid", userName: "Moritz", createdAt: now - 2000, pinned: true }),
+          makeSdkSession("mid", { model: "m-mid", userName: "Moritz", createdAt: now - 1000 }),
+        ],
+      });
+
+      render(<Sidebar />);
+      const names = screen.getAllByText(/^m-/).map((el) => el.textContent);
+      // Pinned first (newest first within), then the rest newest first
+      expect(names).toEqual(["m-pin-mid", "m-pin-old", "m-new", "m-mid"]);
+      expect(screen.getAllByLabelText("Pinned")).toHaveLength(2);
+    });
+
+    it("ignores other users' pins and offers no Pin action on their sessions", () => {
+      localStorage.setItem("cc-user-name", "Moritz");
+      const now = Date.now();
+      mockState = createMockState({
+        sdkSessions: [
+          makeSdkSession("mine", { model: "m-mine", userName: "Moritz", createdAt: now }),
+          makeSdkSession("theirs", { model: "m-theirs", userName: "Alice", createdAt: now - 1000, pinned: true }),
+        ],
+      });
+
+      render(<Sidebar />);
+      const names = screen.getAllByText(/^m-/).map((el) => el.textContent);
+      expect(names).toEqual(["m-mine", "m-theirs"]);
+      expect(screen.queryByLabelText("Pinned")).not.toBeInTheDocument();
+
+      const menus = screen.getAllByTitle("Session actions");
+      fireEvent.click(menus[1]); // Alice's session
+      expect(screen.queryByText("Pin to top")).not.toBeInTheDocument();
+      fireEvent.click(menus[1]);
+      fireEvent.click(menus[0]); // own session
+      expect(screen.getByText("Pin to top")).toBeInTheDocument();
+    });
+
+    it("offers no pinning when the browser has no user name", () => {
+      mockState = createMockState({
+        sdkSessions: [makeSdkSession("s1", { model: "m-1", userName: "Moritz", pinned: true })],
+      });
+      render(<Sidebar />);
+      expect(screen.queryByLabelText("Pinned")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTitle("Session actions"));
+      expect(screen.queryByText("Pin to top")).not.toBeInTheDocument();
+    });
+
+    it("Pin to top calls the API and refreshes the session list", async () => {
+      localStorage.setItem("cc-user-name", "Moritz");
+      mockState = createMockState({
+        sdkSessions: [makeSdkSession("s1", { model: "m-1", userName: "Moritz" })],
+      });
+      render(<Sidebar />);
+      fireEvent.click(screen.getByTitle("Session actions"));
+      fireEvent.click(screen.getByText("Pin to top"));
+      await waitFor(() => expect(mockApi.setSessionPinned).toHaveBeenCalledWith("s1", true));
+      await waitFor(() => expect(mockState.setSdkSessions).toHaveBeenCalled());
+    });
   });
 
   it("context menu shows restore and delete for archived sessions", () => {
@@ -849,9 +964,9 @@ describe("Sidebar", () => {
     });
 
     render(<Sidebar />);
-    const sessionButton = screen.getByText("claude-sonnet-4-6").closest("button");
-    // The button should have min-h-[44px] class for touch accessibility
-    expect(sessionButton).toHaveClass("min-h-[44px]");
+    // The whole row (name + project line) is clickable and must be >= 44px tall
+    const row = screen.getByText("claude-sonnet-4-6").closest(".group");
+    expect(row).toHaveClass("min-h-[44px]");
   });
 
   it("Enter confirms rename in edit mode", () => {

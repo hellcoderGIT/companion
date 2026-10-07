@@ -23,6 +23,8 @@ export interface SessionItem {
   agentName?: string;
   /** Name of the human who created this session (used for the sidebar user filter) */
   userName?: string;
+  /** Pinned by its owner (only floats to the top in the owner's own sidebar) */
+  pinned?: boolean;
 }
 
 export interface ProjectGroup {

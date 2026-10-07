@@ -693,6 +693,22 @@ describe("state management", () => {
     });
   });
 
+  describe("setPinned", () => {
+    it("sets and clears the pinned flag", () => {
+      launcher.launch({ cwd: "/tmp" });
+      expect(launcher.setPinned("test-session-id", true)).toBe(true);
+      expect(launcher.getSession("test-session-id")?.pinned).toBe(true);
+
+      expect(launcher.setPinned("test-session-id", false)).toBe(true);
+      // Cleared rather than stored as false, keeping persisted state lean
+      expect(launcher.getSession("test-session-id")?.pinned).toBeUndefined();
+    });
+
+    it("returns false for an unknown session", () => {
+      expect(launcher.setPinned("nonexistent", true)).toBe(false);
+    });
+  });
+
   describe("removeSession", () => {
     it("deletes session from internal maps", () => {
       launcher.launch({ cwd: "/tmp" });

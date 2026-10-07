@@ -93,6 +93,8 @@ export interface SdkSessionInfo {
   /** The CLI's internal session ID (from system.init), used for --resume */
   cliSessionId?: string;
   archived?: boolean;
+  /** Pinned to the top of its owner's sidebar (only the creator — userName — may pin) */
+  pinned?: boolean;
   /** User-facing session name */
   name?: string;
   /** Name of the human who created this session (injected into prompts, used for filtering) */
@@ -1362,6 +1364,18 @@ export class CliLauncher {
       info.archived = archived;
       this.persistState();
     }
+  }
+
+  /**
+   * Set the pinned flag on a session. Returns false if the session is unknown.
+   */
+  setPinned(sessionId: string, pinned: boolean): boolean {
+    const info = this.sessions.get(sessionId);
+    if (!info) return false;
+    if (pinned) info.pinned = true;
+    else delete info.pinned;
+    this.persistState();
+    return true;
   }
 
   /**
