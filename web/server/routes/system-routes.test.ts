@@ -28,6 +28,15 @@ vi.mock("../update-checker.js", () => ({
 // ─── Mock service ──────────────────────────────────────────────────────────
 vi.mock("../service.js", () => ({
   refreshServiceDefinition: vi.fn(),
+  getDetectedServiceKind: vi.fn(() => "systemd-user"),
+  getUpdateRestartPlan: vi.fn((kind: string | null) =>
+    kind === "systemd-system" || kind === "external"
+      ? { exitCode: 75 }
+      : {
+          command: ["systemctl", "--user", "restart", "the-companion.service"],
+          env: { XDG_RUNTIME_DIR: "/run/user/1000" },
+          exitCode: 0,
+        }),
 }));
 
 // ─── Mock claude-compat checker ────────────────────────────────────────────
@@ -88,6 +97,7 @@ import {
   setUpdateInProgress,
 } from "../update-checker.js";
 import { registerSystemRoutes } from "./system-routes.js";
+import { getDetectedServiceKind } from "../service.js";
 import { checkCompat, getCompatState } from "../claude-compat-checker.js";
 import { pinToVersion, patchBinary, unpatch } from "../claude-patcher.js";
 import { getSettings, updateSettings } from "../settings-manager.js";
@@ -495,6 +505,53 @@ describe("POST /api/update", () => {
 
     // Advance past the 500ms exit timeout
     await vi.advanceTimersByTimeAsync(600);
+
+    // The user unit is restarted through systemctl --user, then we exit 0.
+    expect(mockSpawn).toHaveBeenCalledWith(
+      ["systemctl", "--user", "restart", "the-companion.service"],
+      expect.objectContaining({ env: expect.objectContaining({ XDG_RUNTIME_DIR: "/run/user/1000" }) }),
+    );
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    vi.useRealTimers();
+    exitSpy.mockRestore();
+    // @ts-expect-error -- cleanup Bun global mock
+    delete globalThis.Bun;
+  });
+
+  // Under a system-wide unit (issue #139) the server can't restart itself via
+  // systemctl; it must exit non-zero so Restart=on-failure respawns it.
+  it("exits with the restart code and spawns nothing under a system unit", async () => {
+    vi.useFakeTimers();
+    vi.mocked(getDetectedServiceKind).mockReturnValueOnce("systemd-system");
+    vi.mocked(getUpdateState).mockReturnValue({
+      currentVersion: "1.0.0",
+      latestVersion: "2.0.0",
+      lastChecked: Date.now(),
+      isServiceMode: true,
+      checking: false,
+      updateInProgress: false,
+      channel: "stable",
+    });
+    vi.mocked(isUpdateAvailable).mockReturnValue(true);
+
+    const mockSpawn = vi.fn().mockReturnValueOnce({
+      exited: Promise.resolve(0),
+      stdout: new ReadableStream(),
+      stderr: new ReadableStream(),
+    });
+    // @ts-expect-error -- Bun global mock
+    globalThis.Bun = { spawn: mockSpawn };
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    const res = await app.request("/api/update", { method: "POST" });
+    expect(res.status).toBe(200);
+    await vi.advanceTimersByTimeAsync(150);
+    await vi.advanceTimersByTimeAsync(600);
+
+    // Only the install was spawned — no systemctl --user restart.
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(75);
 
     vi.useRealTimers();
     exitSpy.mockRestore();

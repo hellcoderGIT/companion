@@ -11,7 +11,11 @@ import {
   isUpdateAvailable,
   setUpdateInProgress,
 } from "../update-checker.js";
-import { refreshServiceDefinition } from "../service.js";
+import {
+  getDetectedServiceKind,
+  getUpdateRestartPlan,
+  refreshServiceDefinition,
+} from "../service.js";
 import { getSettings, updateSettings } from "../settings-manager.js";
 import { imagePullManager } from "../image-pull-manager.js";
 import { isSandboxEnabled } from "../feature-flags.js";
@@ -187,29 +191,21 @@ export function registerSystemRoutes(
 
         console.log("[update] Update successful, restarting service...");
 
-        const isLinux = process.platform === "linux";
-        const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
-        const restartCmd = isLinux
-          ? ["systemctl", "--user", "restart", "the-companion.service"]
-          : uid !== undefined
-            ? ["launchctl", "kickstart", "-k", `gui/${uid}/sh.thecompanion.app`]
-            : ["launchctl", "kickstart", "-k", "sh.thecompanion.app"];
+        const plan = getUpdateRestartPlan(getDetectedServiceKind());
+        if (plan.command) {
+          Bun.spawn(plan.command, {
+            stdout: "ignore",
+            stderr: "ignore",
+            stdin: "ignore",
+            env: plan.env ? { ...process.env, ...plan.env } : undefined,
+          });
+        } else {
+          console.log(
+            `[update] Exiting with code ${plan.exitCode} so the supervisor restarts the server.`,
+          );
+        }
 
-        Bun.spawn(restartCmd, {
-          stdout: "ignore",
-          stderr: "ignore",
-          stdin: "ignore",
-          env: isLinux
-            ? {
-                ...process.env,
-                XDG_RUNTIME_DIR:
-                  process.env.XDG_RUNTIME_DIR ||
-                  `/run/user/${uid ?? 1000}`,
-              }
-            : undefined,
-        });
-
-        setTimeout(() => process.exit(0), 500);
+        setTimeout(() => process.exit(plan.exitCode), 500);
       } catch (err) {
         console.error("[update] Update failed:", err);
         setUpdateInProgress(false);
