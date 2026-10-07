@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.124.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.123.0...companion-v0.124.0) (2026-10-07)
+
+
+### Features
+
+* **sidebar:** session search, flat newest-first list, project filter and pinning ([#137](https://github.com/hellcoderGIT/companion/issues/137)) ([5ac4012](https://github.com/hellcoderGIT/companion/commit/5ac40125584f711b5368919defc8a08d16533f59))
+
 ## [0.123.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.122.0...companion-v0.123.0) (2026-09-30)
 
 
