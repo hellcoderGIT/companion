@@ -294,6 +294,20 @@ describe("static model/mode lists", () => {
     expect(sonnet.map((m) => m.label)).toEqual(["Sonnet 5.5", "Sonnet 5"]);
   });
 
+  // Haiku 5.5 is the new cheap/fast pick (1M context). It sits above Haiku 4.5
+  // but must not displace the Opus default at CLAUDE_MODELS[0].
+  it("includes claude-haiku-5-5 in Claude models without making it the default", () => {
+    expect(CLAUDE_MODELS.map((m) => m.value)).toContain("claude-haiku-5-5");
+    expect(getDefaultModel("claude")).toBe("claude-opus-5-5");
+  });
+
+  // Prefix-collapse guard, same as the Opus/Fable/Sonnet pairs.
+  it("keeps Haiku 5.5 and Haiku 4.5 as separate options with distinct labels", () => {
+    const haiku = CLAUDE_MODELS.filter((m) => m.value.startsWith("claude-haiku-"));
+    expect(haiku.map((m) => m.value)).toEqual(["claude-haiku-5-5", "claude-haiku-4-5-20251001"]);
+    expect(haiku.map((m) => m.label)).toEqual(["Haiku 5.5", "Haiku 4.5"]);
+  });
+
   // The static list is only a fallback — the live list comes from the Codex
   // app-server `model/list` RPC. We assert the current frontier model
   // (gpt-6-astra, which Codex 0.153.x reports as isDefault) and that the

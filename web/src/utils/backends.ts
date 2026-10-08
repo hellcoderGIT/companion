@@ -56,6 +56,7 @@ export const CLAUDE_MODELS: ModelOption[] = [
   { value: "claude-opus-4-6", label: "Opus 4.6", icon: "" },
   { value: "claude-sonnet-5-5", label: "Sonnet 5.5", icon: "" },
   { value: "claude-sonnet-5", label: "Sonnet 5", icon: "" },
+  { value: "claude-haiku-5-5", label: "Haiku 5.5", icon: "" },
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", icon: "" },
 ];
 
