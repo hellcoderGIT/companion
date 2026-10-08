@@ -64,12 +64,14 @@ describe("ModelSwitcher", () => {
     // All Claude models should appear as options. Moritz Edition adds
     // Opus 4.7 alongside 4.6, so we assert on the exact labels rather than
     // the loose /Opus/ regex (which would now match two rows). The same now
-    // applies to Sonnet: 5.5 ships alongside 5, so these are anchored too.
+    // applies to Sonnet (5.5 alongside 5) and Haiku (5.5 alongside 4.5),
+    // so these are anchored too.
     expect(screen.getByRole("option", { name: /Opus 4\.7/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Opus 4\.6/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /^Sonnet 5\.5$/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /^Sonnet 5$/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Haiku/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^Haiku 5\.5$/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^Haiku 4\.5$/ })).toBeInTheDocument();
   });
 
   it("marks the current model as selected", () => {

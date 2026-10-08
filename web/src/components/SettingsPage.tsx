@@ -1140,6 +1140,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow"
                   >
                     <option value="claude-haiku-4-5">Claude Haiku 4.5 — cheapest, recommended</option>
+                    <option value="claude-haiku-5-5">Claude Haiku 5.5</option>
                     <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
                     <option value="claude-sonnet-5">Claude Sonnet 5</option>
                   </select>
@@ -1246,6 +1247,7 @@ export function SettingsPage({ embedded = false }: SettingsPageProps) {
                     className="w-full px-3 py-2.5 min-h-[44px] text-sm bg-cc-bg rounded-lg text-cc-fg focus:outline-none focus:ring-1 focus:ring-cc-primary/40 transition-shadow disabled:opacity-50"
                   >
                     <option value="claude-haiku-4-5">Claude Haiku 4.5 — cheapest, recommended</option>
+                    <option value="claude-haiku-5-5">Claude Haiku 5.5</option>
                     <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
                     <option value="claude-sonnet-5">Claude Sonnet 5</option>
                   </select>
