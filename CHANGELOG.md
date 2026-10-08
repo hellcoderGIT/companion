@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.125.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.124.1...companion-v0.125.0) (2026-10-08)
+
+
+### Features
+
+* **models:** add Claude Haiku 5.5 to the model picker ([#142](https://github.com/hellcoderGIT/companion/issues/142)) ([9b9b77e](https://github.com/hellcoderGIT/companion/commit/9b9b77ed9a31ff97ac10023f1c6e5f3eee0e69ca))
+
 ## [0.124.1](https://github.com/hellcoderGIT/companion/compare/companion-v0.124.0...companion-v0.124.1) (2026-10-07)
 
 
