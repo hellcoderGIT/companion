@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.126.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.125.0...companion-v0.126.0) (2026-10-15)
+
+
+### Features
+
+* **sidebar:** sort sessions by last user message instead of creation time ([#144](https://github.com/hellcoderGIT/companion/issues/144)) ([934e517](https://github.com/hellcoderGIT/companion/commit/934e5170cca8e3d4415fefb09ed81dff58f1d397))
+
 ## [0.125.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.124.1...companion-v0.125.0) (2026-10-08)
 
 
