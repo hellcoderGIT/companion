@@ -21,6 +21,8 @@ export interface PersistedSession {
   lastAckSeq?: number;
   processedClientMessageIds?: string[];
   archived?: boolean;
+  /** Epoch ms of the last user_message (see Session.lastUserMessageAt). */
+  lastUserMessageAt?: number;
 }
 
 // ─── Store ──────────────────────────────────────────────────────────────────

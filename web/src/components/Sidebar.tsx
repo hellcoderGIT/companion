@@ -5,7 +5,7 @@ import { ArchiveLinearModal, type LinearTransitionChoice } from "./ArchiveLinear
 import { connectAllSessions, disconnectSession } from "../ws.js";
 import { navigateToSession, navigateHome, parseHash } from "../utils/routing.js";
 import { SessionItem } from "./SessionItem.js";
-import { type SessionItem as SessionItemType } from "../utils/project-grouping.js";
+import { type SessionItem as SessionItemType, sessionRecency } from "../utils/project-grouping.js";
 import { filterSessions, type ProjectFilter } from "../utils/session-search.js";
 
 interface NavItem {
@@ -476,8 +476,9 @@ export function Sidebar() {
       agentName: bridgeState?.agentName || sdkInfo?.agentName,
       userName: sdkInfo?.userName,
       pinned: sdkInfo?.pinned ?? false,
+      lastUserMessageAt: sdkInfo?.lastUserMessageAt,
     };
-  }).sort((a, b) => b.createdAt - a.createdAt);
+  }).sort((a, b) => sessionRecency(b) - sessionRecency(a));
 
   // The browser's own identity (set on the home page). Pins are personal: only
   // the session's creator can pin it, and pins only reorder the creator's view.
@@ -520,8 +521,9 @@ export function Sidebar() {
     setProjectFilter((prev) => (prev?.key === key ? null : { key, label }));
   }, []);
 
-  // Flat list, newest first (allSessionList is already sorted by createdAt desc),
-  // with the viewer's own pinned sessions on top (stable sort keeps age order inside).
+  // Flat list, most recently used first (allSessionList is already sorted by the
+  // last user message, falling back to createdAt), with the viewer's own pinned
+  // sessions on top (stable sort keeps recency order inside).
   const activeSessions = liveSessionList
     .filter((s) => !s.cronJobId && !s.agentId)
     .sort((a, b) => Number(isPinnedForMe(b)) - Number(isPinnedForMe(a)));

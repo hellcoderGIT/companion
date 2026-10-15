@@ -62,5 +62,22 @@ export function serializeForStore(session: Session): PersistedSession {
     nextEventSeq: session.nextEventSeq,
     lastAckSeq: session.lastAckSeq,
     processedClientMessageIds: session.processedClientMessageIds,
+    lastUserMessageAt: session.lastUserMessageAt,
   };
+}
+
+/**
+ * Timestamp of the newest user_message in a history, or undefined if there is
+ * none. Used to backfill Session.lastUserMessageAt for sessions persisted
+ * before that field existed (history is capped, so very old sessions whose
+ * last prompt scrolled out simply fall back to createdAt on the client).
+ */
+export function findLastUserMessageAt(history: BrowserIncomingMessage[]): number | undefined {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    if (msg.type === "user_message" && typeof msg.timestamp === "number" && msg.timestamp > 0) {
+      return msg.timestamp;
+    }
+  }
+  return undefined;
 }

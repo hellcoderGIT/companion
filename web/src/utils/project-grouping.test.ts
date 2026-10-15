@@ -3,6 +3,7 @@ import {
   extractProjectKey,
   extractProjectLabel,
   groupSessionsByProject,
+  sessionRecency,
   type SessionItem,
 } from "./project-grouping.js";
 
@@ -279,5 +280,22 @@ describe("groupSessionsByProject", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe("/home/user/companion");
     expect(groups[0].label).toBe("companion");
+  });
+});
+
+describe("sessionRecency", () => {
+  // Sidebar sort key: the last user message, or creation time for sessions
+  // nobody has written to yet (so a fresh session still lands on top).
+  it("uses lastUserMessageAt when present", () => {
+    expect(sessionRecency(makeItem({ createdAt: 1000, lastUserMessageAt: 5000 }))).toBe(5000);
+  });
+
+  it("falls back to createdAt when no message was sent", () => {
+    expect(sessionRecency(makeItem({ createdAt: 1000 }))).toBe(1000);
+  });
+
+  it("never ranks a session below its creation time", () => {
+    // Defensive: a forked/resumed session may inherit an older message time.
+    expect(sessionRecency(makeItem({ createdAt: 3000, lastUserMessageAt: 2000 }))).toBe(3000);
   });
 });

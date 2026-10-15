@@ -25,6 +25,17 @@ export interface SessionItem {
   userName?: string;
   /** Pinned by its owner (only floats to the top in the owner's own sidebar) */
   pinned?: boolean;
+  /** Epoch ms of the last user message sent to the session (undefined if none yet) */
+  lastUserMessageAt?: number;
+}
+
+/**
+ * Sort key for "most recently used first": the last time a user sent the
+ * session a message, or its creation time if nobody has written to it yet
+ * (a brand-new session should appear on top, not at the bottom).
+ */
+export function sessionRecency(s: Pick<SessionItem, "createdAt" | "lastUserMessageAt">): number {
+  return Math.max(s.createdAt, s.lastUserMessageAt ?? 0);
 }
 
 export interface ProjectGroup {

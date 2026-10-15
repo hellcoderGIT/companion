@@ -711,7 +711,8 @@ describe("Sidebar", () => {
   });
 
   it("lists active sessions flat, newest first, regardless of project", () => {
-    // No more per-project groups: one list sorted by createdAt desc.
+    // No more per-project groups: one flat list. None of these sessions has a
+    // user message yet, so recency falls back to createdAt desc.
     const now = Date.now();
     mockState = createMockState({
       sdkSessions: [
@@ -726,6 +727,24 @@ describe("Sidebar", () => {
     expect(names).toEqual(["model-new", "model-mid", "model-old"]);
     // Project names now live on the session rows, not in group headers
     expect(screen.getAllByRole("button", { name: "Filter by project project-a" })).toHaveLength(2);
+  });
+
+  it("orders sessions by the last user message, not by creation time", () => {
+    // An old session the user just wrote to must jump above newer but idle
+    // ones; a session nobody has written to yet ranks by its creation time.
+    const now = Date.now();
+    mockState = createMockState({
+      sdkSessions: [
+        makeSdkSession("old-active", { model: "m-old-active", createdAt: now - 60_000, lastUserMessageAt: now - 100 }),
+        makeSdkSession("new-idle", { model: "m-new-idle", createdAt: now - 5_000, lastUserMessageAt: now - 4_000 }),
+        makeSdkSession("fresh", { model: "m-fresh", createdAt: now - 1_000 }),
+        makeSdkSession("stale", { model: "m-stale", createdAt: now - 90_000, lastUserMessageAt: now - 80_000 }),
+      ],
+    });
+
+    render(<Sidebar />);
+    const names = screen.getAllByText(/^m-/).map((el) => el.textContent);
+    expect(names).toEqual(["m-old-active", "m-fresh", "m-new-idle", "m-stale"]);
   });
 
   it("search filters active sessions by name and path, hiding archived ones", () => {
@@ -838,6 +857,25 @@ describe("Sidebar", () => {
       // Pinned first (newest first within), then the rest newest first
       expect(names).toEqual(["m-pin-mid", "m-pin-old", "m-new", "m-mid"]);
       expect(screen.getAllByLabelText("Pinned")).toHaveLength(2);
+    });
+
+    it("keeps pinned sessions on top even when an unpinned one was used more recently", () => {
+      // Recency ordering applies within the pinned and unpinned blocks; it must
+      // not let a just-used session jump above the viewer's pins.
+      localStorage.setItem("cc-user-name", "Moritz");
+      const now = Date.now();
+      mockState = createMockState({
+        sdkSessions: [
+          makeSdkSession("busy", { model: "m-busy", userName: "Moritz", createdAt: now - 9000, lastUserMessageAt: now }),
+          makeSdkSession("pin-a", { model: "m-pin-a", userName: "Moritz", createdAt: now - 8000, lastUserMessageAt: now - 7000, pinned: true }),
+          makeSdkSession("pin-b", { model: "m-pin-b", userName: "Moritz", createdAt: now - 6000, lastUserMessageAt: now - 100, pinned: true }),
+          makeSdkSession("quiet", { model: "m-quiet", userName: "Moritz", createdAt: now - 5000 }),
+        ],
+      });
+
+      render(<Sidebar />);
+      const names = screen.getAllByText(/^m-/).map((el) => el.textContent);
+      expect(names).toEqual(["m-pin-b", "m-pin-a", "m-busy", "m-quiet"]);
     });
 
     it("ignores other users' pins and offers no Pin action on their sessions", () => {

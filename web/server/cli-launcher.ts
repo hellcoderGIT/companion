@@ -111,6 +111,8 @@ export interface SdkSessionInfo {
   totalLinesAdded?: number;
   /** Total lines removed (enriched by REST API) */
   totalLinesRemoved?: number;
+  /** Epoch ms of the last user_message (enriched by REST API from the bridge) */
+  lastUserMessageAt?: number;
   /** Whether internet/web search is enabled for Codex sessions */
   codexInternetAccess?: boolean;
   /** Sandbox mode selected for Codex sessions */

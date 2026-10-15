@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   appendAndPersist,
   appendHistory,
+  findLastUserMessageAt,
   persistSession,
   serializeForStore,
   MESSAGE_HISTORY_LIMIT,
@@ -216,6 +217,15 @@ describe("appendAndPersist", () => {
 // ─── serializeForStore ────────────────────────────────────────────────────────
 
 describe("serializeForStore", () => {
+  it("includes lastUserMessageAt so sidebar ordering survives restarts", () => {
+    const session = makeSession({ lastUserMessageAt: 12345 });
+    expect(serializeForStore(session).lastUserMessageAt).toBe(12345);
+  });
+
+  it("leaves lastUserMessageAt undefined when no message was ever sent", () => {
+    expect(serializeForStore(makeSession()).lastUserMessageAt).toBeUndefined();
+  });
+
   it("converts pendingPermissions Map to array of entries", () => {
     const session = makeSession();
     session.pendingPermissions.set("req-1", {
@@ -292,5 +302,36 @@ describe("serializeForStore", () => {
     const second = JSON.stringify(serializeForStore(session));
 
     expect(first).toBe(second);
+  });
+});
+
+// ─── findLastUserMessageAt ───────────────────────────────────────────────────
+
+describe("findLastUserMessageAt", () => {
+  // Backfills Session.lastUserMessageAt for session files persisted before the
+  // field existed; it must pick the NEWEST user message, ignoring other types.
+  it("returns the timestamp of the newest user_message", () => {
+    const history: BrowserIncomingMessage[] = [
+      { type: "user_message", content: "a", timestamp: 100 },
+      makeAssistantMsg("m1"),
+      { type: "user_message", content: "b", timestamp: 300 },
+      makeAssistantMsg("m2"),
+    ];
+    expect(findLastUserMessageAt(history)).toBe(300);
+  });
+
+  it("returns undefined when the history has no user messages", () => {
+    expect(findLastUserMessageAt([])).toBeUndefined();
+    expect(findLastUserMessageAt([makeAssistantMsg("m1")])).toBeUndefined();
+  });
+
+  it("skips user messages without a usable timestamp", () => {
+    // Defensive: malformed/legacy entries with a zero timestamp must not win
+    // over an older valid one.
+    const history: BrowserIncomingMessage[] = [
+      { type: "user_message", content: "valid", timestamp: 500 },
+      { type: "user_message", content: "broken", timestamp: 0 },
+    ];
+    expect(findLastUserMessageAt(history)).toBe(500);
   });
 });

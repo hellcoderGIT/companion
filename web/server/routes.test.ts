@@ -320,6 +320,7 @@ function createMockBridge() {
     closeSession: vi.fn(),
     getSession: vi.fn(() => null),
     getAllSessions: vi.fn(() => []),
+    getLastUserMessageAt: vi.fn(() => undefined),
     getCodexRateLimits: vi.fn(() => null),
     markContainerized: vi.fn(),
     prePopulateCommands: vi.fn(),
@@ -613,6 +614,28 @@ describe("GET /api/sessions", () => {
       totalLinesAdded: 0,
       totalLinesRemoved: 0,
     });
+  });
+
+  it("includes each session's lastUserMessageAt from the bridge", async () => {
+    // The sidebar sorts by the time of the last user message, which only the
+    // bridge knows. Sessions that never received a message have no value (the
+    // key is dropped from the JSON), so the client falls back to createdAt.
+    const sessions = [
+      { sessionId: "s1", state: "running", cwd: "/a", createdAt: 1000 },
+      { sessionId: "s2", state: "running", cwd: "/b", createdAt: 2000 },
+    ];
+    launcher.listSessions.mockReturnValue(sessions);
+    vi.mocked(sessionNames.getAllNames).mockReturnValue({});
+    bridge.getLastUserMessageAt.mockImplementation((id: string) => (id === "s1" ? 5000 : undefined));
+
+    const res = await app.request("/api/sessions", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json[0].lastUserMessageAt).toBe(5000);
+    expect(json[1]).not.toHaveProperty("lastUserMessageAt");
+    expect(bridge.getLastUserMessageAt).toHaveBeenCalledWith("s1");
+    expect(bridge.getLastUserMessageAt).toHaveBeenCalledWith("s2");
   });
 
   it("prefers bridge cwd over launcher cwd when available", async () => {

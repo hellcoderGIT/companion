@@ -2422,6 +2422,45 @@ describe("Browser message routing", () => {
     }
   });
 
+  it("user_message: records lastUserMessageAt for sidebar ordering", () => {
+    // The sidebar orders sessions by the last time a user sent a message, so
+    // routing a user_message must stamp the session (and expose it via
+    // getLastUserMessageAt, which GET /api/sessions reads).
+    const session = bridge.getSession("s1")!;
+    expect(bridge.getLastUserMessageAt("s1")).toBeUndefined();
+
+    const before = Date.now();
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "bump me to the top",
+    }));
+    const after = Date.now();
+
+    expect(session.lastUserMessageAt).toBeGreaterThanOrEqual(before);
+    expect(session.lastUserMessageAt).toBeLessThanOrEqual(after);
+    expect(bridge.getLastUserMessageAt("s1")).toBe(session.lastUserMessageAt);
+    // Same timestamp as the history entry, so restore/backfill stays consistent
+    const entry = session.messageHistory[session.messageHistory.length - 1];
+    expect(entry.type === "user_message" && entry.timestamp).toBe(session.lastUserMessageAt);
+  });
+
+  it("user_message: rejected messages do not bump lastUserMessageAt", () => {
+    // An attachment that fails validation is dropped before reaching the
+    // agent, so it must not reorder the sidebar either.
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "user_message",
+      content: "bad attachment",
+      // Invalid base64 payload → validateAttachments rejects the whole message
+      attachments: [{ name: "x.bin", media_type: "application/octet-stream", data: "not base64!", size: 8 }],
+    }));
+    expect(cli.send).not.toHaveBeenCalled();
+    expect(bridge.getLastUserMessageAt("s1")).toBeUndefined();
+  });
+
+  it("getLastUserMessageAt: returns undefined for unknown sessions", () => {
+    expect(bridge.getLastUserMessageAt("does-not-exist")).toBeUndefined();
+  });
+
   it("user_message: queues when CLI not connected", () => {
     // Close CLI
     bridge.handleCLIClose(cli);
@@ -3016,6 +3055,89 @@ describe("Persistence", () => {
     expect(session!.backendAdapter).toBeNull();
     expect(session!.browserSockets.size).toBe(0);
     expect(session!.processedClientMessageIdSet.has("restored-client-1")).toBe(true);
+  });
+
+  it("restoreFromDisk: keeps the persisted lastUserMessageAt", () => {
+    // The persisted field wins over the history scan: history is capped, so the
+    // stored value is the only reliable record once old prompts scroll out.
+    store.saveSync({
+      id: "persisted-lum",
+      state: {
+        session_id: "persisted-lum",
+        model: "claude-sonnet-4-6",
+        cwd: "/saved",
+        tools: [],
+        permissionMode: "default",
+        claude_code_version: "1.0",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 2,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        is_containerized: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+      messageHistory: [
+        { type: "user_message", content: "older", timestamp: 1000 },
+      ],
+      pendingMessages: [],
+      pendingPermissions: [],
+      lastUserMessageAt: 9000,
+    });
+
+    bridge.restoreFromDisk();
+    expect(bridge.getLastUserMessageAt("persisted-lum")).toBe(9000);
+  });
+
+  it("restoreFromDisk: backfills lastUserMessageAt from history for older session files", () => {
+    // Session files written before the field existed have no lastUserMessageAt;
+    // the newest user_message in the history is the best available answer.
+    store.saveSync({
+      id: "persisted-legacy",
+      state: {
+        session_id: "persisted-legacy",
+        model: "claude-sonnet-4-6",
+        cwd: "/saved",
+        tools: [],
+        permissionMode: "default",
+        claude_code_version: "1.0",
+        mcp_servers: [],
+        agents: [],
+        slash_commands: [],
+        skills: [],
+        total_cost_usd: 0,
+        num_turns: 2,
+        context_used_percent: 0,
+        is_compacting: false,
+        git_branch: "",
+        is_worktree: false,
+        is_containerized: false,
+        repo_root: "",
+        git_ahead: 0,
+        git_behind: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+      },
+      messageHistory: [
+        { type: "user_message", content: "first", timestamp: 1000 },
+        { type: "user_message", content: "second", timestamp: 2000 },
+        { type: "result", data: { type: "result", subtype: "success" } } as any,
+      ],
+      pendingMessages: [],
+      pendingPermissions: [],
+    });
+
+    bridge.restoreFromDisk();
+    expect(bridge.getLastUserMessageAt("persisted-legacy")).toBe(2000);
   });
 
   it("restoreFromDisk: does not overwrite live sessions", () => {
