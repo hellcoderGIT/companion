@@ -1118,6 +1118,9 @@ function handleParsedMessage(
         timestamp: data.timestamp || Date.now(),
       });
       store.clearPromptSuggestions(sessionId);
+      // The bridge echoes every routed user_message (ours, other tabs', cron/agent
+      // injections) — bump the session to the top of the sidebar right away.
+      if (data.timestamp) store.noteUserMessageAt(sessionId, data.timestamp);
       break;
     }
 

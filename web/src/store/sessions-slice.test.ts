@@ -230,6 +230,65 @@ describe("Session management", () => {
   });
 });
 
+// ─── Sidebar recency (lastUserMessageAt) ─────────────────────────────────────
+
+describe("lastUserMessageAt tracking", () => {
+  // The sidebar sorts by the last user message. The value comes from the
+  // /api/sessions poll and from the bridge's live user_message echo; both are
+  // server-clock timestamps that only ever move forward.
+  const sdk = (id: string, lastUserMessageAt?: number): SdkSessionInfo => ({
+    sessionId: id,
+    state: "connected",
+    cwd: "/",
+    createdAt: 100,
+    lastUserMessageAt,
+  });
+
+  it("noteUserMessageAt: stamps the matching session", () => {
+    useStore.getState().setSdkSessions([sdk("s1"), sdk("s2", 500)]);
+    useStore.getState().noteUserMessageAt("s1", 900);
+    const [s1, s2] = useStore.getState().sdkSessions;
+    expect(s1.lastUserMessageAt).toBe(900);
+    expect(s2.lastUserMessageAt).toBe(500);
+  });
+
+  it("noteUserMessageAt: never moves the timestamp backwards", () => {
+    // e.g. an older buffered user_message replayed after a reconnect
+    useStore.getState().setSdkSessions([sdk("s1", 900)]);
+    const before = useStore.getState().sdkSessions;
+    useStore.getState().noteUserMessageAt("s1", 400);
+    expect(useStore.getState().sdkSessions[0].lastUserMessageAt).toBe(900);
+    // No-op updates keep the array identity so the sidebar does not re-render
+    expect(useStore.getState().sdkSessions).toBe(before);
+  });
+
+  it("noteUserMessageAt: ignores unknown sessions and invalid timestamps", () => {
+    useStore.getState().setSdkSessions([sdk("s1", 100)]);
+    const before = useStore.getState().sdkSessions;
+    useStore.getState().noteUserMessageAt("missing", 999);
+    useStore.getState().noteUserMessageAt("s1", 0);
+    expect(useStore.getState().sdkSessions).toBe(before);
+  });
+
+  it("setSdkSessions: a stale poll does not roll back a newer echoed timestamp", () => {
+    // Poll request leaves → user sends a message → echo bumps to 900 → poll
+    // response (computed before the message) arrives with 500. Keep 900 so the
+    // row does not jump down and back up again.
+    useStore.getState().setSdkSessions([sdk("s1", 500)]);
+    useStore.getState().noteUserMessageAt("s1", 900);
+    useStore.getState().setSdkSessions([sdk("s1", 500), sdk("s2", 300)]);
+    const [s1, s2] = useStore.getState().sdkSessions;
+    expect(s1.lastUserMessageAt).toBe(900);
+    expect(s2.lastUserMessageAt).toBe(300);
+  });
+
+  it("setSdkSessions: newer server values replace older known ones", () => {
+    useStore.getState().setSdkSessions([sdk("s1", 500)]);
+    useStore.getState().setSdkSessions([sdk("s1", 800)]);
+    expect(useStore.getState().sdkSessions[0].lastUserMessageAt).toBe(800);
+  });
+});
+
 // ─── Session names ──────────────────────────────────────────────────────────
 
 describe("Session names", () => {

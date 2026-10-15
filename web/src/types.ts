@@ -135,6 +135,8 @@ export interface SdkSessionInfo {
   gitBehind?: number;
   totalLinesAdded?: number;
   totalLinesRemoved?: number;
+  /** Epoch ms of the last user_message sent to the session (drives sidebar order) */
+  lastUserMessageAt?: number;
   resumeSessionAt?: string;
   forkSession?: boolean;
   /** If this session was spawned by a cron job */

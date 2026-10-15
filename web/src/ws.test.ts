@@ -274,6 +274,25 @@ describe("handleMessage: user_message", () => {
     });
   });
 
+  it("bumps the session's lastUserMessageAt so the sidebar re-sorts immediately", () => {
+    // The bridge echoes every routed user_message with its server timestamp;
+    // the sidebar should not have to wait for the 5s /api/sessions poll.
+    useStore.getState().setSdkSessions([
+      { sessionId: "s1", state: "connected", cwd: "/", createdAt: 1, lastUserMessageAt: 500 },
+    ]);
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({
+      type: "user_message",
+      id: "cmsg-live-bump",
+      content: "move me up",
+      timestamp: 7000,
+    });
+
+    expect(useStore.getState().sdkSessions[0].lastUserMessageAt).toBe(7000);
+  });
+
   it("clears prompt suggestions when a server user_message is received", () => {
     wsModule.connectSession("s1");
     fireMessage({ type: "session_init", session: makeSession("s1") });

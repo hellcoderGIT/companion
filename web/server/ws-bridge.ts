@@ -33,6 +33,7 @@ import {
 } from "./ws-bridge-browser-ingest.js";
 import {
   appendHistory as appendHistoryFn,
+  findLastUserMessageAt,
   persistSession as persistSessionFn,
 } from "./ws-bridge-persist.js";
 import {
@@ -216,6 +217,10 @@ export class WsBridge {
           Array.isArray(p.processedClientMessageIds) ? p.processedClientMessageIds : [],
         ),
         lastCliActivityTs: Date.now(),
+        lastUserMessageAt:
+          typeof p.lastUserMessageAt === "number"
+            ? p.lastUserMessageAt
+            : findLastUserMessageAt(p.messageHistory || []),
         stateMachine: new SessionStateMachine(p.id, "terminated"),
       };
       session.state.backend_type = session.backendType;
@@ -372,6 +377,11 @@ export class WsBridge {
 
   getAllSessions(): SessionState[] {
     return Array.from(this.sessions.values()).map((s) => s.state);
+  }
+
+  /** Epoch ms of the last user_message sent to a session (undefined if none yet). */
+  getLastUserMessageAt(sessionId: string): number | undefined {
+    return this.sessions.get(sessionId)?.lastUserMessageAt;
   }
 
   /** Return per-session memory stats for diagnostics. */
@@ -1426,6 +1436,7 @@ export class WsBridge {
         attachments: msg.attachments,
       };
       this.appendHistory(session, userMessage);
+      session.lastUserMessageAt = ts;
       const transitioned = session.stateMachine.transition("streaming", "user_message");
       if (!transitioned) {
         // Session not ready yet (e.g. still initializing). Log a warning so

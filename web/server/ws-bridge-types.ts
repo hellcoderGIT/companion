@@ -57,6 +57,12 @@ export interface Session {
   processedClientMessageIdSet: Set<string>;
   /** Timestamp of last non-keepalive CLI message (for idle detection) */
   lastCliActivityTs: number;
+  /**
+   * Epoch ms of the most recent user_message routed into this session (typed by
+   * a human or injected by cron/agents). Drives the sidebar's "recently used
+   * first" ordering. Persisted; undefined until the first message is sent.
+   */
+  lastUserMessageAt?: number;
   /** Formal session state machine tracking phase and validating transitions. */
   stateMachine: SessionStateMachine;
   /** Cleanup function for state machine transition listener — call on session teardown. */

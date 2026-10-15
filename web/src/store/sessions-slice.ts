@@ -50,6 +50,12 @@ export interface SessionsSlice {
   updateSession: (sessionId: string, updates: Partial<SessionState>) => void;
   removeSession: (sessionId: string) => void;
   setSdkSessions: (sessions: SdkSessionInfo[]) => void;
+  /**
+   * Record that a user_message reached a session at `ts` (server clock, from the
+   * bridge's echo) so the sidebar re-sorts immediately instead of waiting for
+   * the next /api/sessions poll. Never moves the timestamp backwards.
+   */
+  noteUserMessageAt: (sessionId: string, ts: number) => void;
   setConnectionStatus: (sessionId: string, status: "connecting" | "connected" | "disconnected") => void;
   setCliConnected: (sessionId: string, connected: boolean) => void;
   setCliReconnecting: (sessionId: string, reconnecting: boolean) => void;
@@ -156,7 +162,35 @@ export const createSessionsSlice: StateCreator<AppState, [], [], SessionsSlice> 
       };
     }),
 
-  setSdkSessions: (sessions) => set({ sdkSessions: sessions }),
+  setSdkSessions: (sessions) =>
+    set((s) => {
+      // lastUserMessageAt only ever increases on the server, so keep the newer of
+      // the polled value and what we already know. A poll that was in flight
+      // while a message was sent would otherwise briefly drop the row back down.
+      const known = new Map<string, number>();
+      for (const prev of s.sdkSessions) {
+        if (prev.lastUserMessageAt) known.set(prev.sessionId, prev.lastUserMessageAt);
+      }
+      if (known.size === 0) return { sdkSessions: sessions };
+      return {
+        sdkSessions: sessions.map((next) => {
+          const prevAt = known.get(next.sessionId);
+          return prevAt && prevAt > (next.lastUserMessageAt ?? 0)
+            ? { ...next, lastUserMessageAt: prevAt }
+            : next;
+        }),
+      };
+    }),
+
+  noteUserMessageAt: (sessionId, ts) =>
+    set((s) => {
+      if (!(ts > 0)) return s;
+      const idx = s.sdkSessions.findIndex((x) => x.sessionId === sessionId);
+      if (idx === -1 || (s.sdkSessions[idx].lastUserMessageAt ?? 0) >= ts) return s;
+      const sdkSessions = [...s.sdkSessions];
+      sdkSessions[idx] = { ...sdkSessions[idx], lastUserMessageAt: ts };
+      return { sdkSessions };
+    }),
 
   setConnectionStatus: (sessionId, status) =>
     set((s) => {
