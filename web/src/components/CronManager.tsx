@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { api, type CronJobInfo } from "../api.js";
-import { getModelsForBackend, getDefaultModel, toModelOptions, type ModelOption } from "../utils/backends.js";
+import { getModelsForBackend, getDefaultModel, type ModelOption } from "../utils/backends.js";
+import { fetchBackendModelOptions } from "../utils/use-backend-models.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { timeAgo } from "../utils/time-ago.js";
 import { useClickOutside } from "../utils/use-click-outside.js";
@@ -706,18 +707,16 @@ function JobForm({
   // Fetch dynamic models when backend changes
   useEffect(() => {
     setDynamicModels(null);
-    if (form.backendType !== "codex") return;
-    api.getBackendModels(form.backendType).then((fetched) => {
-      if (fetched.length > 0) {
-        const options = toModelOptions(fetched);
-        setDynamicModels(options);
-        if (!options.some((m) => m.value === form.model)) {
-          update({ model: options[0].value });
-        }
+    let cancelled = false;
+    fetchBackendModelOptions(form.backendType).then((options) => {
+      // null → keep the static fallback list
+      if (cancelled || !options) return;
+      setDynamicModels(options);
+      if (!options.some((m) => m.value === form.model)) {
+        update({ model: options[0].value });
       }
-    }).catch(() => {
-      // Fall back to hardcoded models silently
     });
+    return () => { cancelled = true; };
   }, [form.backendType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Set default model if empty

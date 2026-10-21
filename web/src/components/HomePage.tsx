@@ -18,7 +18,8 @@ import { generateUniqueSessionName } from "../utils/names.js";
 import { getRecentDirs, addRecentDir } from "../utils/recent-dirs.js";
 import { navigateToSession } from "../utils/routing.js";
 import { isSandboxEnabled } from "../feature-flags.js";
-import { getModelsForBackend, getModesForBackend, getEffortsForBackend, getDefaultModel, getDefaultMode, toModelOptions, type ModelOption } from "../utils/backends.js";
+import { getModelsForBackend, getModesForBackend, getEffortsForModel, getDefaultModel, getDefaultMode, type ModelOption } from "../utils/backends.js";
+import { fetchBackendModelOptions } from "../utils/use-backend-models.js";
 import type { BackendType } from "../types.js";
 import { EnvManager } from "./EnvManager.js";
 import { FolderPicker } from "./FolderPicker.js";
@@ -149,7 +150,9 @@ export function HomePage() {
 
   const MODELS = dynamicModels || getModelsForBackend(backend);
   const MODES = getModesForBackend(backend);
-  const EFFORTS = getEffortsForBackend(backend);
+  // Effort options depend on the selected model (live list reports per-model
+  // levels, e.g. Haiku 4.5 has none). See getEffortsForModel.
+  const EFFORTS = getEffortsForModel(backend, MODELS.find((m) => m.value === model) || MODELS[0]);
 
   // Environment state
   const [envs, setEnvs] = useState<CompanionEnv[]>([]);
@@ -266,24 +269,21 @@ export function HomePage() {
     }
   }
 
-  // Fetch dynamic models for the selected backend
+  // Fetch the live model list for the selected backend (Claude: from the
+  // installed CLI; Codex: from the app-server). Falls back to the static list
+  // silently when unavailable.
   useEffect(() => {
-    if (backend !== "codex") {
-      setDynamicModels(null);
-      return;
-    }
-    api.getBackendModels(backend).then((models) => {
-      if (models.length > 0) {
-        const options = toModelOptions(models);
-        setDynamicModels(options);
-        // If current model isn't in the list, switch to first
-        if (!options.some((m) => m.value === model)) {
-          setModel(options[0].value);
-        }
+    setDynamicModels(null);
+    let cancelled = false;
+    fetchBackendModelOptions(backend).then((options) => {
+      if (cancelled || !options) return;
+      setDynamicModels(options);
+      // If current model isn't in the list, switch to the first (the CLI's default)
+      if (!options.some((m) => m.value === model)) {
+        setModel(options[0].value);
       }
-    }).catch(() => {
-      // Fall back to hardcoded models silently
     });
+    return () => { cancelled = true; };
   }, [backend]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When sandbox is enabled, check the-companion:latest image status
@@ -712,7 +712,9 @@ export function HomePage() {
           model,
           permissionMode: mode,
           // Empty effort = let the model use its default; Codex has no effort selector.
-          effort: backend === "claude" && effort ? effort : undefined,
+          // An effort the selected model doesn't support is dropped (not cleared
+          // from the saved preference) so the model falls back to its default.
+          effort: backend === "claude" && effort && EFFORTS.some((e) => e.value === effort) ? effort : undefined,
           cwd: effectiveCwd || undefined,
           envSlug: selectedEnv || undefined,
           sandboxEnabled: sandboxEnabled ? true : undefined,

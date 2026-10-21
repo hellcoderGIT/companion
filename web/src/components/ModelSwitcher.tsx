@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { sendToSession } from "../ws.js";
-import { getModelsForBackend } from "../utils/backends.js";
+import { useBackendModels } from "../utils/use-backend-models.js";
 import type { ModelOption } from "../utils/backends.js";
 
 interface ModelSwitcherProps {
@@ -22,7 +22,7 @@ export function ModelSwitcher({ sessionId }: ModelSwitcherProps) {
   const backendType = sdkSession?.backendType ?? runtimeSession?.backend_type ?? "claude";
   // Prefer runtime model (from CLI init) over sdkSession model (from launch config)
   const currentModel = runtimeSession?.model ?? sdkSession?.model ?? "";
-  const models = getModelsForBackend(backendType);
+  const models = useBackendModels(backendType);
 
   // Find the matching model option, or build a fallback for custom models
   const currentOption: ModelOption | null =

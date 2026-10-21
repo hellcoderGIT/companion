@@ -49,6 +49,11 @@ vi.mock("./codex-models.js", () => ({
   fetchCodexModels: mockFetchCodexModels,
 }));
 
+const mockFetchClaudeModels = vi.hoisted(() => vi.fn(async () => [] as Array<{ value: string; label: string; description: string; isDefault?: boolean; efforts: string[] }>));
+vi.mock("./claude-models.js", () => ({
+  fetchClaudeModels: mockFetchClaudeModels,
+}));
+
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
@@ -4004,6 +4009,8 @@ describe("GET /api/backends", () => {
 describe("GET /api/backends/:id/models", () => {
   beforeEach(() => {
     mockFetchCodexModels.mockReset();
+    mockFetchClaudeModels.mockReset();
+    mockFetchClaudeModels.mockResolvedValue([]);
   });
 
   // The primary path: models come live from the Codex app-server `model/list`
@@ -4071,9 +4078,38 @@ describe("GET /api/backends/:id/models", () => {
     expect(res.status).toBe(404);
   });
 
+  // When the Claude CLI probe yields nothing (CLI missing / probe failed), the
+  // endpoint 404s and the frontend uses its static CLAUDE_MODELS fallback.
   it("returns 404 for claude backend (uses frontend defaults)", async () => {
+    mockFetchClaudeModels.mockResolvedValue([]);
     const res = await app.request("/api/backends/claude/models", { method: "GET" });
 
+    expect(res.status).toBe(404);
+  });
+
+  // Primary Claude path: the model list comes from the installed CLI's
+  // initialize handshake, so new models appear on CLI upgrade without a
+  // Companion release. Per-model effort levels are part of the contract
+  // (the effort picker uses them); isDefault is internal (order conveys it).
+  it("returns claude models from the live CLI probe, including effort levels", async () => {
+    mockFetchClaudeModels.mockResolvedValue([
+      { value: "claude-opus-5-5", label: "Opus 5.5", description: "Everyday", isDefault: true, efforts: ["low", "high", "max"] },
+      { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", description: "Fast", efforts: [] },
+    ]);
+
+    const res = await app.request("/api/backends/claude/models", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      { value: "claude-opus-5-5", label: "Opus 5.5", description: "Everyday", efforts: ["low", "high", "max"] },
+      { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", description: "Fast", efforts: [] },
+    ]);
+  });
+
+  // A throwing probe must degrade to the 404 fallback, never a 500.
+  it("returns 404 (not 500) when the claude probe throws", async () => {
+    mockFetchClaudeModels.mockRejectedValue(new Error("boom"));
+    const res = await app.request("/api/backends/claude/models", { method: "GET" });
     expect(res.status).toBe(404);
   });
 });

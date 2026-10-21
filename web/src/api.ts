@@ -259,6 +259,11 @@ export interface BackendModelInfo {
   value: string;
   label: string;
   description: string;
+  /**
+   * Claude only: effort levels the CLI accepts for this model. Empty array =
+   * no effort control. Absent (Codex, older servers) = no per-model info.
+   */
+  efforts?: string[];
 }
 
 export interface ClaudeDiscoveredSession {
