@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.127.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.126.0...companion-v0.127.0) (2026-10-21)
+
+
+### Features
+
+* **models:** load Claude model list live from the installed CLI ([#146](https://github.com/hellcoderGIT/companion/issues/146)) ([6bd3b9f](https://github.com/hellcoderGIT/companion/commit/6bd3b9ff68546729a9bcd981be96022f6c46644a))
+
 ## [0.126.0](https://github.com/hellcoderGIT/companion/compare/companion-v0.125.0...companion-v0.126.0) (2026-10-15)
 
 
