@@ -42,14 +42,36 @@ vi.mock("../store.js", () => ({
   ),
 }));
 
+// The model list is fetched live (Claude: from the installed CLI). Default to
+// "nothing live" so existing tests exercise the static fallback list.
+const mockGetBackendModels = vi.fn();
+vi.mock("../api.js", () => ({
+  api: { getBackendModels: (...args: unknown[]) => mockGetBackendModels(...args) },
+}));
+
 import { ModelSwitcher } from "./ModelSwitcher.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetBackendModels.mockResolvedValue([]);
   resetStore();
 });
 
 describe("ModelSwitcher", () => {
+  // Mid-session switching offers the CLI's live model list, so a model released
+  // after this Companion build can be selected and is sent via set_model.
+  it("offers models from the live CLI list and switches to them", async () => {
+    mockGetBackendModels.mockResolvedValue([
+      { value: "claude-opus-4-6", label: "Opus 4.6", description: "" },
+      { value: "claude-fable-9-9", label: "Fable 9.9", description: "" },
+    ]);
+    render(<ModelSwitcher sessionId="s1" />);
+    fireEvent.click(screen.getByLabelText("Switch model"));
+    fireEvent.click(await screen.findByText("Fable 9.9"));
+    expect(mockGetBackendModels).toHaveBeenCalledWith("claude");
+    expect(mockSendToSession).toHaveBeenCalledWith("s1", { type: "set_model", model: "claude-fable-9-9" });
+  });
+
   it("renders current model icon and label", () => {
     render(<ModelSwitcher sessionId="s1" />);
     // Opus label with version

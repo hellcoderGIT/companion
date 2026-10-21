@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { api, type McpServerConfigAgent, type CompanionEnv, type LinearOAuthConnectionSummary } from "../api.js";
-import { getModelsForBackend, getDefaultModel, getAgentModesForBackend, getDefaultAgentMode } from "../utils/backends.js";
+import { getDefaultModel, getAgentModesForBackend, getDefaultAgentMode } from "../utils/backends.js";
+import { useBackendModels } from "../utils/use-backend-models.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { AgentIcon, AGENT_ICON_OPTIONS } from "./AgentIcon.js";
 
@@ -119,7 +120,7 @@ export function AgentEditor({
   onCancel: () => void;
   linearOAuthConfigured: boolean;
 }) {
-  const models = getModelsForBackend(form.backendType);
+  const models = useBackendModels(form.backendType);
   const modes = getAgentModesForBackend(form.backendType);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(() => countAdvancedFeatures(form) > 0);

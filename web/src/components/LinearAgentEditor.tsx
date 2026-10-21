@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { getModelsForBackend, getDefaultModel, getAgentModesForBackend, getDefaultAgentMode } from "../utils/backends.js";
+import { getDefaultModel, getAgentModesForBackend, getDefaultAgentMode } from "../utils/backends.js";
+import { useBackendModels } from "../utils/use-backend-models.js";
 import { FolderPicker } from "./FolderPicker.js";
 import { LinearLogo } from "./LinearLogo.js";
 import type { AgentFormData } from "./AgentEditor.js";
@@ -63,7 +64,7 @@ export function LinearAgentEditor({
   }, []);
 
   // Derive labels
-  const models = getModelsForBackend(form.backendType);
+  const models = useBackendModels(form.backendType);
   const modes = getAgentModesForBackend(form.backendType);
   const selectedModel = models.find((m) => m.value === form.model) || models[0];
   const selectedMode = modes.find((m) => m.value === form.permissionMode) || modes[0];

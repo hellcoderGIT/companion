@@ -5,6 +5,11 @@ export interface ModelOption {
   value: string;
   label: string;
   icon: string;
+  /**
+   * Effort levels this model supports (Claude, from the live CLI model list).
+   * Undefined = unknown → all of CLAUDE_EFFORTS are offered.
+   */
+  efforts?: string[];
 }
 
 export interface ModeOption {
@@ -28,6 +33,9 @@ const MODEL_ICONS: Record<string, string> = {
 };
 
 function pickIcon(slug: string, index: number): string {
+  // Claude models: match the static CLAUDE_MODELS styling — ★ marks the Fable
+  // tier, everything else is unadorned.
+  if (slug.startsWith("claude-")) return slug.includes("fable") ? "\u2605" : "";
   for (const [key, icon] of Object.entries(MODEL_ICONS)) {
     if (slug.includes(key)) return icon;
   }
@@ -41,11 +49,16 @@ export function toModelOptions(models: BackendModelInfo[]): ModelOption[] {
     value: m.value,
     label: m.label || m.value,
     icon: pickIcon(m.value, i),
+    ...(Array.isArray(m.efforts) ? { efforts: m.efforts } : {}),
   }));
 }
 
 // ─── Static fallbacks ────────────────────────────────────────────────────────
 
+// Static fallback only — the live list comes from the installed Claude Code
+// CLI's `initialize` handshake (server route `/backends/claude/models`, see
+// server/claude-models.ts), so new models appear on CLI upgrade without a
+// Companion release. This list is used only when the CLI probe fails.
 export const CLAUDE_MODELS: ModelOption[] = [
   { value: "claude-opus-5-5", label: "Opus 5.5", icon: "" },
   { value: "claude-opus-5", label: "Opus 5", icon: "" },
@@ -141,6 +154,18 @@ export function getDefaultAgentMode(backend: BackendType): string {
 // options and the selector is hidden for that backend.
 export function getEffortsForBackend(backend: BackendType): EffortOption[] {
   return backend === "codex" ? [] : CLAUDE_EFFORTS;
+}
+
+/**
+ * Effort options for a specific model. When the live model list reports the
+ * model's supported levels, unsupported ones are hidden (e.g. no xHigh on
+ * Opus 4.6, no effort control at all on Haiku 4.5). "Default" is always kept.
+ */
+export function getEffortsForModel(backend: BackendType, model: ModelOption | undefined): EffortOption[] {
+  const all = getEffortsForBackend(backend);
+  if (!model?.efforts) return all;
+  const supported = new Set(model.efforts);
+  return all.filter((e) => e.value === "" || supported.has(e.value));
 }
 
 export function getDefaultEffort(_backend: BackendType): string {

@@ -1268,6 +1268,76 @@ describe("HomePage", () => {
     });
   });
 
+  // ─── Live Claude models (from the installed CLI) ─────────────────────────────
+
+  it("fetches live models for the claude backend and selects the CLI default", async () => {
+    // The Claude model list comes from the CLI's initialize handshake via
+    // /backends/claude/models, so a model the Companion has never heard of
+    // (here a hypothetical "Fable 9.9") appears without a Companion release.
+    // The first entry is the CLI's default and becomes the selection when the
+    // current (static) default isn't in the live list.
+    mockApi.getBackendModels.mockResolvedValue([
+      { value: "claude-fable-9-9", label: "Fable 9.9", description: "", efforts: ["low", "high"] },
+      { value: "claude-opus-5-5", label: "Opus 5.5", description: "", efforts: ["low", "high"] },
+    ]);
+
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+
+    expect(mockApi.getBackendModels).toHaveBeenCalledWith("claude");
+    // claude-opus-5-5 (static default) is in the live list, so it stays selected.
+    await waitFor(() => expect(screen.getByText("Opus 5.5")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Opus 5.5"));
+    expect(screen.getByText("Fable 9.9")).toBeInTheDocument();
+    // Static-only entries are gone once the live list loaded.
+    expect(screen.queryByText("Opus 4.7")).not.toBeInTheDocument();
+  });
+
+  it("limits effort options to the selected model and drops an unsupported saved effort", async () => {
+    // Per-model effort levels come from the CLI: Haiku 4.5 has no effort
+    // control. A saved "max" preference must not be sent for it (the CLI
+    // would reject/ignore it), but the saved preference itself is kept.
+    localStorage.setItem("cc-effort", "max");
+    mockApi.getBackendModels.mockResolvedValue([
+      { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", description: "", efforts: [] },
+    ]);
+    mockStoreGetState.mockReturnValue(buildStoreMock());
+    createSessionStreamMock.mockResolvedValue({ sessionId: "s-haiku", state: "starting", cwd: "/repo" });
+
+    render(<HomePage />);
+    await waitFor(() => expect(screen.getByText("repo")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Haiku 4.5")).toBeInTheDocument());
+
+    // Only "Default" is offered, and the button shows it instead of "Max".
+    const effortButton = screen.getByLabelText("Reasoning effort");
+    expect(effortButton).toHaveTextContent("Default");
+    fireEvent.click(effortButton);
+    expect(screen.queryByText("Max")).not.toBeInTheDocument();
+    fireEvent.click(effortButton);
+
+    fireEvent.change(
+      screen.getByPlaceholderText("Fix a bug, build a feature, refactor code..."),
+      { target: { value: "do a thing" } },
+    );
+    fireEvent.click(screen.getByTitle("Send message"));
+    await waitFor(() => {
+      expect(createSessionStreamMock).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "claude-haiku-4-5-20251001", effort: undefined }),
+        expect.any(Function),
+      );
+    });
+    expect(localStorage.getItem("cc-effort")).toBe("max");
+  });
+
+  it("keeps the static claude list when the live fetch fails", async () => {
+    // CLI missing / probe failed → 404 → silent fallback to CLAUDE_MODELS.
+    mockApi.getBackendModels.mockRejectedValue(new Error("404"));
+    render(<HomePage />);
+    await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.click(screen.getByText("Opus 5.5"));
+    expect(screen.getByText("Opus 4.7")).toBeInTheDocument();
+  });
+
   // ─── Resume candidates error handling ───────────────────────────────────────
 
   it("shows error when loading resume candidates fails", async () => {

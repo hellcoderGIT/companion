@@ -4,6 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { execSync } from "node:child_process";
 import { resolveBinary } from "./path-resolver.js";
 import { fetchCodexModels } from "./codex-models.js";
+import { fetchClaudeModels } from "./claude-models.js";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -1270,8 +1271,28 @@ export function createRoutes(
       return c.json({ error: "Codex models unavailable. Ensure the codex CLI is installed and authenticated." }, 404);
     }
 
-    // Claude models are hardcoded on the frontend
-    return c.json({ error: "Use frontend defaults for this backend" }, 404);
+    if (backendId === "claude") {
+      // Ask the installed Claude Code CLI for its model catalogue (reported in
+      // the stdio `initialize` handshake), so new models appear on CLI upgrade
+      // without a Companion release. The frontend falls back to its static
+      // CLAUDE_MODELS list on 404.
+      try {
+        const models = await fetchClaudeModels();
+        if (models.length > 0) {
+          return c.json(models.map((m) => ({
+            value: m.value,
+            label: m.label,
+            description: m.description,
+            efforts: m.efforts,
+          })));
+        }
+      } catch {
+        // fall through to 404
+      }
+      return c.json({ error: "Claude models unavailable. Ensure the claude CLI is installed." }, 404);
+    }
+
+    return c.json({ error: "Unknown backend" }, 404);
   });
 
   // ─── Containers ─────────────────────────────────────────────────

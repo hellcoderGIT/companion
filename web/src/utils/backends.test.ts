@@ -8,6 +8,7 @@ import {
   getDefaultMode,
   getDefaultAgentMode,
   getEffortsForBackend,
+  getEffortsForModel,
   getDefaultEffort,
   CLAUDE_MODELS,
   CODEX_MODELS,
@@ -320,5 +321,49 @@ describe("static model/mode lists", () => {
 
   it("claude agent modes include acceptEdits for middle ground", () => {
     expect(CLAUDE_AGENT_MODES.some((m) => m.value === "acceptEdits")).toBe(true);
+  });
+});
+
+// ─── Live Claude model list support ──────────────────────────────────────────
+// The Claude model list is fetched from the installed CLI; these helpers turn
+// that payload into picker options and per-model effort choices.
+describe("live Claude model helpers", () => {
+  // Claude options mirror the static styling: ★ for Fable, no icon otherwise
+  // (the generic codex-oriented icon heuristics must not apply).
+  it("toModelOptions gives Claude models the static-list icons", () => {
+    const opts = toModelOptions([
+      { value: "claude-fable-5-1", label: "Fable 5.1", description: "" },
+      { value: "claude-haiku-5-5", label: "Haiku 5.5", description: "" },
+    ]);
+    expect(opts.map((o) => o.icon)).toEqual(["\u2605", ""]);
+  });
+
+  // efforts are passed through when present and omitted when absent, so
+  // "unknown" (undefined) stays distinguishable from "none" ([]).
+  it("toModelOptions passes per-model efforts through", () => {
+    const [withEfforts, none, unknown] = toModelOptions([
+      { value: "claude-opus-4-6", label: "Opus 4.6", description: "", efforts: ["low", "max"] },
+      { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", description: "", efforts: [] },
+      { value: "gpt-5.5", label: "GPT-5.5", description: "" },
+    ]);
+    expect(withEfforts.efforts).toEqual(["low", "max"]);
+    expect(none.efforts).toEqual([]);
+    expect(unknown).not.toHaveProperty("efforts");
+  });
+
+  it("getEffortsForModel filters to supported levels but always keeps Default", () => {
+    const opts = getEffortsForModel("claude", { value: "m", label: "m", icon: "", efforts: ["low", "max"] });
+    expect(opts.map((e) => e.value)).toEqual(["", "low", "max"]);
+  });
+
+  it("getEffortsForModel offers only Default for a model without effort support", () => {
+    const opts = getEffortsForModel("claude", { value: "m", label: "m", icon: "", efforts: [] });
+    expect(opts.map((e) => e.value)).toEqual([""]);
+  });
+
+  it("getEffortsForModel returns all levels when support is unknown, none for codex", () => {
+    expect(getEffortsForModel("claude", CLAUDE_MODELS[0])).toBe(CLAUDE_EFFORTS);
+    expect(getEffortsForModel("claude", undefined)).toBe(CLAUDE_EFFORTS);
+    expect(getEffortsForModel("codex", { value: "x", label: "x", icon: "", efforts: ["low"] })).toEqual([]);
   });
 });
